@@ -182,3 +182,29 @@ test("client: timeout aborts", async () => {
     (e) => e.code === "TIMEOUT",
   );
 });
+
+test("client: timeout aborts stalled body after headers", async () => {
+  // Respond 200 with headers, then stall the body indefinitely (until abort).
+  const fetchImpl = async (_url, opts) => {
+    const body = new ReadableStream({
+      start(controller) {
+        // Send one initial chunk so the parser starts, then stall.
+        controller.enqueue(enc.encode('data: {"choices":[{"delta":{"content":""}}]}\n\n'));
+        opts.signal.addEventListener("abort", () => {
+          controller.error(Object.assign(new Error("aborted"), { name: "AbortError" }));
+        });
+      },
+    });
+    return new Response(body, { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+  await assert.rejects(
+    () =>
+      streamChatCompletion({
+        config: { ...baseConfig, timeoutMs: 100 },
+        messages: [{ role: "user", content: "x" }],
+        mode: "consult",
+        fetchImpl,
+      }),
+    (e) => e.code === "TIMEOUT",
+  );
+});

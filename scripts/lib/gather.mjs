@@ -47,24 +47,49 @@ async function gatherReviewDiff({ diffBase, cwd, caps }) {
   const top = await realpath(topRaw);
 
   await validateRef(diffBase, top);
-  const diffText = await getDiffText(diffBase, top);
   const changed = await getChangedFiles(diffBase, top);
   const binariesInDiff = await getBinaryPathsInDiff(diffBase, top);
 
+  // Containment check: reject any changed path whose realpath escapes the repo
+  // (can happen via in-repo symlinks pointing outside).
+  const containSet = new Set();
+  const containOmitted = [];
+  for (const rel of changed) {
+    try {
+      await containPath(top, rel, { cwd: top });
+      containSet.add(rel);
+    } catch (e) {
+      containOmitted.push({
+        path: rel,
+        status: "listed_only",
+        reason: e instanceof GlmError ? `escapes repo root: ${e.message}` : String(e),
+      });
+    }
+  }
+  const safeChanged = changed.filter((p) => containSet.has(p));
+
   const files = await classifyFiles({
-    relPaths: changed,
+    relPaths: safeChanged,
     rootRealpath: top,
     caps,
     forcedBinaries: binariesInDiff,
   });
+  // Merge containment rejections back in so the model sees that they exist but weren't inlined.
+  const allFiles = [...containOmitted, ...files];
 
-  const truncated = files.some((f) => f.status !== "inlined");
+  // Build diff scoped to inlined files ONLY. Omitted/listed files never leak content.
+  const inlinedPaths = files.filter((f) => f.status === "inlined").map((f) => f.path);
+  const diffText = inlinedPaths.length > 0
+    ? await getDiffText(diffBase, top, inlinedPaths)
+    : "";
+
+  const truncated = allFiles.some((f) => f.status !== "inlined");
 
   return {
     mode: "diff",
     base: diffBase,
     diffText,
-    files,
+    files: allFiles,
     truncated,
   };
 }

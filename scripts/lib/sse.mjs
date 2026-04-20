@@ -22,7 +22,10 @@ export async function* parseSseStream(source) {
   const decoder = new TextDecoder("utf-8", { fatal: false });
   let buffer = "";
 
-  // Normalize line endings: we split on '\n' after replacing '\r\n' and lone '\r'.
+  // Normalize line endings. A trailing bare '\r' at the end of a chunk is held
+  // back (in `buffer`) so that an incoming leading '\n' on the next chunk can
+  // still combine into '\r\n' — otherwise a split CRLF inside a multi-line
+  // event would erroneously become '\n\n' and prematurely terminate it.
   const normalize = (s) => s.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 
   const flushEvent = (rawLines) => {
@@ -65,7 +68,28 @@ export async function* parseSseStream(source) {
 
   for await (const chunk of source) {
     const bytes = chunk instanceof Uint8Array ? chunk : new Uint8Array(chunk);
-    buffer += normalize(decoder.decode(bytes, { stream: true }));
+    let decoded = decoder.decode(bytes, { stream: true });
+
+    // If the previous chunk ended on a trailing '\r', we stashed it by leaving
+    // it in `buffer` unnormalized. Combine it with the current chunk now so
+    // '\r' + '\n' is normalized as a unit. We re-normalize by concatenating
+    // raw then normalizing the new portion that hasn't been normalized yet.
+    let pending = decoded;
+    if (pending.endsWith("\r")) {
+      // Hold back the trailing \r for the next chunk.
+      pending = pending.slice(0, -1);
+      // Process everything except the trailing \r, then re-prepend it to buffer.
+      buffer += normalize(pending);
+      buffer += "\r";
+    } else {
+      // If buffer already ends in '\r' from a prior chunk, combine with the
+      // leading part of this chunk.
+      if (buffer.endsWith("\r")) {
+        buffer = buffer.slice(0, -1) + normalize("\r" + pending);
+      } else {
+        buffer += normalize(pending);
+      }
+    }
 
     for (const data of processBuffer()) {
       if (data === "[DONE]") {
@@ -90,7 +114,12 @@ export async function* parseSseStream(source) {
   }
 
   // Flush any trailing final decode + any remaining complete event
-  buffer += normalize(decoder.decode());
+  let tail = decoder.decode();
+  if (buffer.endsWith("\r")) {
+    buffer = buffer.slice(0, -1) + normalize("\r" + tail);
+  } else {
+    buffer += normalize(tail);
+  }
   // In case the stream ended without a trailing blank line but had one last event
   if (buffer.trim().length > 0) {
     const lines = buffer.split("\n");

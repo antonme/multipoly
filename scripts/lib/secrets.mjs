@@ -72,3 +72,10 @@ export function scanMany(pieces) {
 }
 
 export { PATTERNS };
+
+/**
+ * Format a list of secret hits for an error message. Never includes matched bytes.
+ */
+export function formatHitsForError(hits) {
+  return hits.map((h) => `  - ${h.pattern} at ${h.label}:${h.line}`).join("\n");
+}

@@ -103,3 +103,21 @@ test("sse: mixed \\r\\n and \\n", async () => {
   assert.deepEqual(events[0].value, { a: 1 });
   assert.deepEqual(events[1].value, { b: 2 });
 });
+
+test("sse: split CRLF across chunks inside multi-line event", async () => {
+  // data: {"a":\r\ndata: 1}\r\n\r\n — but split mid-CRLF so first chunk ends with \r
+  const first = 'data: {"a":\r';
+  const second = '\ndata: 1}\r\n\r\n';
+  const events = await collect(chunksFrom([first, second]));
+  assert.deepEqual(events, [{ type: "data", value: { a: 1 } }]);
+});
+
+test("sse: split CRLF across chunks at event boundary", async () => {
+  // end of event "\r\n\r\n" split: first chunk ends right after first \r
+  const first = 'data: {"x":1}\r';
+  const second = '\n\r\ndata: {"y":2}\r\n\r\n';
+  const events = await collect(chunksFrom([first, second]));
+  assert.equal(events.length, 2);
+  assert.deepEqual(events[0].value, { x: 1 });
+  assert.deepEqual(events[1].value, { y: 2 });
+});

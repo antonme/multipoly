@@ -17,6 +17,8 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
+  ErrorCode,
+  McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 
 import { loadConfig, redactedConfig } from "./lib/config.mjs";
@@ -35,30 +37,20 @@ const TOOLS = [
     inputSchema: {
       type: "object",
       additionalProperties: false,
-      oneOf: [
-        {
-          required: ["diff_base"],
-          properties: {
-            diff_base: {
-              type: "string",
-              description: "Git ref to diff HEAD against (e.g. 'main', 'origin/main', a SHA).",
-            },
-            focus: { type: "string", description: "Optional steering text for the reviewer." },
-          },
+      properties: {
+        diff_base: {
+          type: "string",
+          description: "Git ref to diff HEAD against (e.g. 'main', 'origin/main', a SHA).",
         },
-        {
-          required: ["paths"],
-          properties: {
-            paths: {
-              type: "array",
-              items: { type: "string" },
-              minItems: 1,
-              description: "Explicit file paths (repo-relative or absolute) to review.",
-            },
-            focus: { type: "string", description: "Optional steering text for the reviewer." },
-          },
+        paths: {
+          type: "array",
+          items: { type: "string" },
+          minItems: 1,
+          description: "Explicit file paths (repo-relative or absolute) to review.",
         },
-      ],
+        focus: { type: "string", description: "Optional steering text for the reviewer." },
+      },
+      oneOf: [{ required: ["diff_base"] }, { required: ["paths"] }],
     },
   },
   {
@@ -120,21 +112,20 @@ function main() {
 
   const server = new Server(
     { name: "glm", version: "0.1.0" },
-    {
-      capabilities: { tools: {} },
-      // We do our own input validation to keep plain JSON Schema portable across SDK versions.
-      jsonSchemaValidator: {
-        compile: () => () => true,
-      },
-    },
+    { capabilities: { tools: {} } },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { name, arguments: input } = req.params;
+    const handler = HANDLERS[name];
+    if (!handler) {
+      // Unknown tool is a protocol error, not an application result.
+      throw new McpError(ErrorCode.MethodNotFound, `unknown tool: ${name}`);
+    }
     try {
-      const handler = pickHandler(name);
+      validateToolInput(name, input);
       const { result, reasoning } = await handler(input || {}, { config });
       return buildSuccessResponse(name, result, reasoning, config);
     } catch (e) {
@@ -153,16 +144,65 @@ function main() {
   );
 }
 
-function pickHandler(name) {
-  switch (name) {
-    case "glm_review":
-      return handleReview;
-    case "glm_consult":
-      return handleConsult;
-    case "glm_freeform":
-      return handleFreeform;
-    default:
-      throw new GlmError("INVALID_INPUT", `unknown tool: ${name}`);
+const HANDLERS = {
+  glm_review: handleReview,
+  glm_consult: handleConsult,
+  glm_freeform: handleFreeform,
+};
+
+/**
+ * Minimal runtime input validation for the three tools. We do this ourselves
+ * rather than rely on a heavy JSON-schema lib; the surface is tiny.
+ */
+function validateToolInput(name, raw) {
+  const input = raw || {};
+  if (typeof input !== "object" || Array.isArray(input)) {
+    throw new GlmError("INVALID_INPUT", `${name}: arguments must be an object`);
+  }
+  if (name === "glm_review") {
+    const hasBase = "diff_base" in input;
+    const hasPaths = "paths" in input;
+    if (hasBase === hasPaths) {
+      throw new GlmError(
+        "INVALID_INPUT",
+        `glm_review: exactly one of 'diff_base' or 'paths' is required`,
+      );
+    }
+    if (hasBase && typeof input.diff_base !== "string") {
+      throw new GlmError("INVALID_INPUT", `glm_review.diff_base must be a string`);
+    }
+    if (hasPaths) {
+      if (!Array.isArray(input.paths) || input.paths.length === 0) {
+        throw new GlmError("INVALID_INPUT", `glm_review.paths must be a non-empty array`);
+      }
+      if (!input.paths.every((p) => typeof p === "string" && p.length > 0)) {
+        throw new GlmError("INVALID_INPUT", `glm_review.paths entries must be non-empty strings`);
+      }
+    }
+    if ("focus" in input && typeof input.focus !== "string") {
+      throw new GlmError("INVALID_INPUT", `glm_review.focus must be a string`);
+    }
+    return;
+  }
+  if (name === "glm_consult") {
+    if (typeof input.prompt !== "string" || input.prompt.trim().length === 0) {
+      throw new GlmError("INVALID_INPUT", `glm_consult.prompt must be a non-empty string`);
+    }
+    if ("paths" in input) {
+      if (!Array.isArray(input.paths)) {
+        throw new GlmError("INVALID_INPUT", `glm_consult.paths must be an array`);
+      }
+      if (!input.paths.every((p) => typeof p === "string" && p.length > 0)) {
+        throw new GlmError("INVALID_INPUT", `glm_consult.paths entries must be non-empty strings`);
+      }
+    }
+    return;
+  }
+  if (name === "glm_freeform") {
+    if (typeof input.prompt !== "string" || input.prompt.trim().length === 0) {
+      throw new GlmError("INVALID_INPUT", `glm_freeform.prompt must be a non-empty string`);
+    }
+    return;
   }
 }
 

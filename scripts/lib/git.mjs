@@ -54,29 +54,38 @@ export async function validateRef(ref, cwd) {
  */
 export async function getChangedFiles(base, cwd) {
   const out = await git(
-    ["diff", "--name-only", "--diff-filter=ACMR", `${base}...HEAD`],
+    ["diff", "--no-renames", "--name-only", "--diff-filter=ACMR", `${base}...HEAD`],
     cwd,
   );
   return out.split("\n").map((s) => s.trim()).filter(Boolean);
 }
 
 /**
- * Unified diff text for base...HEAD.
+ * Unified diff text for base...HEAD, optionally scoped to specific paths.
+ * Rename detection disabled so numstat/name-only/diff agree on path identity.
  */
-export async function getDiffText(base, cwd) {
-  return git(["diff", `${base}...HEAD`], cwd);
+export async function getDiffText(base, cwd, paths = null) {
+  const args = ["diff", "--no-renames", `${base}...HEAD`];
+  if (paths && paths.length > 0) {
+    args.push("--");
+    args.push(...paths);
+  }
+  return git(args, cwd);
 }
 
 /**
  * Returns a Set of repo-relative paths that are binary in the given diff.
  * Per git-diff, binary files appear with "-\t-\t<path>" in --numstat output.
+ * We pass --no-renames so each row has a single path in the third column.
  */
 export async function getBinaryPathsInDiff(base, cwd) {
-  const out = await git(["diff", "--numstat", `${base}...HEAD`], cwd);
+  const out = await git(["diff", "--no-renames", "--numstat", `${base}...HEAD`], cwd);
   const binaries = new Set();
   for (const line of out.split("\n")) {
+    if (!line) continue;
     const parts = line.split("\t");
     if (parts.length >= 3 && parts[0] === "-" && parts[1] === "-") {
+      // With --no-renames, parts[2..] is the single path (may contain tabs in theory).
       binaries.add(parts.slice(2).join("\t"));
     }
   }

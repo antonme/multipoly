@@ -1,6 +1,6 @@
 import { GlmError } from "./errors.mjs";
 import { gatherReview } from "./gather.mjs";
-import { scanMany } from "./secrets.mjs";
+import { scanMany, formatHitsForError } from "./secrets.mjs";
 import { streamChatCompletion } from "./client.mjs";
 import {
   REVIEW_SYSTEM_PROMPT,
@@ -8,12 +8,6 @@ import {
   renderReviewUserMessage,
 } from "./prompts.mjs";
 import { REVIEW_SCHEMA, validateReview } from "./schema.mjs";
-
-function formatSecretHits(hits) {
-  return hits
-    .map((h) => `  - ${h.pattern} at ${h.label}:${h.line}`)
-    .join("\n");
-}
 
 export async function handleReview(input, { config, fetchImpl } = {}) {
   const gathered = await gatherReview({
@@ -35,7 +29,7 @@ export async function handleReview(input, { config, fetchImpl } = {}) {
   if (!secretScan.clean && !config.allowSecrets) {
     throw new GlmError(
       "SECRET",
-      `Potential secrets detected in outbound payload:\n${formatSecretHits(secretScan.hits)}\nSet GLM_ALLOW_SECRETS=1 to override.`,
+      `Potential secrets detected in outbound payload:\n${formatHitsForError(secretScan.hits)}\nSet GLM_ALLOW_SECRETS=1 to override.`,
     );
   }
 
@@ -68,8 +62,10 @@ export async function handleReview(input, { config, fetchImpl } = {}) {
   // If invalid, single retry with strict-JSON prefix.
   let reasoning = attempt1.reasoning;
   if (!validation.valid) {
+    // One retry with a single strict-JSON correction turn. The system prompt
+    // already contains the schema; we only add the correction in the user turn.
     const retryMessages = [
-      { role: "system", content: REVIEW_SYSTEM_PROMPT + "\n\n" + REVIEW_JSON_ONLY_PREFIX },
+      { role: "system", content: REVIEW_SYSTEM_PROMPT },
       { role: "user", content: userMessage },
       { role: "assistant", content: attempt1.content },
       {
@@ -119,6 +115,10 @@ function tryParseJson(text) {
 }
 
 function stripCodeFence(text) {
-  const m = text.match(/^\s*```(?:json)?\s*\n([\s\S]*?)\n\s*```\s*$/);
-  return m ? m[1] : text;
+  // Tolerant to \r\n, optional language tag, optional trailing fence.
+  const withClose = text.match(/^\s*```(?:json)?\s*\r?\n([\s\S]*?)\r?\n\s*```\s*$/);
+  if (withClose) return withClose[1];
+  const withoutClose = text.match(/^\s*```(?:json)?\s*\r?\n([\s\S]*)$/);
+  if (withoutClose) return withoutClose[1].replace(/\s*```\s*$/, "");
+  return text;
 }

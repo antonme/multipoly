@@ -3,9 +3,13 @@
  * Keeping this dependency-free keeps the install surface small.
  */
 
+/**
+ * Schema sent to the model via response_format. Permissive at the root
+ * (server adds `truncated` and `files` post-merge). Strict inside `findings`
+ * so we catch garbage fields the model might emit per-finding.
+ */
 export const REVIEW_SCHEMA = Object.freeze({
   type: "object",
-  additionalProperties: false,
   required: ["schema_version", "findings", "summary_md"],
   properties: {
     schema_version: { type: "string", const: "1" },
@@ -28,6 +32,15 @@ export const REVIEW_SCHEMA = Object.freeze({
     summary_md: { type: "string" },
   },
 });
+
+const FINDING_KEYS = new Set([
+  "severity",
+  "path",
+  "line",
+  "end_line",
+  "message",
+  "suggestion",
+]);
 
 const SEVERITIES = new Set(["blocker", "high", "medium", "low", "nit"]);
 
@@ -53,8 +66,13 @@ export function validateReview(obj) {
   }
   for (let i = 0; i < obj.findings.length; i++) {
     const f = obj.findings[i];
-    if (!f || typeof f !== "object") {
+    if (!f || typeof f !== "object" || Array.isArray(f)) {
       return { valid: false, reason: `findings[${i}] must be an object` };
+    }
+    for (const k of Object.keys(f)) {
+      if (!FINDING_KEYS.has(k)) {
+        return { valid: false, reason: `findings[${i}] has unknown field: ${k}` };
+      }
     }
     if (!SEVERITIES.has(f.severity)) {
       return { valid: false, reason: `findings[${i}].severity invalid: ${JSON.stringify(f.severity)}` };

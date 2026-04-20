@@ -1,12 +1,8 @@
 import { GlmError } from "./errors.mjs";
 import { gatherConsult } from "./gather.mjs";
-import { scanMany } from "./secrets.mjs";
+import { scanMany, formatHitsForError } from "./secrets.mjs";
 import { streamChatCompletion } from "./client.mjs";
 import { CONSULT_SYSTEM_PROMPT, renderConsultUserMessage } from "./prompts.mjs";
-
-function formatSecretHits(hits) {
-  return hits.map((h) => `  - ${h.pattern} at ${h.label}:${h.line}`).join("\n");
-}
 
 export async function handleConsult(input, { config, fetchImpl } = {}) {
   const gathered = await gatherConsult({
@@ -22,7 +18,7 @@ export async function handleConsult(input, { config, fetchImpl } = {}) {
   if (!secretScan.clean && !config.allowSecrets) {
     throw new GlmError(
       "SECRET",
-      `Potential secrets detected in outbound payload:\n${formatSecretHits(secretScan.hits)}\nSet GLM_ALLOW_SECRETS=1 to override.`,
+      `Potential secrets detected in outbound payload:\n${formatHitsForError(secretScan.hits)}\nSet GLM_ALLOW_SECRETS=1 to override.`,
     );
   }
 

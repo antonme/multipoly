@@ -80,24 +80,38 @@ export async function streamChatCompletion({
     }
   }
 
-  // Stream-read the body via parseSseStream.
+  // Stream-read the body via parseSseStream. The per-call AbortController
+  // (res.__abort) remains armed until the full body is consumed, so a server
+  // that sends headers and then stalls still times out.
   let content = "";
   let reasoning = "";
   let finishReason = null;
   let usage = null;
 
-  const source = bodyToAsyncIterable(res.body);
-  for await (const ev of parseSseStream(source)) {
-    if (ev.type === "done") break;
-    const v = ev.value;
-    const choice = v?.choices?.[0];
-    if (choice) {
-      const delta = choice.delta || {};
-      if (typeof delta.content === "string") content += delta.content;
-      if (typeof delta.reasoning_content === "string") reasoning += delta.reasoning_content;
-      if (choice.finish_reason) finishReason = choice.finish_reason;
+  try {
+    const source = bodyToAsyncIterable(res.body);
+    for await (const ev of parseSseStream(source)) {
+      if (ev.type === "done") break;
+      const v = ev.value;
+      const choice = v?.choices?.[0];
+      if (choice) {
+        const delta = choice.delta || {};
+        if (typeof delta.content === "string") content += delta.content;
+        if (typeof delta.reasoning_content === "string") reasoning += delta.reasoning_content;
+        if (choice.finish_reason) finishReason = choice.finish_reason;
+      }
+      if (v?.usage) usage = v.usage;
     }
-    if (v?.usage) usage = v.usage;
+  } catch (e) {
+    if (e?.name === "AbortError" || e?.code === "ABORT_ERR") {
+      throw new GlmError("TIMEOUT", `stream timed out after ${config.timeoutMs}ms`, {
+        correlationId,
+        cause: e,
+      });
+    }
+    throw e;
+  } finally {
+    res.__cancelTimer?.();
   }
 
   return { content, reasoning, finishReason, usage, fellBackFromJsonSchema: fellBack };
@@ -127,6 +141,7 @@ async function callWithRetry({ url, apiKey, body, timeoutMs, correlationId, fetc
   while (attempt <= MAX_RETRIES) {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), timeoutMs);
+    let headersOk = false;
     try {
       const res = await fetchImpl(url, {
         method: "POST",
@@ -139,9 +154,18 @@ async function callWithRetry({ url, apiKey, body, timeoutMs, correlationId, fetc
         body: JSON.stringify(body),
         signal: ac.signal,
       });
-      clearTimeout(timer);
 
-      if (res.ok) return res;
+      if (res.ok) {
+        // Keep the timer armed for body consumption; caller cancels via __cancelTimer.
+        headersOk = true;
+        res.__cancelTimer = () => {
+          clearTimeout(timer);
+          try { ac.abort(); } catch {}
+        };
+        return res;
+      }
+
+      clearTimeout(timer);
 
       // Read body for error details (bounded)
       const text = await res.text().catch(() => "");
@@ -175,7 +199,7 @@ async function callWithRetry({ url, apiKey, body, timeoutMs, correlationId, fetc
         details,
       });
     } catch (e) {
-      clearTimeout(timer);
+      if (!headersOk) clearTimeout(timer);
       if (e instanceof GlmError) throw e;
       if (e?.name === "AbortError") {
         throw new GlmError("TIMEOUT", `request timed out after ${timeoutMs}ms`, {
