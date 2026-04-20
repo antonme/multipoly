@@ -154,11 +154,27 @@ const HANDLERS = {
  * Minimal runtime input validation for the three tools. We do this ourselves
  * rather than rely on a heavy JSON-schema lib; the surface is tiny.
  */
+const ALLOWED_KEYS = Object.freeze({
+  glm_review: new Set(["diff_base", "paths", "focus"]),
+  glm_consult: new Set(["prompt", "paths"]),
+  glm_freeform: new Set(["prompt"]),
+});
+
+function rejectUnknownKeys(name, input) {
+  const allowed = ALLOWED_KEYS[name];
+  for (const k of Object.keys(input)) {
+    if (!allowed.has(k)) {
+      throw new GlmError("INVALID_INPUT", `${name}: unknown argument '${k}'`);
+    }
+  }
+}
+
 function validateToolInput(name, raw) {
   const input = raw || {};
   if (typeof input !== "object" || Array.isArray(input)) {
     throw new GlmError("INVALID_INPUT", `${name}: arguments must be an object`);
   }
+  rejectUnknownKeys(name, input);
   if (name === "glm_review") {
     const hasBase = "diff_base" in input;
     const hasPaths = "paths" in input;
@@ -168,8 +184,10 @@ function validateToolInput(name, raw) {
         `glm_review: exactly one of 'diff_base' or 'paths' is required`,
       );
     }
-    if (hasBase && typeof input.diff_base !== "string") {
-      throw new GlmError("INVALID_INPUT", `glm_review.diff_base must be a string`);
+    if (hasBase) {
+      if (typeof input.diff_base !== "string" || input.diff_base.trim().length === 0) {
+        throw new GlmError("INVALID_INPUT", `glm_review.diff_base must be a non-empty string`);
+      }
     }
     if (hasPaths) {
       if (!Array.isArray(input.paths) || input.paths.length === 0) {

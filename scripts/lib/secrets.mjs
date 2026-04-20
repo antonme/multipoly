@@ -75,7 +75,17 @@ export { PATTERNS };
 
 /**
  * Format a list of secret hits for an error message. Never includes matched bytes.
+ * Deduplicates identical (pattern, label, line) triples to keep the error tight
+ * when a regex hits the same line multiple times.
  */
 export function formatHitsForError(hits) {
-  return hits.map((h) => `  - ${h.pattern} at ${h.label}:${h.line}`).join("\n");
+  const seen = new Set();
+  const lines = [];
+  for (const h of hits) {
+    const key = `${h.pattern}\0${h.label}\0${h.line}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    lines.push(`  - ${h.pattern} at ${h.label}:${h.line}`);
+  }
+  return lines.join("\n");
 }

@@ -124,12 +124,13 @@ function isJsonSchemaUnsupported(err) {
   if (status !== 400 && status !== 422) return false;
   const msg = `${err.message} ${JSON.stringify(err.details?.body ?? "")}`.toLowerCase();
   if (!msg.includes("response_format")) return false;
+  // Narrow: only "unsupported" / "not supported" signals a backend that
+  // doesn't implement json_schema. Words like "invalid" or "unknown" could
+  // mean "your schema has a bug" — fall-back in that case would silently
+  // degrade to json_object and mask the real problem.
   return (
     msg.includes("json_schema") &&
-    (msg.includes("unsupported") ||
-      msg.includes("not supported") ||
-      msg.includes("invalid") ||
-      msg.includes("unknown"))
+    (msg.includes("unsupported") || msg.includes("not supported"))
   );
 }
 

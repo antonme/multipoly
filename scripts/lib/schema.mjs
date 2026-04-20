@@ -4,12 +4,14 @@
  */
 
 /**
- * Schema sent to the model via response_format. Permissive at the root
- * (server adds `truncated` and `files` post-merge). Strict inside `findings`
- * so we catch garbage fields the model might emit per-finding.
+ * Schema sent to the model via response_format. Strict at every level to stay
+ * compatible with OpenAI-style structured outputs (`strict: true` requires
+ * `additionalProperties: false` on every object). The server-authoritative
+ * `truncated` and `files` fields are merged post-parse, not emitted by the model.
  */
 export const REVIEW_SCHEMA = Object.freeze({
   type: "object",
+  additionalProperties: false,
   required: ["schema_version", "findings", "summary_md"],
   properties: {
     schema_version: { type: "string", const: "1" },
@@ -55,6 +57,8 @@ export function validateReview(obj) {
   if (!obj || typeof obj !== "object" || Array.isArray(obj)) {
     return { valid: false, reason: "root must be an object" };
   }
+  // Tolerate extra keys the model may emit; we only care that the three we
+  // trust are shape-correct. The schema sent to the model is still strict.
   if (obj.schema_version !== "1") {
     return { valid: false, reason: `schema_version must be "1", got ${JSON.stringify(obj.schema_version)}` };
   }
