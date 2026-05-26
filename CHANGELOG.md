@@ -4,6 +4,46 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Second-pass review fixes (2026-05-27)
+
+Found by a follow-up multi-reviewer pass (self-review + Codex) over the
+multi-transport work:
+
+- **Secret-scanner ReDoS (regex backtracking) — fixed.** The `env_style_secret`
+  and `generic_api_secret_assignment` patterns had unbounded `[A-Z0-9_]*` on
+  both sides of the keyword alternation, which backtracks O(n²) on a long
+  word-char run. A crafted file in the payload under review (e.g. a long
+  `KEY_KEY_…` run) could pin the synchronous scanner — and the whole Node event
+  loop — for tens of seconds (~17 s at 300 KB, measured). Both quantifiers are
+  now bounded to `{0,64}`: linear, and still detects every realistic prefixed
+  identifier name. A regression test asserts the scan stays sub-second.
+- **Secret-scanner per-hit line numbering — fixed (O(n²) → ~linear).** `scan()`
+  recomputed each hit's line number by rescanning from offset 0, so a payload
+  with many secret-shaped matches (e.g. 24 000 `AKIA…` lines, ~336 KB) was
+  O(n·hits) — ~7 s, freezing the event loop. Newline offsets are now built once
+  per scan (lazily, only when there is a hit) and each line is found by binary
+  search; line numbers are byte-identical to the previous implementation.
+- **Anthropic extended thinking — now actually sent.** The native Anthropic
+  transport accumulated `thinking_delta` output but never enabled thinking in
+  the request, so `opus` reasoning was always empty and `MULTIPOLY_THINKING` was
+  silently ignored for anthropic-transport models. It now sends
+  `thinking: { type: "enabled", budget_tokens }` (budget = `min(8192,
+  max_tokens − 1024)`, skipped when the cap is too small to leave output room),
+  gated on the model declaring thinking support. The on/off/auto/mode-default
+  resolution is now a single shared `resolveThinkingPreference` used by both the
+  http and anthropic transports. Because extended thinking and native structured
+  output are not safely combinable across all model/endpoint versions, review
+  mode omits `output_config` when thinking is on and relies on the existing
+  prompt-JSON validate/reprompt loop.
+- **CLI subprocess cleanup on signals — fixed.** Cleanup was registered only on
+  `exit`/`beforeExit`, which do not fire on signal termination — the usual way
+  an MCP client stops a server — so a SIGTERM orphaned detached agent process
+  groups. `installGroupCleanup` now also handles SIGINT/SIGTERM, killing every
+  tracked group and then exiting `128 + signo` (installing a signal listener
+  suppresses Node's default termination, so the explicit exit is required).
+  Registration is dependency-injected so it can be unit-tested without real
+  signals.
+
 ### Audit fixes (2026-05-27)
 
 **High priority:**

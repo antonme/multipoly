@@ -43,11 +43,11 @@ function anthropicConfig(overrides = {}) {
         apiKey: "sk-ant-test",
         apiKeyEnv: "ANTHROPIC_API_KEY",
         anthropicVersion: "2023-06-01",
-        supportsThinking: true,
+        supportsThinking: overrides.supportsThinking ?? true,
         maxTokens: { review: overrides.reviewMax, consult: overrides.consultMax },
       },
     },
-    thinking: "off",
+    thinking: overrides.thinking ?? "off",
     timeoutMs: 5000,
     progress: "off",
   };
@@ -240,4 +240,88 @@ test("anthropic: stop_reason max_tokens maps to finish_reason length", async () 
   ];
   const out = await runModel({ config: anthropicConfig(), modelKey: "m", messages, mode: "consult", fetchImpl: anthropicFetch(events, cap) });
   assert.equal(out.finishReason, "length");
+});
+
+test("anthropic: enables extended thinking when thinking is on", async () => {
+  const cap = {};
+  await runModel({
+    config: anthropicConfig({ thinking: "on", consultMax: 16384 }),
+    modelKey: "m",
+    messages,
+    mode: "consult",
+    fetchImpl: anthropicFetch(basicEvents, cap),
+  });
+  assert.ok(cap.body.thinking, "thinking field should be present");
+  assert.equal(cap.body.thinking.type, "enabled");
+  assert.ok(cap.body.thinking.budget_tokens >= 1024, "budget >= Anthropic floor 1024");
+  assert.ok(cap.body.thinking.budget_tokens < cap.body.max_tokens, "budget < max_tokens");
+});
+
+test("anthropic: omits thinking when thinking is off", async () => {
+  const cap = {};
+  await runModel({
+    config: anthropicConfig(),
+    modelKey: "m",
+    messages,
+    mode: "consult",
+    fetchImpl: anthropicFetch(basicEvents, cap),
+  });
+  assert.equal("thinking" in cap.body, false);
+});
+
+test("anthropic: per-call thinking arg overrides config", async () => {
+  const cap = {};
+  await runModel({
+    config: anthropicConfig({ thinking: "off", consultMax: 16384 }),
+    modelKey: "m",
+    messages,
+    mode: "consult",
+    thinking: true,
+    fetchImpl: anthropicFetch(basicEvents, cap),
+  });
+  assert.ok(cap.body.thinking, "explicit thinking arg should enable thinking despite config off");
+  assert.equal(cap.body.thinking.type, "enabled");
+});
+
+test("anthropic: never sends thinking for a model that doesn't support it", async () => {
+  const cap = {};
+  await runModel({
+    config: anthropicConfig({ thinking: "on", supportsThinking: false, consultMax: 16384 }),
+    modelKey: "m",
+    messages,
+    mode: "consult",
+    fetchImpl: anthropicFetch(basicEvents, cap),
+  });
+  assert.equal("thinking" in cap.body, false);
+});
+
+test("anthropic: thinking on in review omits native output_config (uses prompt-JSON)", async () => {
+  const cap = {};
+  const responseFormat = {
+    type: "json_schema",
+    json_schema: { name: "m_review", strict: true, schema: { type: "object", properties: {}, additionalProperties: false } },
+  };
+  await runModel({
+    config: anthropicConfig({ thinking: "on", reviewMax: 16384 }),
+    modelKey: "m",
+    messages,
+    mode: "review",
+    responseFormat,
+    fetchImpl: anthropicFetch(basicEvents, cap),
+  });
+  assert.ok(cap.body.thinking, "thinking should be enabled");
+  assert.equal("output_config" in cap.body, false, "output_config must be omitted when thinking is on");
+});
+
+test("anthropic: skips thinking when max_tokens is too small for a budget", async () => {
+  const cap = {};
+  await runModel({
+    config: anthropicConfig({ thinking: "on", consultMax: 1024 }),
+    modelKey: "m",
+    messages,
+    mode: "consult",
+    fetchImpl: anthropicFetch(basicEvents, cap),
+  });
+  assert.equal("thinking" in cap.body, false, "1024 max_tokens cannot fit a >=1024 thinking budget plus output");
+  assert.equal(cap.body.max_tokens, 1024);
 });

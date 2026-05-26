@@ -7,24 +7,60 @@ import { CLI_KINDS } from "../models.mjs";
 import { scan } from "../secrets.mjs";
 
 // Track all spawned CLI process groups so they can be cleaned up on shutdown.
-// `defaultExecFile` adds the group PID before spawning; the cleanup hook below
-// SIGKILLs every group. Using a Set so concurrent adds are safe and duplicates
+// `defaultExecFile` adds the group PID before spawning; the cleanup hooks below
+// SIGKILL every group. Using a Set so concurrent adds are safe and duplicates
 // are idempotent.
 const _liveGroups = new Set();
 let _cleanupRegistered = false;
 function _registerCleanup() {
   if (_cleanupRegistered) return;
   _cleanupRegistered = true;
-  const kill = () => {
-    for (const pgid of _liveGroups) {
-      try { process.kill(-pgid, "SIGKILL"); } catch { /* already gone */ }
+  installGroupCleanup(_liveGroups);
+}
+
+/**
+ * Install shutdown cleanup that SIGKILLs every tracked process group.
+ *
+ * `exit`/`beforeExit` only kill (the process is already going down). But those
+ * do NOT fire on signal termination — which is exactly how an MCP client stops
+ * a server — so we also handle SIGINT/SIGTERM. A signal handler must terminate
+ * the process itself: installing a listener suppresses Node's default
+ * termination, so without the explicit `exit(128+signo)` the server would
+ * survive a SIGTERM. Children are spawned detached (own group), so a parent
+ * that died without running this would orphan in-flight agents.
+ *
+ * Dependencies are injected for testing (so tests never register real OS signal
+ * handlers or kill the test process).
+ *
+ * @param {Set<number>} liveGroups — tracked group PIDs (group leader pids).
+ */
+export function installGroupCleanup(
+  liveGroups,
+  {
+    proc = process,
+    killGroup = (pgid) => process.kill(-pgid, "SIGKILL"), // negative pid → whole group
+    exit = (code) => process.exit(code),
+  } = {},
+) {
+  const killAll = () => {
+    for (const pgid of liveGroups) {
+      try {
+        killGroup(pgid);
+      } catch {
+        /* already gone */
+      }
     }
-    _liveGroups.clear();
+    liveGroups.clear();
   };
-  // `exit` fires when the event loop empties or process.exit() is called.
-  process.on("exit", kill);
-  // `beforeExit` fires when the loop is about to drain naturally.
-  process.on("beforeExit", kill);
+  proc.on("exit", killAll);
+  proc.on("beforeExit", killAll);
+  // 128 + signal number is the conventional exit code for signal termination.
+  for (const [signal, code] of [["SIGINT", 130], ["SIGTERM", 143]]) {
+    proc.on(signal, () => {
+      killAll();
+      exit(code);
+    });
+  }
 }
 
 const MAX_BUFFER = 64 * 1024 * 1024;

@@ -1,7 +1,7 @@
 import { MultipolyError, newCorrelationId } from "./errors.mjs";
 import { parseSseStream } from "./sse.mjs";
 import { resolveMaxTokensForModel } from "./config.mjs";
-import { modelSupportsThinking } from "./models.mjs";
+import { modelSupportsThinking, resolveThinkingPreference } from "./models.mjs";
 
 /**
  * GLM streaming chat completion client.
@@ -43,20 +43,8 @@ export async function streamChatCompletion({
     );
   }
 
-  // Resolve effective thinking.
-  let wantThinking;
-  if (thinking !== undefined) {
-    wantThinking = thinking;
-  } else if (config.thinking === "auto") {
-    wantThinking = null; // omit the field entirely
-  } else if (config.thinking === "on") {
-    wantThinking = true;
-  } else if (config.thinking === "off") {
-    wantThinking = false;
-  } else {
-    // mode-default
-    wantThinking = mode === "review";
-  }
+  // Resolve effective thinking (shared with the anthropic transport).
+  const wantThinking = resolveThinkingPreference({ thinking, configThinking: config.thinking, mode });
 
   const body = {
     model: modelConfig.model,

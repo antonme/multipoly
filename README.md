@@ -121,6 +121,15 @@ structured outputs; if the endpoint rejects the schema, it transparently falls
 back to prompt-instructed JSON. Anthropic requires `max_tokens`; when no
 model-specific cap is set it defaults to 16384 — raise
 `MULTIPOLY_OPUS_MAX_TOKENS_REVIEW` (or the server-wide cap) for large reviews.
+
+Extended thinking: when thinking is enabled (the mode-default for review, or
+`MULTIPOLY_THINKING=on`) the request sends `thinking: { type: "enabled",
+budget_tokens }` with a budget of `min(8192, max_tokens − 1024)`. If the cap is
+too small to leave room for both reasoning and an answer, thinking is skipped
+(raise `MULTIPOLY_OPUS_MAX_TOKENS_*`). Native structured output and extended
+thinking are not safely combinable on all model/endpoint versions, so a review
+with thinking on uses prompt-instructed JSON (the validate/reprompt loop) rather
+than `output_config`.
 A custom anthropic model:
 
 ```

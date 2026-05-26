@@ -1,12 +1,41 @@
 import { MultipolyError, newCorrelationId } from "../errors.mjs";
 import { parseSseStream } from "../sse.mjs";
 import { resolveMaxTokensForModel } from "../config.mjs";
-import { ANTHROPIC_VERSION } from "../models.mjs";
+import { ANTHROPIC_VERSION, modelSupportsThinking, resolveThinkingPreference } from "../models.mjs";
 
 // Anthropic requires max_tokens, but multipoly leaves model caps undefined by
 // default (the http path omits the field). Use a generous default so a review
 // JSON isn't truncated; operators raise it via MULTIPOLY_<K>_MAX_TOKENS_*.
 const DEFAULT_MAX_TOKENS = 16384;
+
+// Anthropic extended-thinking budget tuning. budget_tokens must be >= 1024 and
+// strictly < max_tokens (the thinking budget is carved out of max_tokens), so
+// we also reserve a minimum for the visible answer. When the cap is too small
+// to fit both, thinking is skipped rather than starving the output.
+const MIN_THINKING_BUDGET_TOKENS = 1024; // Anthropic's documented floor
+const DEFAULT_THINKING_BUDGET_TOKENS = 8192;
+const MIN_OUTPUT_TOKENS = 1024;
+
+/**
+ * Build the Anthropic `thinking` request field, or null to omit it.
+ * Mirrors the http transport's gating (model must support thinking and the
+ * resolved preference must be true) but maps onto Anthropic's budgeted shape.
+ */
+function buildThinkingField({ supportsThinking, wantThinking, maxTokens, correlationId }) {
+  if (!supportsThinking || wantThinking !== true) return null;
+  const budget = Math.min(DEFAULT_THINKING_BUDGET_TOKENS, maxTokens - MIN_OUTPUT_TOKENS);
+  if (budget < MIN_THINKING_BUDGET_TOKENS) {
+    process.stderr.write(
+      JSON.stringify({
+        event: "anthropic_thinking_skipped",
+        correlationId,
+        reason: `max_tokens (${maxTokens}) too small to fit a thinking budget (need >= ${MIN_THINKING_BUDGET_TOKENS + MIN_OUTPUT_TOKENS}); proceeding without extended thinking`,
+      }) + "\n",
+    );
+    return null;
+  }
+  return { type: "enabled", budget_tokens: budget };
+}
 
 /**
  * Native Anthropic Messages API transport. Mirrors the http client's return
@@ -26,6 +55,7 @@ export async function runAnthropicModel({
   messages,
   mode,
   responseFormat,
+  thinking,
   timeoutMs,
   fetchImpl = globalThis.fetch,
 }) {
@@ -43,6 +73,10 @@ export async function runAnthropicModel({
   const { system, turns } = splitSystem(messages);
   const maxTokens = resolveMaxTokensForModel(config, modelKey, mode) ?? DEFAULT_MAX_TOKENS;
 
+  const supportsThinking = m.supportsThinking ?? modelSupportsThinking(config, modelKey);
+  const wantThinking = resolveThinkingPreference({ thinking, configThinking: config?.thinking, mode });
+  const thinkingField = buildThinkingField({ supportsThinking, wantThinking, maxTokens, correlationId });
+
   const baseBody = {
     model: m.model,
     max_tokens: maxTokens,
@@ -50,9 +84,14 @@ export async function runAnthropicModel({
     messages: turns,
   };
   if (system) baseBody.system = system;
+  if (thinkingField) baseBody.thinking = thinkingField;
 
-  // Native structured output for review JSON.
+  // Native structured output for review JSON. Extended thinking and native
+  // structured output are not safely combinable across all model/endpoint
+  // versions, so when thinking is enabled we omit output_config and rely on
+  // prompt-instructed JSON (the caller's validate/reprompt loop) instead.
   const outputConfig =
+    !thinkingField &&
     mode === "review" && responseFormat?.type === "json_schema" && responseFormat.json_schema?.schema
       ? { format: { type: "json_schema", schema: responseFormat.json_schema.schema } }
       : null;

@@ -31,25 +31,47 @@ const PATTERNS = Object.freeze([
   // OpenAI / Anthropic / admin API keys: sk-, sk-proj-, sk-ant-, sk-admin-.
   { name: "openai_style_sk_key", re: /\bsk-(?:proj-|ant-|admin-)?[A-Za-z0-9_\-]{20,}\b/ },
   // .env-style unquoted assignment (splits on whitespace so it catches
-  // SECRET=rawvalue as well as quoted forms).
+  // SECRET=rawvalue as well as quoted forms). The identifier quantifiers are
+  // bounded ({0,64}) rather than unbounded (*): two adjacent `[A-Z0-9_]*`
+  // around the keyword backtrack O(n^2) on a long word-char run (a ReDoS that
+  // froze the synchronous scan), whereas a constant bound keeps it linear.
+  // 64 chars of prefix/suffix is far beyond any real env-var name.
   {
     name: "env_style_secret",
-    re: /\b[A-Z0-9_]*(?:API|SECRET|TOKEN|PASSWORD|PASS|KEY)[A-Z0-9_]*\s*=\s*[^\s"']{16,}/i,
+    re: /\b[A-Z0-9_]{0,64}(?:API|SECRET|TOKEN|PASSWORD|PASS|KEY)[A-Z0-9_]{0,64}\s*=\s*[^\s"']{16,}/i,
   },
-  // Quoted assignment — JSON / YAML / TOML / .env with quotes.
+  // Quoted assignment — JSON / YAML / TOML / .env with quotes. Bounded for the
+  // same ReDoS reason as env_style_secret above.
   {
     name: "generic_api_secret_assignment",
-    re: /\b[A-Z0-9_]*(?:API|SECRET|TOKEN|PASSWORD|PASS|KEY)[A-Z0-9_]*\s*[:=]\s*["'][^"']{16,}["']/i,
+    re: /\b[A-Z0-9_]{0,64}(?:API|SECRET|TOKEN|PASSWORD|PASS|KEY)[A-Z0-9_]{0,64}\s*[:=]\s*["'][^"']{16,}["']/i,
   },
 ]);
 
-function lineNumberOf(text, index) {
-  // 1-based line number of position `index` in `text`.
-  let line = 1;
-  for (let i = 0; i < index && i < text.length; i++) {
-    if (text.charCodeAt(i) === 10) line++;
+function buildNewlineIndex(text) {
+  // Sorted positions of '\n' in `text`. Built once per scan so per-hit line
+  // lookup is O(log n) instead of O(index): a payload with MANY secret-shaped
+  // matches previously made scan() O(n * hits) ~ O(n^2) — a synchronous CPU
+  // DoS on attacker-controlled outbound content — because every hit rescanned
+  // from offset 0 to compute its line number.
+  const offsets = [];
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) === 10) offsets.push(i);
   }
-  return line;
+  return offsets;
+}
+
+function lineNumberOf(newlineOffsets, index) {
+  // 1-based line = (count of newline offsets strictly before `index`) + 1,
+  // found by binary search over the precomputed offsets.
+  let lo = 0;
+  let hi = newlineOffsets.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (newlineOffsets[mid] < index) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo + 1;
 }
 
 /**
@@ -63,12 +85,16 @@ export function scan(text, label) {
     return { hits: [], clean: true };
   }
   const hits = [];
+  // Built lazily on the first hit so clean payloads (the common case) pay
+  // nothing, and a payload with many hits builds it exactly once.
+  let newlineOffsets = null;
   for (const { name, re } of PATTERNS) {
     // Use a global copy to walk all matches without mutating the shared regex.
     const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
     let m;
     while ((m = g.exec(text)) !== null) {
-      hits.push({ pattern: name, label, line: lineNumberOf(text, m.index) });
+      if (newlineOffsets === null) newlineOffsets = buildNewlineIndex(text);
+      hits.push({ pattern: name, label, line: lineNumberOf(newlineOffsets, m.index) });
       if (m.index === g.lastIndex) g.lastIndex++; // zero-length guard
     }
   }
