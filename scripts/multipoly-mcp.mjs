@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * GLM MCP server entrypoint.
+ * Multipoly MCP server entrypoint.
  *
  * Exposes three tools over MCP stdio:
  *   - glm_review   — structured JSON code review over a git diff or file list
@@ -8,8 +8,8 @@
  *   - glm_freeform — free-form single-shot chat
  *
  * Startup:
- *   node scripts/glm-mcp.mjs           # serve over stdio
- *   node scripts/glm-mcp.mjs --health  # validate config and exit
+ *   node scripts/multipoly-mcp.mjs           # serve over stdio
+ *   node scripts/multipoly-mcp.mjs --health  # validate config and exit
  */
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -143,7 +143,7 @@ function main() {
   }
 
   const server = new Server(
-    { name: "glm", version: "0.1.0" },
+    { name: "multipoly", version: "0.1.0" },
     { capabilities: { tools: {} } },
   );
 
@@ -172,7 +172,7 @@ function main() {
   });
 
   process.stderr.write(
-    `glm-mcp ready | model=${config.model} endpoint=${config.endpoint}\n`,
+    `multipoly-mcp ready | model=${config.model} endpoint=${config.endpoint}\n`,
   );
   if (config.progress === "reasoning") {
     // Live reasoning tokens stream to stderr without passing through the
@@ -180,7 +180,7 @@ function main() {
     // emitting. Operators enabling this mode should be aware the stream
     // can contain verbatim file/prompt content.
     process.stderr.write(
-      `glm-mcp WARNING: GLM_PROGRESS=reasoning streams raw reasoning tokens to stderr unfiltered. ` +
+      `multipoly-mcp WARNING: GLM_PROGRESS=reasoning streams raw reasoning tokens to stderr unfiltered. ` +
         `Use GLM_PROGRESS=heartbeat for production.\n`,
     );
   }

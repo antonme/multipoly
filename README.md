@@ -1,6 +1,6 @@
-# glm — Claude Code plugin for GLM 5.1
+# Multipoly — Claude Code multimodel MCP plugin
 
-Use GLM 5.1 from Claude Code (or any other MCP-aware client, e.g. opencode) for code review and design consultation. Analogous to the official `codex` plugin, but targets GLM 5.1 via Z.AI's OpenAI-compatible API.
+Use multiple coding models from Claude Code (or any other MCP-aware client, e.g. opencode) for code review, design consultation, and council-style synthesis. This baseline still exposes the inherited GLM-backed tools while the multimodel behavior is built out.
 
 Three tools:
 
@@ -15,16 +15,16 @@ Three tools:
 ### Local (for development on this repo)
 
 ```sh
-cd ~/dev/glm
+cd ~/dev/multipoly
 npm install
 # Health check (validates env and endpoint resolution)
-node scripts/glm-mcp.mjs --health
+node scripts/multipoly-mcp.mjs --health
 ```
 
 Register with Claude Code:
 
 ```sh
-claude mcp add glm -- node /Users/anton/dev/glm/scripts/glm-mcp.mjs
+claude mcp add multipoly -- node /Users/anton/dev/multipoly/scripts/multipoly-mcp.mjs
 ```
 
 Or register as a local plugin in `~/.claude/settings.json`:
@@ -32,7 +32,7 @@ Or register as a local plugin in `~/.claude/settings.json`:
 ```json
 {
   "plugins": {
-    "glm": { "path": "/Users/anton/dev/glm" }
+    "multipoly": { "path": "/Users/anton/dev/multipoly" }
   }
 }
 ```
@@ -42,7 +42,7 @@ Or register as a local plugin in `~/.claude/settings.json`:
 Opencode is an MCP client. Register the same MCP server via opencode's MCP config (see `opencode mcp add --help`):
 
 ```sh
-opencode mcp add glm -- node /Users/anton/dev/glm/scripts/glm-mcp.mjs
+opencode mcp add multipoly -- node /Users/anton/dev/multipoly/scripts/multipoly-mcp.mjs
 ```
 
 ## Configuration
@@ -146,9 +146,9 @@ timeout — and a long GLM 5.1 thinking review can easily exceed a client defaul
 Example `~/.codex/config.toml`:
 
 ```toml
-[mcp_servers.glm]
+[mcp_servers.multipoly]
 command = "node"
-args = ["/Users/anton/dev/glm/scripts/glm-mcp.mjs"]
+args = ["/Users/anton/dev/multipoly/scripts/multipoly-mcp.mjs"]
 startup_timeout_sec = 15
 tool_timeout_sec = 600
 ```

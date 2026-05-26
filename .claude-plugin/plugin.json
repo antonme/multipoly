@@ -1,14 +1,14 @@
 {
-  "name": "glm",
+  "name": "multipoly",
   "version": "0.1.0",
-  "description": "Use GLM 5.1 from Claude Code for code review and design consultation.",
+  "description": "Use multiple coding models from Claude Code for review, consultation, and council synthesis.",
   "author": {
     "name": "Anton Volnuhin"
   },
   "mcpServers": {
-    "glm": {
+    "multipoly": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/glm-mcp.mjs"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/multipoly-mcp.mjs"]
     }
   }
 }

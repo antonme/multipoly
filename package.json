@@ -1,15 +1,15 @@
 {
-  "name": "glm-mcp",
+  "name": "multipoly-mcp",
   "version": "0.1.0",
-  "description": "Claude Code plugin that exposes GLM 5.1 via MCP for code review and design consultation.",
+  "description": "MCP server for multimodel code review, design consultation, and model councils.",
   "type": "module",
   "private": true,
   "engines": {
     "node": ">=18"
   },
   "scripts": {
-    "start": "node scripts/glm-mcp.mjs",
-    "health": "node scripts/glm-mcp.mjs --health",
+    "start": "node scripts/multipoly-mcp.mjs",
+    "health": "node scripts/multipoly-mcp.mjs --health",
     "test": "node --test --test-reporter=spec tests/*.test.mjs"
   },
   "dependencies": {
