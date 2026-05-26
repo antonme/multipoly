@@ -155,6 +155,37 @@ test("gather: diff mode only inlines files under caps — diff text never mentio
   assert.ok(g.diffText.includes("a.txt"));
 });
 
+test("gather: diff mode uses merge-base semantics when diff_base branch has advanced", async () => {
+  const repo = await realpath(await mkdtemp(path.join(tmpdir(), "glm-gather-diverged-")));
+  await git(repo, "init", "-q", "-b", "main");
+  await writeFile(path.join(repo, "a.txt"), "base\n");
+  await git(repo, "add", ".");
+  await git(repo, "commit", "-q", "-m", "base");
+
+  await git(repo, "checkout", "-q", "-b", "feature");
+  await writeFile(path.join(repo, "b.txt"), "feature\n");
+  await git(repo, "add", ".");
+  await git(repo, "commit", "-q", "-m", "feature change");
+
+  await git(repo, "checkout", "-q", "main");
+  await writeFile(path.join(repo, "a.txt"), "main-only\n");
+  await git(repo, "add", ".");
+  await git(repo, "commit", "-q", "-m", "main advanced");
+
+  await git(repo, "checkout", "-q", "feature");
+  const g = await gatherReview({
+    diffBase: "main",
+    cwd: repo,
+    caps: defaultCaps,
+  });
+
+  const paths = new Set(g.files.map((f) => f.path));
+  assert.ok(paths.has("b.txt"));
+  assert.ok(!paths.has("a.txt"), "diff_base-only changes must not be included in a feature review");
+  assert.ok(g.diffText.includes("b.txt"));
+  assert.ok(!g.diffText.includes("main-only"));
+});
+
 test("gather: diff-mode symlink that escapes repo is listed_only, not inlined", async () => {
   const { repo, baseSha } = await makeRepo();
   // Create a target outside the repo

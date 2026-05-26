@@ -56,6 +56,18 @@ export async function resolveCommit(ref, cwd) {
 }
 
 /**
+ * Resolve the merge base between two already-pinned commits.
+ */
+export async function resolveMergeBase(left, right, cwd) {
+  try {
+    const out = await execFileP("git", ["merge-base", left, right], { cwd });
+    return out.stdout.trim();
+  } catch (e) {
+    throw new MultipolyError("GIT", `could not resolve merge-base for ${left} and ${right}`, { cause: e });
+  }
+}
+
+/**
  * Files changed between base...HEAD. Filter: Added, Copied, Modified, Renamed (skip Deleted).
  * Returns repo-relative paths.
  */

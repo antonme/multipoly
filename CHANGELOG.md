@@ -4,6 +4,54 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Audit fixes (2026-05-27)
+
+**High priority:**
+- **Dynamic `TOOL_KEY_SPEC`:** The runtime argument-key validator was built from
+  the static `MODEL_KEYS` constant (glm/qwen/deepseek/composer), so custom
+  models and `opus` silently passed unrecognized arguments through. It is now
+  built from the active model registry in `main()`, covering every configured
+  model.
+- **Gemini E2BIG guard:** A gemini review whose prompt exceeds 200 KB (UTF-8)
+  on argv now fails with `INVALID_INPUT` and remediation hints instead of a
+  cryptic OS-spawn `E2BIG` crash.
+- **Secret scanner expansion:** Added `ASIA` (AWS temporary), `github_pat_`,
+  `xapp-` (Slack app), SSH public key, `sk-proj-`/`sk-ant-`/`sk-admin-`
+  (OpenAI/Anthropic/admin), and unquoted `.env`-style (`KEY=value`) patterns.
+  Fixed a typo that dropped `ghr_` refresh-token detection, and sanitized hit
+  labels in formatted errors so malicious filenames cannot inject extra lines.
+- **Timeout visibility:** Every tool call now emits a structured `tool_call`
+  event to stderr showing the effective upstream timeout and a warning about the
+  MCP client's own lower tool-call ceiling (Codex/Claude Code ~60s).
+- **Anthropic `message_stop`:** A missing `message_stop` event no longer throws;
+  it logs a structured warning and returns whatever content was received. The
+  caller's budget / JSON-validation layers catch genuine truncation.
+
+**Medium priority:**
+- **Synthesizer fallback logging:** When the configured synthesizer model is not
+  actually configured and the fallthrough chain activates, a structured
+  `synthesizer_fallback` event is logged to stderr.
+- **Git TOCTOU hardening:** `gatherReviewDiff` now resolves `diffBase` and
+  `HEAD` to commit hashes and then pins their merge base before any diff
+  queries, so concurrent commits/amends/resets can't cause file-list/diff-text
+  disagreement while preserving `diff_base...HEAD` semantics when the base
+  branch has advanced.
+- **Orphaned CLI agent cleanup:** Spawned CLI subprocess PIDs are tracked in a
+  `_liveGroups` Set; `process.on('exit')` and `beforeExit` handlers SIGKILL
+  every tracked group so a crashed MCP server doesn't leave agent grandchildren.
+- **Unicode-safe `sanitizeDisplay`:** Uses `codePointAt` so surrogate pairs
+  (non-BMP characters like emoji) are handled as single units, and lone
+  surrogates are replaced with `?` instead of passed through.
+- **1‑token budget detection:** In review mode, content that is non-empty but
+  too short to be valid JSON (< 64 chars) now surfaces as `BUDGET` rather than
+  a confusing `SCHEMA` error.
+- **Unconfigured Anthropic custom models:** A malformed optional Anthropic base
+  URL no longer blocks startup when that custom model is missing credentials;
+  it is validated once the model is actually configured.
+- **Council docs/commands:** Slash-command and skill guidance now reflect the
+  current default harness-side council synthesis instead of the old
+  Qwen-as-default behavior.
+
 ### Multi-transport models (http / anthropic / cli)
 
 Models can now be reached over three transports behind one model contract, so

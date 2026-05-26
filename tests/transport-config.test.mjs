@@ -72,6 +72,20 @@ test("transport: custom model can declare anthropic transport", () => {
   assert.equal(c.models.haiku.baseUrl, "https://api.anthropic.com");
 });
 
+test("transport: unconfigured anthropic model with bad base URL does not block other models", () => {
+  const c = loadConfig({
+    ...glm,
+    MULTIPOLY_MODELS: "haiku",
+    MULTIPOLY_HAIKU_TRANSPORT: "anthropic",
+    MULTIPOLY_HAIKU_MODEL: "claude-haiku-4-5",
+    MULTIPOLY_HAIKU_BASE_URL: "ftp://bad",
+  });
+  assert.equal(c.models.glm.configured, true);
+  assert.equal(c.models.haiku.configured, false);
+  assert.ok(c.models.haiku.missing.some((m) => /API_KEY/.test(m)));
+  assert.equal(c.models.haiku.baseUrl, "ftp://bad");
+});
+
 test("transport: custom cli model with cliKind + auth token env + temp cwd", () => {
   const c = loadConfig({
     ...glm,

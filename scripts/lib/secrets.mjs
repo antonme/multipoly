@@ -98,10 +98,25 @@ export function formatHitsForError(hits) {
   const seen = new Set();
   const lines = [];
   for (const h of hits) {
-    const key = `${h.pattern}\0${h.label}\0${h.line}`;
+    const label = sanitizeHitLabel(h.label);
+    const key = `${h.pattern}\0${label}\0${h.line}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    lines.push(`  - ${h.pattern} at ${h.label}:${h.line}`);
+    lines.push(`  - ${h.pattern} at ${label}:${h.line}`);
   }
   return lines.join("\n");
+}
+
+function sanitizeHitLabel(label) {
+  const raw = String(label ?? "");
+  let out = "";
+  for (let i = 0; i < raw.length; i++) {
+    const cp = raw.codePointAt(i);
+    if (cp === undefined) break;
+    if (cp < 0x20 || cp === 0x7f) out += "?";
+    else if (cp >= 0xd800 && cp <= 0xdfff) out += "?";
+    else out += String.fromCodePoint(cp);
+    if (cp >= 0x10000) i++;
+  }
+  return out.length > 512 ? out.slice(0, 512) + "..." : out;
 }

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { scan, scanMany } from "../scripts/lib/secrets.mjs";
+import { scan, scanMany, formatHitsForError } from "../scripts/lib/secrets.mjs";
 
 test("secrets: clean text passes", () => {
   const r = scan("just some harmless code\nconst x = 1\n", "foo");
@@ -65,6 +65,12 @@ test("secrets: scanMany aggregates", () => {
   assert.equal(r.clean, false);
   assert.equal(r.hits.length, 1);
   assert.equal(r.hits[0].label, "b");
+});
+
+test("secrets: formatted hit labels cannot inject extra lines", () => {
+  const out = formatHitsForError([{ pattern: "aws_access_key_id", label: "evil\n- injected", line: 7 }]);
+  assert.equal(out.split("\n").length, 1);
+  assert.match(out, /evil\?- injected:7/);
 });
 
 test("secrets: short values don't match generic pattern", () => {

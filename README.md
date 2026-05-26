@@ -84,7 +84,7 @@ Server-wide settings:
 | Var | Default | Notes |
 |---|---|---|
 | `MULTIPOLY_THINKING` | mode-default | `on` / `off` / `auto`. Default: on for review, off for consult. |
-| `MULTIPOLY_SYNTHESIZER` | (unset) | Default council synthesizer: a model key (`glm`/`qwen`/`deepseek`/`composer`), or `harness`/`none`/`caller` to defer to the calling harness. Unset = defer. Overridable per-call. |
+| `MULTIPOLY_SYNTHESIZER` | (unset) | Default council synthesizer: any active model key (`glm`/`qwen`/`deepseek`/`composer`/`opus`/custom), or `harness`/`none`/`caller` to defer to the calling harness. Unset = defer. Overridable per-call. |
 | `MULTIPOLY_MAX_TOKENS_REVIEW` | 131072 | Output-token cap for review and council review synthesis. |
 | `MULTIPOLY_MAX_TOKENS_CONSULT` | 131072 | Output-token cap for consult and council consult synthesis. |
 | `MULTIPOLY_TIMEOUT_MS` | 600000 | Upstream stream inactivity timeout in ms, range `[1, 3600000]`. |
@@ -97,7 +97,7 @@ Server-wide settings:
 
 Legacy `GLM_*` names are still accepted for server-wide settings during migration.
 
-`MULTIPOLY_THINKING` is only sent to models that declare support for the `thinking` request field; currently that is the GLM profile. Non-GLM profiles omit the field even when the server-wide setting is `on`.
+`MULTIPOLY_THINKING` is only sent to models that declare support for the `thinking` request field; currently the builtins that do are `glm` and `opus`. Other profiles omit the field even when the server-wide setting is `on`.
 
 The 131072 token default is GLM-specific. Non-GLM profiles omit `max_tokens` by default so their provider default applies. Set `MULTIPOLY_MAX_TOKENS_REVIEW` / `MULTIPOLY_MAX_TOKENS_CONSULT` to apply one cap to every model, or use model-specific caps such as `MULTIPOLY_QWEN_MAX_TOKENS_REVIEW` and `MULTIPOLY_QWEN_MAX_TOKENS_CONSULT`.
 
@@ -206,7 +206,7 @@ there is no `argv` field (argv is built from the controlled `cliKind` recipe).
 ```jsonc
 {
   "models": {
-    "opus":   { "transport": "anthropic", "model": "claude-opus-4-7", "apiKeyEnv": "ANTHROPIC_API_KEY" },
+    "myopus": { "transport": "anthropic", "model": "claude-opus-4-7", "apiKeyEnv": "ANTHROPIC_API_KEY" },
     "mygem":  { "transport": "cli", "cliKind": "gemini", "model": "gemini-3-pro",
                 "authTokenEnv": "GEMINI_API_KEY", "cwd": "temp", "enabled": true }
   }
@@ -286,7 +286,7 @@ Council tools accept the same review/consult arguments plus:
 
 To merge server-side instead, set a `synthesizer`:
 
-- A model key (`glm`, `qwen`, `deepseek`, `composer`) runs that model as the synthesizer. If the named model isn't configured, resolution falls through the chain `chosen → qwen → deepseek → glm → composer` and uses the first configured model.
+- A model key (`glm`, `qwen`, `deepseek`, `composer`, `opus`, or a custom key) runs that model as the synthesizer. If the named model isn't configured, resolution falls through the chain `chosen → qwen → deepseek → glm → composer → any other configured model` and uses the first configured model.
 - `harness` / `none` / `caller` forces the default defer-to-harness behavior even when `MULTIPOLY_SYNTHESIZER` names a model.
 
 The per-call `synthesizer` argument overrides the `MULTIPOLY_SYNTHESIZER` env default. When server-side synthesis runs, member outputs are re-scanned for secrets before being sent to the synthesizer provider.

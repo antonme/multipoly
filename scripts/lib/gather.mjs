@@ -6,6 +6,7 @@ import {
   getToplevel,
   validateRef,
   resolveCommit,
+  resolveMergeBase,
   getChangedFiles,
   getDiffText,
   getBinaryPathsInDiff,
@@ -49,11 +50,14 @@ async function gatherReviewDiff({ diffBase, cwd, caps }) {
 
   // Pin both endpoints to commit hashes BEFORE reading any diff data, so a
   // concurrent commit/amend/reset between the three git calls can't cause
-  // the file list, binary detection, and diff text to disagree.
+  // the file list, binary detection, and diff text to disagree. Resolve the
+  // merge-base once to preserve git's `diff_base...HEAD` review semantics
+  // while still avoiding a moving `HEAD` ref in later git calls.
   const baseHash = await validateRef(diffBase, top);
   const headHash = await resolveCommit("HEAD", top);
-  const changed = await getChangedFiles(baseHash, top, headHash);
-  const binariesInDiff = await getBinaryPathsInDiff(baseHash, top, headHash);
+  const mergeBaseHash = await resolveMergeBase(baseHash, headHash, top);
+  const changed = await getChangedFiles(mergeBaseHash, top, headHash);
+  const binariesInDiff = await getBinaryPathsInDiff(mergeBaseHash, top, headHash);
 
   // Containment check: reject any changed path whose realpath escapes the repo
   // (can happen via in-repo symlinks pointing outside). Keep the resolved
@@ -102,7 +106,7 @@ async function gatherReviewDiff({ diffBase, cwd, caps }) {
   // Build diff scoped to inlined files ONLY. Omitted/listed files never leak content.
   const inlinedPaths = inlinedFiles.map((f) => f.path);
   let diffText = inlinedPaths.length > 0 && diffBudget > 0
-    ? await getDiffText(baseHash, top, inlinedPaths, headHash)
+    ? await getDiffText(mergeBaseHash, top, inlinedPaths, headHash)
     : "";
 
   let diffTruncated = false;

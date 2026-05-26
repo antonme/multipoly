@@ -159,6 +159,26 @@ test("cli: gemini — plan approval mode + workspace trust env", async () => {
   assert.equal(opts.env.GEMINI_CLI_TRUST_WORKSPACE, "true");
 });
 
+test("cli: gemini — overlarge argv prompt rejects with correct cap guidance", async () => {
+  const cap = [];
+  await assert.rejects(
+    () =>
+      runModel({
+        config: cliConfig("gemini"),
+        modelKey: "m",
+        messages: [{ role: "user", content: "x".repeat(201_000) }],
+        mode: "consult",
+        execFileImpl: fakeExec("gemini out", cap),
+        env: {},
+      }),
+    (e) =>
+      e.code === "INVALID_INPUT" &&
+      /lower MULTIPOLY_PER_FILE_CAP_BYTES/.test(e.message) &&
+      !/raise MULTIPOLY_PER_FILE_CAP_BYTES/.test(e.message),
+  );
+  assert.equal(cap.length, 0, "must reject before spawning");
+});
+
 test("cli: agy — minimal flags, no --model, add-dir cwd", async () => {
   const cap = [];
   await runModel({

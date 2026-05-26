@@ -265,7 +265,10 @@ function loadAnthropicModelConfig(env, key, info, serverMaxTokens) {
       ...common,
       configured: false,
       missing: Object.freeze(missing),
-      baseUrl: baseUrlRaw ? validateCustomBaseUrl(baseUrlRaw, baseUrlLabel) : null,
+      // Match the http transport: malformed optional fields on an otherwise
+      // unconfigured model should not block startup for the configured models.
+      // The URL is validated before any Anthropic call once credentials are present.
+      baseUrl: baseUrlRaw || null,
       apiKey: null,
     });
   }

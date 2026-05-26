@@ -271,7 +271,7 @@ export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, pro
         throw new MultipolyError(
           "INVALID_INPUT",
           `gemini prompt is ${promptBytes} bytes, which risks OS argv limit. ` +
-            `Reduce the file set, raise MULTIPOLY_PER_FILE_CAP_BYTES to inline fewer files, ` +
+            `Shorten the prompt or reduce the file set; for reviews, lower MULTIPOLY_PER_FILE_CAP_BYTES or MULTIPOLY_TOTAL_CAP_BYTES, ` +
             `or use a different transport for large reviews.`,
         );
       }
