@@ -1,5 +1,6 @@
 import { MultipolyError } from "./errors.mjs";
 import { streamChatCompletion } from "./client.mjs";
+import { runCliModel } from "./transport/cli.mjs";
 
 /**
  * Transport dispatcher: the single seam through which every model call flows,
@@ -28,6 +29,10 @@ export async function runModel(args) {
     // is ignored by the http path.
     const { execFileImpl, ...httpArgs } = args;
     return streamChatCompletion(httpArgs);
+  }
+
+  if (transport === "cli") {
+    return runCliModel(args);
   }
 
   throw new MultipolyError(
