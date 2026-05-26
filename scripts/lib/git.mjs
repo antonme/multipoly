@@ -40,6 +40,13 @@ export async function validateRef(ref, cwd) {
   if (ref.startsWith("-")) {
     throw new MultipolyError("INVALID_INPUT", `diff_base looks like an option flag: ${JSON.stringify(ref)}`);
   }
+  return resolveCommit(ref, cwd);
+}
+
+/**
+ * Resolve a git ref to a full commit hash. Returns the 40-char SHA.
+ */
+export async function resolveCommit(ref, cwd) {
   try {
     const out = await execFileP("git", ["rev-parse", "--verify", `${ref}^{commit}`], { cwd });
     return out.stdout.trim();
@@ -52,12 +59,13 @@ export async function validateRef(ref, cwd) {
  * Files changed between base...HEAD. Filter: Added, Copied, Modified, Renamed (skip Deleted).
  * Returns repo-relative paths.
  */
-export async function getChangedFiles(base, cwd) {
+export async function getChangedFiles(base, cwd, headHash = null) {
   // -z emits NUL-separated paths so filenames containing newlines or tabs
   // survive intact. Without -z, git would C-quote such paths with embedded
   // escapes and our naïve newline split would mangle them.
+  const range = headHash ? `${base}..${headHash}` : `${base}...HEAD`;
   const out = await git(
-    ["diff", "--no-renames", "-z", "--name-only", "--diff-filter=ACMR", `${base}...HEAD`],
+    ["diff", "--no-renames", "-z", "--name-only", "--diff-filter=ACMR", range],
     cwd,
   );
   return out.split("\0").filter((s) => s.length > 0);
@@ -67,8 +75,9 @@ export async function getChangedFiles(base, cwd) {
  * Unified diff text for base...HEAD, optionally scoped to specific paths.
  * Rename detection disabled so numstat/name-only/diff agree on path identity.
  */
-export async function getDiffText(base, cwd, paths = null) {
-  const args = ["diff", "--no-renames", `${base}...HEAD`];
+export async function getDiffText(base, cwd, paths = null, headHash = null) {
+  const range = headHash ? `${base}..${headHash}` : `${base}...HEAD`;
+  const args = ["diff", "--no-renames", range];
   if (paths && paths.length > 0) {
     args.push("--");
     args.push(...paths);
@@ -81,12 +90,13 @@ export async function getDiffText(base, cwd, paths = null) {
  * Per git-diff, binary files appear with "-\t-\t<path>" in --numstat output.
  * We pass --no-renames so each row has a single path in the third column.
  */
-export async function getBinaryPathsInDiff(base, cwd) {
+export async function getBinaryPathsInDiff(base, cwd, headHash = null) {
   // --numstat -z emits rows as `added<TAB>deleted<TAB>path\0`. With -z, git
   // does NOT C-quote paths, so a path containing embedded tabs or newlines
   // is delivered literally — splitting on the first two tabs only (limit 3)
   // recovers the full path exactly.
-  const out = await git(["diff", "--no-renames", "-z", "--numstat", `${base}...HEAD`], cwd);
+  const range = headHash ? `${base}..${headHash}` : `${base}...HEAD`;
+  const out = await git(["diff", "--no-renames", "-z", "--numstat", range], cwd);
   const binaries = new Set();
   for (const row of out.split("\0")) {
     if (!row) continue;

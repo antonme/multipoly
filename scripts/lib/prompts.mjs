@@ -70,11 +70,24 @@ function sanitizeDisplay(s) {
   // write a NUL into the source file and git would flag it as binary,
   // breaking diffs and many editors. Walking codepoints is slightly
   // slower but keeps the source text-clean.
+  //
+  // Use codePointAt so surrogate pairs (non-BMP characters like emoji /
+  // rare CJK) are handled as one unit. A lone high surrogate (0xD800-0xDBFF)
+  // without its trailing low surrogate is a corrupt half and gets replaced.
   let cleaned = "";
   for (let i = 0; i < raw.length; i++) {
-    const cp = raw.charCodeAt(i);
-    if (cp < 0x20 || cp === 0x7f || cp === 0x60 /* backtick */) cleaned += "?";
-    else cleaned += raw[i];
+    const cp = raw.codePointAt(i);
+    if (cp === undefined) break;
+    if (cp < 0x20 || cp === 0x7f || cp === 0x60 /* backtick */) {
+      cleaned += "?";
+    } else if (cp >= 0xd800 && cp <= 0xdfff) {
+      // Lone surrogate: corrupt UTF-16, replace as a visible marker.
+      cleaned += "?";
+    } else {
+      cleaned += String.fromCodePoint(cp);
+    }
+    // Advance past the full codepoint (1 char for BMP, 2 for surrogates).
+    if (cp >= 0x10000) i++;
   }
   return cleaned.length > MAX ? cleaned.slice(0, MAX) + "…" : cleaned;
 }

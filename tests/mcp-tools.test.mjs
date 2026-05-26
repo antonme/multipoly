@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildTools, TOOL_KEY_SPEC } from "../scripts/multipoly-mcp.mjs";
+import { buildTools, buildToolKeySpec } from "../scripts/multipoly-mcp.mjs";
 import { SYNTHESIZER_CHOICES } from "../scripts/lib/config.mjs";
+import { MODEL_KEYS } from "../scripts/lib/models.mjs";
 
 test("mcp tools: exposes model-specific review and consult tools plus council tools", () => {
   const names = buildTools().map((t) => t.name).sort();
@@ -48,9 +49,12 @@ test("mcp tools: council synthesizer enum lists model keys plus harness sentinel
 
 test("mcp tools: advertised schema keys match the hand-rolled validator key sets", () => {
   // Guards against the advertised inputSchema and the runtime validator drifting.
+  // buildToolKeySpec is now dynamic so it can cover custom + opus models;
+  // for the builtin-only test suite we pass MODEL_KEYS.
+  const keySpec = buildToolKeySpec(MODEL_KEYS);
   for (const tool of buildTools()) {
     const schemaKeys = Object.keys(tool.inputSchema.properties).sort();
-    const allowedKeys = [...TOOL_KEY_SPEC[tool.name]].sort();
+    const allowedKeys = [...keySpec[tool.name] ?? []].sort();
     assert.deepEqual(schemaKeys, allowedKeys, tool.name);
   }
 });

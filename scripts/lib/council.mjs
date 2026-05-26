@@ -99,8 +99,24 @@ function resolveSynthesisTarget(input, config) {
 
   // Builtin preference order first, then any remaining (custom) configured
   // models, so an explicit-but-unconfigured choice still lands on a real model.
+  // When the chosen key is not the one that actually runs, log a diagnostic
+  // so the operator knows a fallthrough occurred.
+  let firstAttempt = true;
   for (const key of [chosen, ...SYNTHESIZER_FALLBACK_ORDER, ...modelKeys]) {
-    if (config.models[key]?.configured) return { mode: "model", key };
+    if (config.models[key]?.configured) {
+      if (!firstAttempt && chosen !== key) {
+        process.stderr.write(
+          JSON.stringify({
+            event: "synthesizer_fallback",
+            chosen,
+            used: key,
+            reason: "chosen synthesizer is not configured; fell through to the next available model",
+          }) + "\n",
+        );
+      }
+      return { mode: "model", key };
+    }
+    firstAttempt = false;
   }
   // Unreachable while the council quorum holds (≥2 configured members). Defer
   // rather than error if it somehow is.

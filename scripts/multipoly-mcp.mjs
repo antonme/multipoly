@@ -171,10 +171,13 @@ function main() {
     { capabilities: { tools: {} } },
   );
 
-  // Tools and handlers reflect the loaded registry (builtins + any custom
-  // models from MULTIPOLY_MODELS), so env-defined models are fully exposed.
+  // Tools, handlers, and key-validation spec all reflect the loaded registry
+  // (builtins + any custom models from MULTIPOLY_MODELS), so env-defined models
+  // are fully exposed — including unknown-argument rejection for every tool.
+  const modelKeys = config.modelKeys;
   const tools = buildTools(registryFromConfig(config));
-  const handlers = buildHandlers(config.modelKeys);
+  const handlers = buildHandlers(modelKeys);
+  const toolKeySpec = buildToolKeySpec(modelKeys);
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
@@ -186,7 +189,20 @@ function main() {
       throw new McpError(ErrorCode.MethodNotFound, `unknown tool: ${name}`);
     }
     try {
-      validateToolInput(name, input, config.modelKeys);
+      validateToolInput(name, input, modelKeys, toolKeySpec);
+      // Log the effective timeout so operators can spot MCP-client-tool-timeout mismatches.
+      const effectiveTimeoutMs = input?.timeout_ms ?? config.timeoutMs;
+      process.stderr.write(
+        JSON.stringify({
+          event: "tool_call",
+          tool: name,
+          correlationId: null, // filled on error by the handler chain
+          timeout_ms: effectiveTimeoutMs,
+          client_warning:
+            "MCP client may enforce its own lower tool-call timeout (e.g. Codex ~60s, Claude Code ~60s). " +
+            "If the client kills this call before the upstream timeout, raise the client's tool_timeout_sec / MCP_TOOL_TIMEOUT.",
+        }) + "\n",
+      );
       const { result, reasoning } = await handler(input || {}, { config });
       return buildSuccessResponse(name, result, reasoning, config);
     } catch (e) {
@@ -236,26 +252,23 @@ const REVIEW_KEYS = new Set(["diff_base", "paths", "focus", "timeout_ms"]);
 const CONSULT_KEYS = new Set(["prompt", "paths", "timeout_ms"]);
 const COUNCIL_EXTRA_KEYS = new Set(["models", "synthesizer", "include_individual_results"]);
 
-// Map each tool name to its allowed argument keys. Exported so a test can
-// assert this stays in lockstep with the advertised inputSchema properties.
-export const TOOL_KEY_SPEC = Object.fromEntries([
-  ...MODEL_KEYS.flatMap((key) => [
-    [`${key}_review`, REVIEW_KEYS],
-    [`${key}_consult`, CONSULT_KEYS],
-  ]),
-  ["council_review", new Set([...REVIEW_KEYS, ...COUNCIL_EXTRA_KEYS])],
-  ["council_consult", new Set([...CONSULT_KEYS, ...COUNCIL_EXTRA_KEYS])],
-]);
-
-function rejectUnknownKeys(name, input, allowed) {
-  for (const k of Object.keys(input)) {
-    if (!allowed.has(k)) {
-      throw new MultipolyError("INVALID_INPUT", `${name}: unknown argument '${k}'`);
-    }
-  }
+/**
+ * Build the tool-key spec (allowed argument keys per tool name) from the
+ * active model registry so custom and opus models are covered, not just the
+ * four builtins. Called in main() once the config is loaded.
+ */
+export function buildToolKeySpec(modelKeys) {
+  return Object.fromEntries([
+    ...modelKeys.flatMap((key) => [
+      [`${key}_review`, REVIEW_KEYS],
+      [`${key}_consult`, CONSULT_KEYS],
+    ]),
+    ["council_review", new Set([...REVIEW_KEYS, ...COUNCIL_EXTRA_KEYS])],
+    ["council_consult", new Set([...CONSULT_KEYS, ...COUNCIL_EXTRA_KEYS])],
+  ]);
 }
 
-function validateToolInput(name, raw, modelKeys = MODEL_KEYS) {
+function validateToolInput(name, raw, modelKeys, toolKeySpec) {
   const input = raw || {};
   if (typeof input !== "object" || Array.isArray(input)) {
     throw new MultipolyError("INVALID_INPUT", `${name}: arguments must be an object`);
@@ -263,6 +276,14 @@ function validateToolInput(name, raw, modelKeys = MODEL_KEYS) {
   // Shared across all three tools. Throws INVALID_INPUT on a bad value;
   // returns undefined when absent (handler falls back to config.timeoutMs).
   if ("timeout_ms" in input) resolveCallTimeoutMs(input.timeout_ms);
+  const allowedKeySet = toolKeySpec?.[name];
+  if (allowedKeySet) {
+    for (const k of Object.keys(input)) {
+      if (!allowedKeySet.has(k)) {
+        throw new MultipolyError("INVALID_INPUT", `${name}: unknown argument '${k}'`);
+      }
+    }
+  }
   if (name.endsWith("_review")) {
     validateReviewInput(name, input, name.startsWith("council_"), modelKeys);
     return;
@@ -272,10 +293,6 @@ function validateToolInput(name, raw, modelKeys = MODEL_KEYS) {
     return;
   }
   throw new MultipolyError("INVALID_INPUT", `unknown tool shape: ${name}`);
-}
-
-function allowedKeys(baseKeys, isCouncil) {
-  return isCouncil ? new Set([...baseKeys, ...COUNCIL_EXTRA_KEYS]) : baseKeys;
 }
 
 function validateCouncilExtras(name, input, modelKeys) {
@@ -301,7 +318,6 @@ function validateCouncilExtras(name, input, modelKeys) {
 }
 
 function validateReviewInput(name, input, isCouncil, modelKeys) {
-  rejectUnknownKeys(name, input, allowedKeys(REVIEW_KEYS, isCouncil));
   if (isCouncil) validateCouncilExtras(name, input, modelKeys);
 
   const hasBase = "diff_base" in input;
@@ -331,7 +347,6 @@ function validateReviewInput(name, input, isCouncil, modelKeys) {
 }
 
 function validateConsultInput(name, input, isCouncil, modelKeys) {
-  rejectUnknownKeys(name, input, allowedKeys(CONSULT_KEYS, isCouncil));
   if (isCouncil) validateCouncilExtras(name, input, modelKeys);
 
   if (typeof input.prompt !== "string" || input.prompt.trim().length === 0) {

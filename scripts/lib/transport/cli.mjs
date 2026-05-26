@@ -6,6 +6,27 @@ import { MultipolyError } from "../errors.mjs";
 import { CLI_KINDS } from "../models.mjs";
 import { scan } from "../secrets.mjs";
 
+// Track all spawned CLI process groups so they can be cleaned up on shutdown.
+// `defaultExecFile` adds the group PID before spawning; the cleanup hook below
+// SIGKILLs every group. Using a Set so concurrent adds are safe and duplicates
+// are idempotent.
+const _liveGroups = new Set();
+let _cleanupRegistered = false;
+function _registerCleanup() {
+  if (_cleanupRegistered) return;
+  _cleanupRegistered = true;
+  const kill = () => {
+    for (const pgid of _liveGroups) {
+      try { process.kill(-pgid, "SIGKILL"); } catch { /* already gone */ }
+    }
+    _liveGroups.clear();
+  };
+  // `exit` fires when the event loop empties or process.exit() is called.
+  process.on("exit", kill);
+  // `beforeExit` fires when the loop is about to drain naturally.
+  process.on("beforeExit", kill);
+}
+
 const MAX_BUFFER = 64 * 1024 * 1024;
 
 /**
@@ -238,17 +259,28 @@ export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, pro
         env: {},
       };
     }
-    case "gemini":
+    case "gemini": {
       // gemini's `-p` IS the prompt in headless mode (it's appended to stdin if
       // any). A separate "task is on stdin" meta-instruction confused the model
-      // (it ignored stdin), so pass the full prompt as `-p`. Note: this puts the
-      // prompt in argv — very large gemini reviews could approach the OS argv
-      // limit; prefer another transport for huge inputs.
+      // (it ignored stdin), so pass the full prompt as `-p`. This puts the
+      // prompt in argv — guard against the OS E2BIG limit (128KB conservative
+      // floor; most platforms allow 200-260 KB).
+      const GEMINI_ARGV_SAFETY_LIMIT = 200_000;
+      const promptBytes = Buffer.byteLength(prompt, "utf8");
+      if (promptBytes > GEMINI_ARGV_SAFETY_LIMIT) {
+        throw new MultipolyError(
+          "INVALID_INPUT",
+          `gemini prompt is ${promptBytes} bytes, which risks OS argv limit. ` +
+            `Reduce the file set, raise MULTIPOLY_PER_FILE_CAP_BYTES to inline fewer files, ` +
+            `or use a different transport for large reviews.`,
+        );
+      }
       return {
         args: ["-m", model, "-o", "text", "--approval-mode", "plan", "-p", prompt],
         stdin: "",
         env: { GEMINI_CLI_TRUST_WORKSPACE: "true" },
       };
+    }
     case "agy":
       return {
         // No --model / --output-format / read-only mode on agy; weak sandbox
@@ -280,6 +312,7 @@ export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, pro
  * stdout, rejects with stdout/stderr attached on non-zero exit / timeout.
  */
 export function defaultExecFile(file, args, opts) {
+  _registerCleanup();
   return new Promise((resolve, reject) => {
     const child = spawn(file, args, {
       cwd: opts.cwd,
@@ -287,6 +320,11 @@ export function defaultExecFile(file, args, opts) {
       detached: true,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    // Track the process group for shutdown cleanup so a SIGKILL'd server
+    // doesn't orphan agent grandchildren.
+    _liveGroups.add(child.pid);
+    const untrack = () => _liveGroups.delete(child.pid);
+
     const stdout = [];
     const stderr = [];
     let outBytes = 0;
@@ -328,10 +366,12 @@ export function defaultExecFile(file, args, opts) {
     });
     child.on("error", (err) => {
       if (timer) clearTimeout(timer);
+      untrack();
       reject(err);
     });
     child.on("close", (code, signal) => {
       if (timer) clearTimeout(timer);
+      untrack();
       const out = Buffer.concat(stdout).toString(opts.encoding);
       const err = Buffer.concat(stderr).toString(opts.encoding);
       if (overflow) return reject(withIo(new Error("stdout maxBuffer exceeded"), out, err));

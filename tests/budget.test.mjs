@@ -30,6 +30,8 @@ test("budget: freeform with truncated non-empty content returns {truncated: true
 });
 
 test("budget: review with truncated content throws (JSON would be incomplete)", () => {
+  // Short truncated review JSON (< 64 chars) now triggers the too-short guard
+  // before the truncated-at-max_tokens path. Both are valid BUDGET errors.
   assert.throws(
     () =>
       assertContentBudget(
@@ -37,7 +39,7 @@ test("budget: review with truncated content throws (JSON would be incomplete)", 
         131072,
         "review",
       ),
-    (e) => e.code === "BUDGET" && /truncated at max_tokens/i.test(e.message),
+    (e) => e.code === "BUDGET" && /too short to be valid review JSON/i.test(e.message),
   );
 });
 

@@ -9,21 +9,37 @@
  */
 
 const PATTERNS = Object.freeze([
-  { name: "aws_access_key_id", re: /AKIA[0-9A-Z]{16}/ },
+  { name: "aws_access_key_id", re: /\b(AKIA|ASIA)[A-Z0-9]{16}\b/ },
   {
     name: "aws_secret_access_key",
     re: /aws_secret_access_key\s*=\s*["']?[A-Za-z0-9/+=]{40}["']?/i,
   },
-  { name: "github_token", re: /\bgh[pousr]_[A-Za-z0-9]{20,}\b/ },
+  // Full GitHub token family: classic (ghp_, gho_, ghu_, ghs_, ghr_) and
+  // fine-grained (github_pat_). Fine-grained tokens are longer and prefixed.
+  { name: "github_token", re: /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/ },
+  { name: "github_fine_grained_token", re: /\bgithub_pat_[A-Za-z0-9_]{20,}\b/ },
+  // Slack: user tokens (xoxp, xoxb, xoxa, xoxr, xoxs), bot tokens, and
+  // app-level tokens (xapp).
   { name: "slack_token", re: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },
+  { name: "slack_app_token", re: /\bxapp-[A-Za-z0-9-]{10,}\b/ },
   {
     name: "pem_private_key",
     re: /-----BEGIN (?:RSA |OPENSSH |EC |DSA )?PRIVATE KEY-----/,
   },
-  { name: "openai_style_sk_key", re: /\bsk-[A-Za-z0-9_\-]{20,}\b/ },
+  // SSH public keys — not a secret by themselves, but pairing is suspicious.
+  { name: "ssh_public_key", re: /(?:ssh-(?:rsa|dss|ed25519|ed448)|ecdsa-sha2-nistp(?:256|384|521))\s+[A-Za-z0-9+/=]{20,}/ },
+  // OpenAI / Anthropic / admin API keys: sk-, sk-proj-, sk-ant-, sk-admin-.
+  { name: "openai_style_sk_key", re: /\bsk-(?:proj-|ant-|admin-)?[A-Za-z0-9_\-]{20,}\b/ },
+  // .env-style unquoted assignment (splits on whitespace so it catches
+  // SECRET=rawvalue as well as quoted forms).
+  {
+    name: "env_style_secret",
+    re: /\b[A-Z0-9_]*(?:API|SECRET|TOKEN|PASSWORD|PASS|KEY)[A-Z0-9_]*\s*=\s*[^\s"']{16,}/i,
+  },
+  // Quoted assignment — JSON / YAML / TOML / .env with quotes.
   {
     name: "generic_api_secret_assignment",
-    re: /\b[A-Z0-9_]*(?:API|SECRET|TOKEN|PASSWORD|PASS)[A-Z0-9_]*\s*[:=]\s*["'][^"']{16,}["']/,
+    re: /\b[A-Z0-9_]*(?:API|SECRET|TOKEN|PASSWORD|PASS|KEY)[A-Z0-9_]*\s*[:=]\s*["'][^"']{16,}["']/i,
   },
 ]);
 

@@ -20,7 +20,9 @@ import { MultipolyError } from "./errors.mjs";
  * Throws BUDGET only when the result is unrecoverable:
  *   - Content is strictly empty (can't return anything useful), OR
  *   - mode is "review" and content was truncated (broken JSON can't be parsed
- *     into the required schema).
+ *     into the required schema), OR
+ *   - mode is "review" and content is too short to possibly be valid JSON
+ *     (1-2 token output from an exhausted budget).
  */
 export function assertContentBudget(attempt, maxTokens, mode, { modelKey, supportsThinking = true } = {}) {
   // Treat whitespace-only content as empty for the budget check. A " " or
@@ -42,6 +44,23 @@ export function assertContentBudget(attempt, maxTokens, mode, { modelKey, suppor
   const thinkingHint = supportsThinking ? ", reduce the number of files per call, or set MULTIPOLY_THINKING=off" : " or reduce the number of files per call";
   const emptyCause = supportsThinking ? " during reasoning" : "";
   const details = { finishReason: attempt.finishReason, usage: attempt.usage };
+
+  // In review mode, content that is non-empty but far too short to possibly
+  // be valid JSON against the schema is also unrecoverable. The minimum valid
+  // review output is ~65 chars:
+  //   {"schema_version":"1","findings":[],"summary_md":"x"}
+  // A model that produced only a few tokens before truncation should get a
+  // BUDGET error rather than a confusing SCHEMA error when the JSON parse or
+  // validation inevitably fails.
+  const MIN_REVIEW_CHARS = 64;
+  if (mode === "review" && !strictlyEmpty && /\S/.test(attempt.content) && attempt.content.trim().length < MIN_REVIEW_CHARS) {
+    throw new MultipolyError(
+      "BUDGET",
+      `model output is only ${attempt.content.trim().length} non-whitespace chars — too short to be valid review JSON (minimum ~65). ` +
+        `The model likely exhausted ${limitLabel} before producing content. Raise ${capHint}${thinkingHint}.`,
+      { details },
+    );
+  }
 
   if (strictlyEmpty && truncated) {
     throw new MultipolyError(

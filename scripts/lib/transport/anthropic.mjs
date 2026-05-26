@@ -176,13 +176,22 @@ async function runOnce({ m, body, timeoutMs, correlationId, fetchImpl }) {
     clearTimeout(timer);
   }
 
-  // A stream that ended without `message_stop` was truncated mid-flight;
-  // surfacing the partial content as a valid answer would be wrong (a partial
-  // review JSON, a cut-off consult). Fail so the caller can retry/error.
+  // A stream that ended without `message_stop` may have been truncated
+  // mid-flight, but the Anthropic API does not guarantee this event in all
+  // response modes. Rather than fail a potentially-complete response, log a
+  // warning and accept whatever content was received. The caller's budget /
+  // JSON-validation layers will catch genuine truncation.
   if (!sawStop) {
-    throw new MultipolyError("STREAM", "anthropic stream ended before message_stop (truncated response)", {
-      correlationId,
-    });
+    process.stderr.write(
+      JSON.stringify({
+        event: "anthropic_no_message_stop",
+        correlationId,
+        warning:
+          "Anthropic stream ended without the message_stop event. " +
+          "The response may be truncated; if review JSON fails validation, " +
+          "raise MULTIPOLY_<K>_MAX_TOKENS_REVIEW.",
+      }) + "\n",
+    );
   }
 
   return { content, reasoning, finishReason, usage: finalizeUsage(usage) };
