@@ -49,6 +49,7 @@ const FINDING_KEYS = new Set([
 ]);
 
 const SEVERITIES = new Set(["blocker", "high", "medium", "low", "nit"]);
+const MODEL_KEYS = Object.freeze(["glm", "qwen", "deepseek", "composer"]);
 
 /**
  * Validate a parsed object against the review schema (subset of fields we care about).
@@ -107,6 +108,43 @@ export function validateReview(obj) {
     }
     if (f.suggestion != null && typeof f.suggestion !== "string") {
       return { valid: false, reason: `findings[${i}].suggestion must be a string or null` };
+    }
+  }
+  return { valid: true };
+}
+
+export const COUNCIL_REVIEW_SCHEMA = Object.freeze({
+  type: "object",
+  additionalProperties: false,
+  required: ["schema_version", "synthesizer", "models", "findings", "summary_md"],
+  properties: {
+    schema_version: { type: "string", const: "1" },
+    synthesizer: { type: "string", enum: MODEL_KEYS },
+    models: {
+      type: "array",
+      items: { type: "string", enum: MODEL_KEYS },
+    },
+    findings: REVIEW_SCHEMA.properties.findings,
+    summary_md: { type: "string" },
+  },
+});
+
+export function validateCouncilReview(obj) {
+  const base = validateReview({
+    schema_version: obj?.schema_version,
+    findings: obj?.findings,
+    summary_md: obj?.summary_md,
+  });
+  if (!base.valid) return base;
+  if (!MODEL_KEYS.includes(obj.synthesizer)) {
+    return { valid: false, reason: `synthesizer invalid: ${JSON.stringify(obj.synthesizer)}` };
+  }
+  if (!Array.isArray(obj.models) || obj.models.length < 2) {
+    return { valid: false, reason: "models must contain at least two model keys" };
+  }
+  for (const m of obj.models) {
+    if (!MODEL_KEYS.includes(m)) {
+      return { valid: false, reason: `models contains invalid key: ${JSON.stringify(m)}` };
     }
   }
   return { valid: true };

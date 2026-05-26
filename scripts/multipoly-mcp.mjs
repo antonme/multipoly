@@ -24,6 +24,7 @@ import { GlmError, logError } from "./lib/errors.mjs";
 import { MODEL_KEYS, MODEL_INFO } from "./lib/models.mjs";
 import { handleModelReview } from "./lib/model-review.mjs";
 import { handleModelConsult } from "./lib/model-consult.mjs";
+import { handleCouncilReview, handleCouncilConsult } from "./lib/council.mjs";
 import { scan } from "./lib/secrets.mjs";
 
 const TIMEOUT_ARG_SCHEMA = {
@@ -184,17 +185,13 @@ function main() {
   }
 }
 
-async function handleCouncilUnavailable() {
-  throw new GlmError("INTERNAL", "council tools are not implemented yet");
-}
-
 const HANDLERS = Object.fromEntries([
   ...MODEL_KEYS.flatMap((key) => [
     [`${key}_review`, (input, ctx) => handleModelReview(key, input, ctx)],
     [`${key}_consult`, (input, ctx) => handleModelConsult(key, input, ctx)],
   ]),
-  ["council_review", handleCouncilUnavailable],
-  ["council_consult", handleCouncilUnavailable],
+  ["council_review", handleCouncilReview],
+  ["council_consult", handleCouncilConsult],
 ]);
 
 /**

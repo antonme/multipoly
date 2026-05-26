@@ -119,3 +119,43 @@ export function renderConsultUserMessage(prompt, files) {
   parts.push(prompt);
   return parts.join("\n\n");
 }
+
+export const COUNCIL_REVIEW_SYNTHESIS_PROMPT = `You are Qwen acting as a council chair.
+
+You will receive structured review outputs from multiple models. Merge them into one high-signal review.
+
+Rules:
+- Deduplicate overlapping findings.
+- Prefer correctness, security, data-loss, and production-risk issues over style.
+- Preserve material disagreements in summary_md.
+- Output STRICT JSON matching the provided schema. No prose outside JSON.`;
+
+export const COUNCIL_CONSULT_SYNTHESIS_PROMPT = `You are Qwen acting as a council chair.
+
+You will receive answers from multiple models. Produce one concise final answer.
+
+Rules:
+- Merge the best arguments.
+- Call out disagreements only when they affect the decision.
+- Do not average weak opinions into a vague compromise.
+- Use markdown with short sections or bullets.`;
+
+export function renderCouncilReviewSynthesisMessage({ originalPrompt, memberResults, schema }) {
+  return [
+    "# Original review request",
+    originalPrompt,
+    "# Member review outputs",
+    JSON.stringify(memberResults, null, 2),
+    "# Required output schema",
+    JSON.stringify(schema, null, 2),
+  ].join("\n\n");
+}
+
+export function renderCouncilConsultSynthesisMessage({ originalPrompt, memberResults }) {
+  return [
+    "# Original consult request",
+    originalPrompt,
+    "# Member consult outputs",
+    JSON.stringify(memberResults, null, 2),
+  ].join("\n\n");
+}

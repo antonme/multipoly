@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { validateReview } from "../scripts/lib/schema.mjs";
+import { validateReview, validateCouncilReview } from "../scripts/lib/schema.mjs";
 
 const valid = {
   schema_version: "1",
@@ -100,4 +100,27 @@ test("schema: end_line without line rejected (impossible range)", () => {
   });
   assert.equal(r.valid, false);
   assert.match(r.reason, /end_line requires line/);
+});
+
+test("schema: council review requires synthesizer and at least two models", () => {
+  assert.deepEqual(
+    validateCouncilReview({
+      schema_version: "1",
+      synthesizer: "qwen",
+      models: ["glm", "qwen"],
+      findings: [],
+      summary_md: "ok",
+    }),
+    { valid: true },
+  );
+
+  const tooFew = validateCouncilReview({
+    schema_version: "1",
+    synthesizer: "qwen",
+    models: ["glm"],
+    findings: [],
+    summary_md: "ok",
+  });
+  assert.equal(tooFew.valid, false);
+  assert.match(tooFew.reason, /at least two/);
 });
