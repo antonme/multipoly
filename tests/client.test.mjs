@@ -38,6 +38,16 @@ const baseConfig = {
   baseUrl: "https://api.test/v1",
   apiKey: "k",
   model: "glm-5.1",
+  models: {
+    glm: {
+      configured: true,
+      key: "glm",
+      displayName: "GLM",
+      baseUrl: "https://api.test/v1",
+      apiKey: "k",
+      model: "glm-5.1",
+    },
+  },
   thinking: "mode-default",
   timeoutMs: 5000,
   maxTokens: { review: 8192, consult: 16384, freeform: 16384 },
@@ -48,6 +58,7 @@ test("client: happy path streams content", async () => {
   const fetchImpl = makeFetch({});
   const out = await streamChatCompletion({
     config: baseConfig,
+    modelKey: "glm",
     messages: [{ role: "user", content: "hi" }],
     mode: "consult",
     fetchImpl,
@@ -60,10 +71,39 @@ test("client: happy path streams content", async () => {
   assert.deepEqual(sent.thinking, { type: "disabled" }); // consult default off
 });
 
+test("client: sends request to selected model config", async () => {
+  const fetchImpl = makeFetch({});
+  const out = await streamChatCompletion({
+    config: {
+      ...baseConfig,
+      models: {
+        qwen: {
+          configured: true,
+          key: "qwen",
+          displayName: "Qwen",
+          baseUrl: "https://qwen.example/v1",
+          apiKey: "qwen-key",
+          model: "qwen3.7max",
+        },
+      },
+    },
+    modelKey: "qwen",
+    messages: [{ role: "user", content: "hi" }],
+    mode: "consult",
+    fetchImpl,
+  });
+  assert.equal(out.content, "ok");
+  assert.equal(fetchImpl.calls[0].url, "https://qwen.example/v1/chat/completions");
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.equal(sent.model, "qwen3.7max");
+  assert.equal(fetchImpl.calls[0].opts.headers.authorization, "Bearer qwen-key");
+});
+
 test("client: review mode enables thinking by default", async () => {
   const fetchImpl = makeFetch({});
   await streamChatCompletion({
     config: baseConfig,
+    modelKey: "glm",
     messages: [{ role: "user", content: "x" }],
     mode: "review",
     fetchImpl,
@@ -76,6 +116,7 @@ test("client: GLM_THINKING=auto omits thinking field", async () => {
   const fetchImpl = makeFetch({});
   await streamChatCompletion({
     config: { ...baseConfig, thinking: "auto" },
+    modelKey: "glm",
     messages: [{ role: "user", content: "x" }],
     mode: "review",
     fetchImpl,
@@ -90,6 +131,7 @@ test("client: 401 fails fast (no retry)", async () => {
     () =>
       streamChatCompletion({
         config: baseConfig,
+        modelKey: "glm",
         messages: [{ role: "user", content: "x" }],
         mode: "consult",
         fetchImpl,
@@ -113,6 +155,7 @@ test("client: 429 retries with backoff", async () => {
   };
   const out = await streamChatCompletion({
     config: { ...baseConfig, timeoutMs: 2000 },
+    modelKey: "glm",
     messages: [{ role: "user", content: "x" }],
     mode: "consult",
     fetchImpl,
@@ -138,6 +181,7 @@ test("client: 429 with Retry-After > cap fails fast (no retry)", async () => {
     () =>
       streamChatCompletion({
         config: { ...baseConfig, timeoutMs: 2000 },
+        modelKey: "glm",
         messages: [{ role: "user", content: "x" }],
         mode: "consult",
         fetchImpl,
@@ -170,6 +214,7 @@ test("client: 429 with Retry-After within cap is honored (not silently clamped)"
   };
   const out = await streamChatCompletion({
     config: { ...baseConfig, timeoutMs: 10_000 },
+    modelKey: "glm",
     messages: [{ role: "user", content: "x" }],
     mode: "consult",
     fetchImpl,
@@ -184,6 +229,7 @@ test("client: unknown 400 does NOT fall back from json_schema", async () => {
     () =>
       streamChatCompletion({
         config: baseConfig,
+        modelKey: "glm",
         messages: [{ role: "user", content: "x" }],
         mode: "review",
         responseFormat: { type: "json_schema", json_schema: {} },
@@ -210,6 +256,7 @@ test("client: explicit 'json_schema not supported' triggers fallback", async () 
   };
   const out = await streamChatCompletion({
     config: baseConfig,
+    modelKey: "glm",
     messages: [{ role: "user", content: "x" }],
     mode: "review",
     responseFormat: { type: "json_schema", json_schema: { name: "x", schema: {} } },
@@ -233,6 +280,7 @@ test("client: timeout aborts", async () => {
     () =>
       streamChatCompletion({
         config: { ...baseConfig, timeoutMs: 50 },
+        modelKey: "glm",
         messages: [{ role: "user", content: "x" }],
         mode: "consult",
         fetchImpl,
@@ -255,6 +303,7 @@ test("client: per-call timeoutMs overrides config.timeoutMs", async () => {
     () =>
       streamChatCompletion({
         config: { ...baseConfig, timeoutMs: 60_000 },
+        modelKey: "glm",
         messages: [{ role: "user", content: "x" }],
         mode: "consult",
         timeoutMs: 80,
@@ -284,6 +333,7 @@ test("client: timeout aborts stalled body after headers", async () => {
     () =>
       streamChatCompletion({
         config: { ...baseConfig, timeoutMs: 100 },
+        modelKey: "glm",
         messages: [{ role: "user", content: "x" }],
         mode: "consult",
         fetchImpl,

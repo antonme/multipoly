@@ -26,6 +26,16 @@ const baseConfig = {
   baseUrl: "https://api.test/v1",
   apiKey: "k",
   model: "glm-5.1",
+  models: {
+    glm: {
+      configured: true,
+      key: "glm",
+      displayName: "GLM",
+      baseUrl: "https://api.test/v1",
+      apiKey: "k",
+      model: "glm-5.1",
+    },
+  },
   thinking: "mode-default",
   timeoutMs: 5000,
   maxTokens: { review: 8192, consult: 16384, freeform: 16384 },
@@ -48,6 +58,7 @@ test("client: falls back from json_schema to json_object on 'not implemented'", 
   ]);
   const out = await streamChatCompletion({
     config: baseConfig,
+    modelKey: "glm",
     messages: [{ role: "user", content: "x" }],
     mode: "consult",
     responseFormat: { type: "json_schema", json_schema: { name: "x", schema: {}, strict: true } },
@@ -77,6 +88,7 @@ test("client: falls back on 'response_format not available' without the literal 
   ]);
   const out = await streamChatCompletion({
     config: baseConfig,
+    modelKey: "glm",
     messages: [{ role: "user", content: "x" }],
     mode: "consult",
     responseFormat: { type: "json_schema", json_schema: { name: "x", schema: {}, strict: true } },
@@ -98,6 +110,7 @@ test("client: does NOT fall back on 'unsupported property' client-side schema bu
   await assert.rejects(
     streamChatCompletion({
       config: baseConfig,
+      modelKey: "glm",
       messages: [{ role: "user", content: "x" }],
       mode: "consult",
       responseFormat: { type: "json_schema", json_schema: { name: "x", schema: {}, strict: true } },
@@ -121,6 +134,7 @@ test("client: does NOT fall back on client-side 'invalid response_format' errors
   await assert.rejects(
     streamChatCompletion({
       config: baseConfig,
+      modelKey: "glm",
       messages: [{ role: "user", content: "x" }],
       mode: "consult",
       responseFormat: { type: "json_schema", json_schema: { name: "x", schema: {}, strict: true } },

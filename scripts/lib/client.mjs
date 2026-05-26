@@ -6,6 +6,7 @@ import { parseSseStream } from "./sse.mjs";
  *
  * @param {object} args
  * @param {object} args.config — loaded config object
+ * @param {string} args.modelKey — configured model key to call
  * @param {Array<{role:string,content:string}>} args.messages
  * @param {"review"|"consult"|"freeform"} args.mode
  * @param {object} [args.responseFormat] — e.g. {type:"json_schema", json_schema:{name,schema,strict:true}}
@@ -15,6 +16,7 @@ import { parseSseStream } from "./sse.mjs";
  */
 export async function streamChatCompletion({
   config,
+  modelKey,
   messages,
   mode,
   responseFormat,
@@ -27,6 +29,28 @@ export async function streamChatCompletion({
   // env-derived config.timeoutMs. Both are the upstream stream inactivity
   // budget — not the MCP client's tool-call timeout, which sits above us.
   const effectiveTimeoutMs = timeoutMs ?? config.timeoutMs;
+  const effectiveModelKey = modelKey ?? "glm";
+  const legacyModelConfig = {
+    configured: true,
+    key: "glm",
+    displayName: "GLM 5.1",
+    baseUrl: config.baseUrl,
+    apiKey: config.apiKey,
+    model: config.model,
+    missing: [],
+  };
+  const modelConfig = config.models
+    ? config.models[effectiveModelKey]
+    : legacyModelConfig;
+
+  if (!modelConfig?.configured) {
+    const missing = modelConfig?.missing ?? [`unknown model ${effectiveModelKey}`];
+    throw new GlmError(
+      "CONFIG",
+      `${effectiveModelKey} is not configured: missing ${missing.join(", ")}`,
+      { details: { model: effectiveModelKey, missing } },
+    );
+  }
 
   // Resolve effective thinking.
   let wantThinking;
@@ -44,7 +68,7 @@ export async function streamChatCompletion({
   }
 
   const body = {
-    model: config.model,
+    model: modelConfig.model,
     messages,
     stream: true,
     max_tokens: config.maxTokens[mode],
@@ -59,8 +83,8 @@ export async function streamChatCompletion({
     const reqBody = { ...body };
     if (rf) reqBody.response_format = rf;
     return callWithRetry({
-      url: `${config.baseUrl}/chat/completions`,
-      apiKey: config.apiKey,
+      url: `${modelConfig.baseUrl}/chat/completions`,
+      apiKey: modelConfig.apiKey,
       body: reqBody,
       timeoutMs: effectiveTimeoutMs,
       correlationId,
@@ -96,7 +120,11 @@ export async function streamChatCompletion({
   let finishReason = null;
   let usage = null;
 
-  const progress = new ProgressReporter(config.progress, mode, correlationId);
+  const progress = new ProgressReporter(
+    config.progress,
+    `${effectiveModelKey}:${mode}`,
+    correlationId,
+  );
   progress.start();
 
   try {
