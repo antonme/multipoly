@@ -1,7 +1,7 @@
 import { MultipolyError } from "./errors.mjs";
 import { gatherReview } from "./gather.mjs";
 import { scanMany, formatHitsForError } from "./secrets.mjs";
-import { streamChatCompletion } from "./client.mjs";
+import { runModel } from "./run-model.mjs";
 import {
   REVIEW_SYSTEM_PROMPT,
   REVIEW_JSON_ONLY_PREFIX,
@@ -52,7 +52,7 @@ export async function prepareReview(input, { config, cwd = process.cwd() } = {})
   };
 }
 
-export async function runPreparedReview(modelKey, prepared, { config, fetchImpl } = {}) {
+export async function runPreparedReview(modelKey, prepared, { config, fetchImpl, execFileImpl } = {}) {
   const responseFormat = {
     type: "json_schema",
     json_schema: {
@@ -62,7 +62,7 @@ export async function runPreparedReview(modelKey, prepared, { config, fetchImpl 
     },
   };
 
-  const attempt1 = await streamChatCompletion({
+  const attempt1 = await runModel({
     config,
     modelKey,
     messages: prepared.messages,
@@ -70,6 +70,7 @@ export async function runPreparedReview(modelKey, prepared, { config, fetchImpl 
     responseFormat,
     timeoutMs: prepared.timeoutMs,
     fetchImpl,
+    execFileImpl,
   });
 
   const maxTokens = resolveMaxTokensForModel(config, modelKey, "review");
@@ -85,7 +86,7 @@ export async function runPreparedReview(modelKey, prepared, { config, fetchImpl 
   let reasoning = attempt1.reasoning;
   if (!validation.valid) {
     const attempt1Echo = safeTruncate(attempt1.content, 8192);
-    const attempt2 = await streamChatCompletion({
+    const attempt2 = await runModel({
       config,
       modelKey,
       messages: [
@@ -102,6 +103,7 @@ export async function runPreparedReview(modelKey, prepared, { config, fetchImpl 
       responseFormat: attempt1.fellBackFromJsonSchema ? { type: "json_object" } : responseFormat,
       timeoutMs: prepared.timeoutMs,
       fetchImpl,
+      execFileImpl,
     });
     assertContentBudget(attempt2, maxTokens, "review", budgetContext);
     if (attempt2.reasoning) reasoning = attempt2.reasoning;
