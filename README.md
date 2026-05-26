@@ -1,24 +1,23 @@
-# Multipoly — Claude Code multimodel MCP plugin
+# multipoly - multimodel MCP plugin
 
-Use multiple coding models from Claude Code (or any other MCP-aware client, e.g. opencode) for code review, design consultation, and council-style synthesis. This baseline still exposes the inherited GLM-backed tools while the multimodel behavior is built out.
+Multipoly exposes multiple coding models through one MCP server. It supports direct model-specific review/consult tools and council tools that run multiple models in parallel and synthesize with Qwen.
 
-Three tools:
+## Tools
 
-| Tool | Purpose | Output |
-|---|---|---|
-| `glm_review` | Structured code review over a git diff or file list | JSON |
-| `glm_consult` | Second opinion on a design/implementation question, with optional attached files | Markdown |
-| `glm_freeform` | Free-form single-shot prompt (escape hatch) | Markdown |
+| Tool family | Purpose |
+|---|---|
+| `glm_review`, `qwen_review`, `deepseek_review`, `composer_review` | Structured code review from one model |
+| `glm_consult`, `qwen_consult`, `deepseek_consult`, `composer_consult` | Design/implementation consultation from one model |
+| `council_review`, `council_consult` | Parallel member calls plus Qwen synthesis |
 
 ## Install
 
-### Local (for development on this repo)
+### Local Development
 
 ```sh
 cd ~/dev/multipoly
 npm install
-# Health check (validates env and endpoint resolution)
-node scripts/multipoly-mcp.mjs --health
+MULTIPOLY_GLM_API_KEY=dummy npm run health
 ```
 
 Register with Claude Code:
@@ -37,9 +36,9 @@ Or register as a local plugin in `~/.claude/settings.json`:
 }
 ```
 
-### With opencode
+### With Opencode
 
-Opencode is an MCP client. Register the same MCP server via opencode's MCP config (see `opencode mcp add --help`):
+Opencode is an MCP client. Register the same MCP server via opencode's MCP config:
 
 ```sh
 opencode mcp add multipoly -- node /Users/anton/dev/multipoly/scripts/multipoly-mcp.mjs
@@ -47,63 +46,65 @@ opencode mcp add multipoly -- node /Users/anton/dev/multipoly/scripts/multipoly-
 
 ## Configuration
 
-All via env vars. Required: an API key.
+Configure any subset of models. A model-specific tool returns a typed config error when its model is not configured. Council tools default to all configured models and require at least two successful member results.
+
+| Model | Required env |
+|---|---|
+| GLM | `MULTIPOLY_GLM_API_KEY`; optional `MULTIPOLY_GLM_BASE_URL`, `MULTIPOLY_GLM_MODEL` |
+| Qwen | `MULTIPOLY_QWEN_API_KEY`, `MULTIPOLY_QWEN_BASE_URL`; optional `MULTIPOLY_QWEN_MODEL` |
+| DeepSeek | `MULTIPOLY_DEEPSEEK_API_KEY`, `MULTIPOLY_DEEPSEEK_BASE_URL`; optional `MULTIPOLY_DEEPSEEK_MODEL` |
+| Composer | `MULTIPOLY_COMPOSER_API_KEY`, `MULTIPOLY_COMPOSER_BASE_URL`; optional `MULTIPOLY_COMPOSER_MODEL` |
+
+GLM also accepts legacy `GLM_API_KEY` and `ZHIPU_API_KEY` for compatibility.
+
+Server-wide settings:
 
 | Var | Default | Notes |
 |---|---|---|
-| `GLM_API_KEY` | — | Required (or use `ZHIPU_API_KEY`). |
-| `ZHIPU_API_KEY` | — | Fallback for `GLM_API_KEY` — matches opencode's convention so existing setups work. |
-| `GLM_MODEL` | `glm-5.1` | Any Z.AI or Bigmodel model id. |
-| `GLM_ENDPOINT` | `zai-coding-plan` | One of `zai-coding-plan`, `bigmodel-cn`, `custom`. |
-| `GLM_BASE_URL` | — | Required when `GLM_ENDPOINT=custom`. |
-| `GLM_THINKING` | mode-default | `on` / `off` / `auto`. Default: on for review, off for consult/freeform. |
-| `GLM_MAX_TOKENS_REVIEW` | 131072 | GLM 5.1's published output ceiling. Reasoning + content share this budget in thinking mode. |
-| `GLM_MAX_TOKENS_CONSULT` | 131072 | |
-| `GLM_MAX_TOKENS_FREEFORM` | 131072 | |
-| `GLM_TIMEOUT_MS` | 600000 | Inactivity timeout (ms), range `[1, 3600000]`. The timer fires only if the upstream goes silent for this long; every SSE chunk (including reasoning deltas) resets it. A long-thinking review that keeps streaming will not trip it. Overridable per call via the `timeout_ms` argument. **This bounds only the GLM↔upstream stream — the MCP client (Claude Code / Codex / opencode) imposes its own tool-call timeout on top; see [Client-side timeout](#client-side-timeout).** |
-| `GLM_PROGRESS` | `heartbeat` | Live progress on stderr: `off` (silent), `heartbeat` (short summary every 3s), `reasoning` (streams the model's thinking tokens as they arrive). |
-| `GLM_PER_FILE_CAP_BYTES` | 262144 | Review mode: files larger than this are omitted. |
-| `GLM_TOTAL_CAP_BYTES` | 1572864 | Review mode: total bytes of inlined content. |
-| `GLM_FILE_COUNT_CAP` | 50 | Review mode. |
-| `GLM_ALLOW_SECRETS` | 0 | Override the secret scanner (unsafe). |
-| `GLM_DEBUG_REASONING` | 0 | Surface `reasoning_content` as a second text block. |
+| `MULTIPOLY_THINKING` | mode-default | `on` / `off` / `auto`. Default: on for review, off for consult. |
+| `MULTIPOLY_MAX_TOKENS_REVIEW` | 131072 | Output-token cap for review and council review synthesis. |
+| `MULTIPOLY_MAX_TOKENS_CONSULT` | 131072 | Output-token cap for consult and council consult synthesis. |
+| `MULTIPOLY_TIMEOUT_MS` | 600000 | Upstream stream inactivity timeout in ms, range `[1, 3600000]`. |
+| `MULTIPOLY_PROGRESS` | `heartbeat` | `off`, `heartbeat`, or `reasoning` progress output on stderr. |
+| `MULTIPOLY_PER_FILE_CAP_BYTES` | 262144 | Review mode: files larger than this are omitted. |
+| `MULTIPOLY_TOTAL_CAP_BYTES` | 1572864 | Review mode: total bytes of inlined content. |
+| `MULTIPOLY_FILE_COUNT_CAP` | 50 | Review mode file count cap. |
+| `MULTIPOLY_ALLOW_SECRETS` | 0 | Override the secret scanner after explicit user consent. |
+| `MULTIPOLY_DEBUG_REASONING` | 0 | Surface `reasoning_content` as a second text block. |
 
-The plugin will work out of the box if you already use opencode with Z.AI:
+Legacy `GLM_*` names are still accepted for server-wide settings during migration.
 
-```sh
-# Already-exported opencode env is enough
-export ZHIPU_API_KEY="$(opencode ... )"  # or however you set it
-```
+## Tool Reference
 
-## Tool reference
-
-### `glm_review`
+### Review Tools
 
 ```jsonc
-// Either diff_base OR paths (exactly one):
+// Either diff_base OR paths, exactly one:
 {
-  "diff_base": "main",          // diff HEAD against this ref
-  "focus": "concurrency safety" // optional steering
+  "diff_base": "main",
+  "focus": "concurrency safety",
+  "timeout_ms": 540000
 }
-// or
+```
+
+```jsonc
 {
   "paths": ["src/foo.ts", "src/bar.ts"],
   "focus": "API shape",
-  "timeout_ms": 540000 // optional per-call inactivity timeout override
+  "timeout_ms": 540000
 }
 ```
-
-All three tools accept an optional `timeout_ms` (integer, `[1, 3600000]`) that overrides `GLM_TIMEOUT_MS` for that single call.
 
 Returns JSON:
 
 ```jsonc
 {
   "schema_version": "1",
+  "model": "qwen",
   "findings": [
-    { "severity": "high", "path": "src/foo.ts", "line": 42, "message": "…", "suggestion": "…" }
+    { "severity": "high", "path": "src/foo.ts", "line": 42, "message": "...", "suggestion": "..." }
   ],
-  "summary_md": "## Summary\n- …",
+  "summary_md": "## Summary\n- ...",
   "truncated": false,
   "files": [
     { "path": "src/foo.ts", "status": "inlined" },
@@ -112,36 +113,40 @@ Returns JSON:
 }
 ```
 
-### `glm_consult`
+### Consult Tools
 
 ```jsonc
 {
   "prompt": "Is using a global lock here reasonable given X and Y?",
-  "paths": ["src/lock.ts"], // optional attached context
-  "timeout_ms": 540000      // optional
+  "paths": ["src/lock.ts"],
+  "timeout_ms": 540000
 }
 ```
 
 Returns markdown.
 
-### `glm_freeform`
+### Council Tools
+
+Council tools accept the same review/consult arguments plus:
 
 ```jsonc
-{ "prompt": "…", "timeout_ms": 540000 /* optional */ }
+{
+  "models": ["glm", "qwen"],
+  "synthesizer": "qwen",
+  "include_individual_results": false
+}
 ```
 
-Returns markdown.
+`models` defaults to all configured models. `synthesizer` defaults to `qwen`.
 
-## Client-side timeout
+## Client-Side Timeout
 
-`GLM_TIMEOUT_MS` / `timeout_ms` only govern the GLM↔upstream HTTP stream. The
-MCP **client** that launched this server enforces its own, separate tool-call
-timeout — and a long GLM 5.1 thinking review can easily exceed a client default:
+`MULTIPOLY_TIMEOUT_MS` / `timeout_ms` only govern the model upstream HTTP stream. The MCP client that launched this server enforces its own separate tool-call timeout, and long thinking reviews can exceed a client default.
 
 | Client | Setting | Default | How to raise |
 |---|---|---|---|
-| **Codex CLI** | `tool_timeout_sec` under `[mcp_servers.<id>]` in `~/.codex/config.toml` | 60s | Set `tool_timeout_sec = 600` (seconds, not ms) |
-| Claude Code | `MCP_TOOL_TIMEOUT` env (ms) | ~60s | Export `MCP_TOOL_TIMEOUT=600000` |
+| Codex CLI | `tool_timeout_sec` under `[mcp_servers.<id>]` in `~/.codex/config.toml` | 60s | Set `tool_timeout_sec = 600` |
+| Claude Code | `MCP_TOOL_TIMEOUT` env in ms | about 60s | Export `MCP_TOOL_TIMEOUT=600000` |
 
 Example `~/.codex/config.toml`:
 
@@ -153,30 +158,29 @@ startup_timeout_sec = 15
 tool_timeout_sec = 600
 ```
 
-If the client kills the call first, no server-side setting can save it —
-raise the client timeout, lower `timeout_ms` to fail fast, or split the
-review into smaller calls.
+If the client kills the call first, no server-side setting can save it. Raise the client timeout, lower `timeout_ms` to fail fast, or split the review into smaller calls.
 
-## Slash commands
+## Slash Commands
 
-- `/glm-review [base-ref]` — defaults to `main`.
-- `/glm-consult <question>` — open-ended consultation.
-- `/glm <prompt>` — escape hatch.
+- `/glm-review [base-ref]`, `/qwen-review [base-ref]`, `/deepseek-review [base-ref]`, `/composer-review [base-ref]`
+- `/glm-consult <question>`, `/qwen-consult <question>`, `/deepseek-consult <question>`, `/composer-consult <question>`
+- `/council-review [base-ref]`
+- `/council-consult <question>`
 
 ## Safety
 
-- All git/file operations use `execFile` with arg arrays (no shell), real-path containment against the repo root, atomic-per-file caps, and binary detection.
-- Payloads are pre-scanned for common secret shapes (AWS, GH, Slack, PEM, generic API_KEY). Hits refuse the request by default; matched bytes are never echoed to output or logs. Override with `GLM_ALLOW_SECRETS=1`.
-- All HTTP calls use an `AbortController` timeout; 401/403 fail fast, 429/5xx use exponential backoff (max 3 retries) honoring `Retry-After`.
+- All git/file operations use `execFile` with arg arrays, real-path containment against the repo root, atomic per-file caps, and binary detection.
+- Payloads are pre-scanned for common secret shapes. Hits refuse the request by default; matched bytes are never echoed to output or logs. Override only with explicit user consent.
+- All HTTP calls use an `AbortController` timeout; 401/403 fail fast, and 429/5xx use exponential backoff with bounded `Retry-After` handling.
 
 ## Development
 
 ```sh
-npm test        # node:test against pure modules + git-backed fixtures
-npm run health  # load config + print redacted summary
-npm run start   # launch the MCP server over stdio (for piping tests)
+npm test
+npm run health
+npm run start
 ```
 
 ## Status
 
-v0.1.0 — initial release. See `docs/superpowers/specs/` for the design spec and `docs/superpowers/plans/` for the implementation plan.
+v0.1.0 - multimodel fork in active development. See `docs/superpowers/specs/` for design context and `docs/superpowers/plans/` for the implementation plan.
