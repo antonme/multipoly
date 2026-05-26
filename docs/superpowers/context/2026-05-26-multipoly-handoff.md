@@ -109,14 +109,19 @@ Task 1 review status:
 
 - Spec compliance review: approved, no findings.
 - Code quality review: initially found stale package identity in `package-lock.json`.
-- Follow-up fix: `package-lock.json` top-level and root package names were changed from `glm-mcp` to `multipoly-mcp`.
+- Follow-up fix commit: `2c81325 fix: sync multipoly lockfile metadata`.
+- Code quality re-review: approved, no remaining findings.
 
-Task 1 is ready for follow-up verification after the package-lock fix:
+Task 1 verification after the package-lock fix:
 
 ```bash
 GLM_API_KEY=dummy npm run health
 npm test
 ```
+
+Result: passed, 123 tests, 0 failures.
+
+Task 1 can be treated as complete. Continue with Task 2 in the implementation plan.
 
 ## Important Implementation Notes
 
