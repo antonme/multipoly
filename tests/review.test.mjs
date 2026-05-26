@@ -64,6 +64,16 @@ const baseConfig = {
   baseUrl: "https://api.test/v1",
   apiKey: "k",
   model: "glm-5.1",
+  models: {
+    glm: {
+      configured: true,
+      key: "glm",
+      displayName: "GLM",
+      baseUrl: "https://api.test/v1",
+      apiKey: "k",
+      model: "glm-5.1",
+    },
+  },
   thinking: "mode-default",
   timeoutMs: 5000,
   maxTokens: { review: 8192, consult: 16384, freeform: 16384 },
@@ -95,6 +105,7 @@ test("review: happy path — valid JSON passes on first attempt, server-authorit
       { config: baseConfig, fetchImpl },
     );
     assert.equal(out.result.schema_version, "1");
+    assert.equal(out.result.model, "glm");
     assert.deepEqual(
       out.result.findings[0],
       {
