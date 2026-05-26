@@ -1,5 +1,16 @@
 import { MultipolyError } from "./errors.mjs";
-import { MODEL_KEYS, envPrefixForModel, firstNonEmpty, loadModelRegistry } from "./models.mjs";
+import {
+  MODEL_KEYS,
+  envPrefixForModel,
+  firstNonEmpty,
+  loadModelRegistry,
+  CLI_KINDS,
+  ANTHROPIC_VERSION,
+} from "./models.mjs";
+
+// An environment variable NAME (not value): used to validate authTokenEnv,
+// which names the env var whose value a cli transport injects into the child.
+const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const ENDPOINT_PROFILES = Object.freeze({
   "zai-coding-plan": "https://api.z.ai/api/coding/paas/v4",
@@ -122,7 +133,53 @@ function resolveLegacyGlmBaseUrl(env) {
   );
 }
 
+// Compute the per-model review/consult max_tokens caps. GLM inherits the
+// output ceiling by default; other models default to undefined unless the
+// server-wide cap was set explicitly. Shared across all transports.
+function resolveModelMaxTokens(env, key, prefix, serverMaxTokens) {
+  const review = parseInteger(
+    env[`${prefix}_MAX_TOKENS_REVIEW`],
+    key === "glm" || serverMaxTokens.explicit.review ? serverMaxTokens.values.review : undefined,
+  );
+  const consult = parseInteger(
+    env[`${prefix}_MAX_TOKENS_CONSULT`],
+    key === "glm" || serverMaxTokens.explicit.consult ? serverMaxTokens.values.consult : undefined,
+  );
+  return Object.freeze({ review, consult });
+}
+
+function validateEnvVarName(raw, label) {
+  const v = String(raw).trim();
+  if (!ENV_NAME_RE.test(v)) {
+    throw new MultipolyError(
+      "CONFIG",
+      `${label} must be a valid environment variable NAME (letters/digits/underscore, no leading digit), got ${JSON.stringify(raw)}`,
+    );
+  }
+  return v;
+}
+
+function parseCwdMode(raw, label) {
+  const v = (raw || "").trim().toLowerCase();
+  if (!v) return "repo";
+  if (v !== "repo" && v !== "temp") {
+    throw new MultipolyError("CONFIG", `${label} must be 'repo' or 'temp', got ${JSON.stringify(raw)}`);
+  }
+  return v;
+}
+
+// Dispatch per-model config loading by the registry-declared transport. Each
+// branch returns a frozen config with a `transport` discriminant the runModel
+// dispatcher reads. http = OpenAI-compatible; anthropic = native Messages;
+// cli = local read-only agent subprocess.
 function loadOneModelConfig(env, key, info, serverMaxTokens) {
+  const transport = info.transport ?? "http";
+  if (transport === "anthropic") return loadAnthropicModelConfig(env, key, info, serverMaxTokens);
+  if (transport === "cli") return loadCliModelConfig(env, key, info, serverMaxTokens);
+  return loadHttpModelConfig(env, key, info, serverMaxTokens);
+}
+
+function loadHttpModelConfig(env, key, info, serverMaxTokens) {
   const prefix = envPrefixForModel(key);
   const explicitModelBaseUrl = (env[`${prefix}_BASE_URL`] || "").trim();
   const explicitLegacyGlmBaseUrl = key === "glm" ? (env.GLM_BASE_URL || "").trim() : "";
@@ -152,15 +209,7 @@ function loadOneModelConfig(env, key, info, serverMaxTokens) {
     env[`${prefix}_MODEL`] ||
     (key === "glm" ? env.GLM_MODEL : null) ||
     info.defaultModel;
-  const reviewMaxTokens = parseInteger(
-    env[`${prefix}_MAX_TOKENS_REVIEW`],
-    key === "glm" || serverMaxTokens.explicit.review ? serverMaxTokens.values.review : undefined,
-  );
-  const consultMaxTokens = parseInteger(
-    env[`${prefix}_MAX_TOKENS_CONSULT`],
-    key === "glm" || serverMaxTokens.explicit.consult ? serverMaxTokens.values.consult : undefined,
-  );
-  const maxTokens = Object.freeze({ review: reviewMaxTokens, consult: consultMaxTokens });
+  const maxTokens = resolveModelMaxTokens(env, key, prefix, serverMaxTokens);
   const missing = [];
 
   if (!baseUrlRaw) missing.push(`${prefix}_BASE_URL`);
@@ -171,6 +220,7 @@ function loadOneModelConfig(env, key, info, serverMaxTokens) {
     return Object.freeze({
       key,
       displayName: info.displayName,
+      transport: "http",
       configured: false,
       missing: Object.freeze(missing),
       model,
@@ -184,12 +234,107 @@ function loadOneModelConfig(env, key, info, serverMaxTokens) {
   return Object.freeze({
     key,
     displayName: info.displayName,
+    transport: "http",
     configured: true,
     missing: Object.freeze([]),
     model,
     baseUrl: validateCustomBaseUrl(baseUrlRaw, baseUrlLabel),
     apiKey: keyHit.value,
     apiKeyEnv: keyHit.name,
+    supportsThinking: Boolean(info.supportsThinking),
+    maxTokens,
+  });
+}
+
+function loadAnthropicModelConfig(env, key, info, serverMaxTokens) {
+  const prefix = envPrefixForModel(key);
+  const explicitModelBaseUrl = (env[`${prefix}_BASE_URL`] || "").trim();
+  const globalAnthropicBaseUrl = (env.ANTHROPIC_BASE_URL || "").trim();
+  const baseUrlRaw = explicitModelBaseUrl || globalAnthropicBaseUrl || info.defaultBaseUrl;
+  const baseUrlLabel = explicitModelBaseUrl
+    ? `${prefix}_BASE_URL`
+    : globalAnthropicBaseUrl
+      ? "ANTHROPIC_BASE_URL"
+      : `${prefix}_BASE_URL`;
+  const model = env[`${prefix}_MODEL`] || info.defaultModel;
+  const keyHit = firstNonEmpty(env, info.apiKeyEnv);
+  const maxTokens = resolveModelMaxTokens(env, key, prefix, serverMaxTokens);
+
+  const missing = [];
+  if (!baseUrlRaw) missing.push(`${prefix}_BASE_URL`);
+  if (!model) missing.push(`${prefix}_MODEL`);
+  if (!keyHit) missing.push(info.apiKeyEnv.join(" or "));
+
+  const common = {
+    key,
+    displayName: info.displayName,
+    transport: "anthropic",
+    model,
+    anthropicVersion: ANTHROPIC_VERSION,
+    supportsThinking: Boolean(info.supportsThinking),
+    maxTokens,
+  };
+  if (missing.length > 0) {
+    return Object.freeze({
+      ...common,
+      configured: false,
+      missing: Object.freeze(missing),
+      baseUrl: baseUrlRaw ? validateCustomBaseUrl(baseUrlRaw, baseUrlLabel) : null,
+      apiKey: null,
+    });
+  }
+  return Object.freeze({
+    ...common,
+    configured: true,
+    missing: Object.freeze([]),
+    baseUrl: validateCustomBaseUrl(baseUrlRaw, baseUrlLabel),
+    apiKey: keyHit.value,
+    apiKeyEnv: keyHit.name,
+  });
+}
+
+function loadCliModelConfig(env, key, info, serverMaxTokens) {
+  const prefix = envPrefixForModel(key);
+  const cliKind = info.cliKind;
+  const kindDef = CLI_KINDS[cliKind];
+  if (!kindDef) {
+    // Registry validation should have caught this; defensive.
+    throw new MultipolyError("CONFIG", `${prefix}: unknown cli kind ${JSON.stringify(cliKind)}`);
+  }
+  const binary = (env[`${prefix}_CLI`] || "").trim() || kindDef.binary;
+  const model = (env[`${prefix}_MODEL`] || "").trim() || info.defaultModel || kindDef.defaultModel || null;
+  const authTokenEnvRaw = (env[`${prefix}_AUTH_TOKEN_ENV`] || "").trim();
+  const authTokenEnv = authTokenEnvRaw
+    ? validateEnvVarName(authTokenEnvRaw, `${prefix}_AUTH_TOKEN_ENV`)
+    : null;
+  const cwdMode = parseCwdMode(env[`${prefix}_CWD`], `${prefix}_CWD`);
+  const unsafe = parseBool(env[`${prefix}_UNSAFE`], false);
+  const reasoningEffort = (env[`${prefix}_REASONING_EFFORT`] || "").trim() || null;
+  const enabled = parseBool(env[`${prefix}_ENABLED`], false);
+  const timeoutMs = parseInteger(env[`${prefix}_TIMEOUT_MS`], undefined, TIMEOUT_BOUNDS);
+  const maxTokens = resolveModelMaxTokens(env, key, prefix, serverMaxTokens);
+
+  // A cli model is opt-in (it shells out to a local agent), so it stays
+  // unconfigured until ENABLED. A weak-sandbox kind (agy) additionally
+  // requires UNSAFE, since it has no real read-only mode (D3).
+  const missing = [];
+  if (!enabled) missing.push(`${prefix}_ENABLED=1`);
+  if (kindDef.weakSandbox && !unsafe) missing.push(`${prefix}_UNSAFE=1 (weak sandbox)`);
+
+  return Object.freeze({
+    key,
+    displayName: info.displayName,
+    transport: "cli",
+    cliKind,
+    binary,
+    model,
+    authTokenEnv,
+    cwdMode,
+    unsafe,
+    reasoningEffort,
+    timeoutMs,
+    configured: missing.length === 0,
+    missing: Object.freeze(missing),
     supportsThinking: Boolean(info.supportsThinking),
     maxTokens,
   });
