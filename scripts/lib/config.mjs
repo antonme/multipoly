@@ -1,4 +1,5 @@
 import { GlmError } from "./errors.mjs";
+import { MODEL_KEYS, MODEL_INFO, envPrefixForModel, firstNonEmpty } from "./models.mjs";
 
 const ENDPOINT_PROFILES = Object.freeze({
   "zai-coding-plan": "https://api.z.ai/api/coding/paas/v4",
@@ -98,6 +99,65 @@ function validateCustomBaseUrl(raw) {
   );
 }
 
+function resolveLegacyGlmBaseUrl(env) {
+  const explicit = (env.GLM_BASE_URL || "").trim();
+  if (explicit) return explicit;
+
+  const endpoint = env.GLM_ENDPOINT || "zai-coding-plan";
+  if (endpoint === "custom") {
+    throw new GlmError("CONFIG", "GLM_ENDPOINT=custom requires GLM_BASE_URL");
+  }
+  if (ENDPOINT_PROFILES[endpoint]) return ENDPOINT_PROFILES[endpoint];
+
+  const valid = [...Object.keys(ENDPOINT_PROFILES), "custom"].join(", ");
+  throw new GlmError(
+    "CONFIG",
+    `GLM_ENDPOINT must be one of ${valid}, got ${JSON.stringify(endpoint)}`,
+  );
+}
+
+function loadOneModelConfig(env, key) {
+  const info = MODEL_INFO[key];
+  const prefix = envPrefixForModel(key);
+  const baseUrlRaw =
+    env[`${prefix}_BASE_URL`] ||
+    (key === "glm" ? resolveLegacyGlmBaseUrl(env) : null) ||
+    info.defaultBaseUrl;
+  const model =
+    env[`${prefix}_MODEL`] ||
+    (key === "glm" ? env.GLM_MODEL : null) ||
+    info.defaultModel;
+  const keyHit = firstNonEmpty(env, info.apiKeyEnv);
+  const missing = [];
+
+  if (!baseUrlRaw) missing.push(`${prefix}_BASE_URL`);
+  if (!model) missing.push(`${prefix}_MODEL`);
+  if (!keyHit) missing.push(info.apiKeyEnv.join(" or "));
+
+  if (missing.length > 0) {
+    return Object.freeze({
+      key,
+      displayName: info.displayName,
+      configured: false,
+      missing: Object.freeze(missing),
+      model,
+      baseUrl: baseUrlRaw || null,
+      apiKey: null,
+    });
+  }
+
+  return Object.freeze({
+    key,
+    displayName: info.displayName,
+    configured: true,
+    missing: Object.freeze([]),
+    model,
+    baseUrl: validateCustomBaseUrl(baseUrlRaw),
+    apiKey: keyHit.value,
+    apiKeyEnv: keyHit.name,
+  });
+}
+
 function parseThinking(raw) {
   if (raw === undefined || raw === "") return "mode-default";
   const v = String(raw).toLowerCase();
@@ -108,36 +168,17 @@ function parseThinking(raw) {
 }
 
 export function loadConfig(env = process.env) {
-  const endpoint = env.GLM_ENDPOINT || "zai-coding-plan";
-  let baseUrl;
-  if (endpoint === "custom") {
-    if (!env.GLM_BASE_URL) {
-      throw new GlmError("CONFIG", "GLM_ENDPOINT=custom requires GLM_BASE_URL");
-    }
-    baseUrl = validateCustomBaseUrl(env.GLM_BASE_URL);
-  } else if (ENDPOINT_PROFILES[endpoint]) {
-    baseUrl = ENDPOINT_PROFILES[endpoint];
-  } else {
-    const valid = [...Object.keys(ENDPOINT_PROFILES), "custom"].join(", ");
-    throw new GlmError(
-      "CONFIG",
-      `GLM_ENDPOINT must be one of ${valid}, got ${JSON.stringify(endpoint)}`,
-    );
-  }
+  const models = Object.freeze(
+    Object.fromEntries(MODEL_KEYS.map((key) => [key, loadOneModelConfig(env, key)])),
+  );
 
-  // Trim before falling through: a whitespace-only GLM_API_KEY (common in
-  // misconfigured shell exports: `export GLM_API_KEY= "$(cmd)"`) previously
-  // won the OR and produced `Authorization: Bearer    ` → 401, even when
-  // ZHIPU_API_KEY held a valid key.
-  const apiKey = (env.GLM_API_KEY || "").trim() || (env.ZHIPU_API_KEY || "").trim();
-  if (!apiKey) {
+  if (!Object.values(models).some((m) => m.configured)) {
     throw new GlmError(
       "AUTH",
-      "No API key found. Set GLM_API_KEY (or ZHIPU_API_KEY for opencode compatibility).",
+      "No model API key found. Configure at least one model, for example MULTIPOLY_GLM_API_KEY.",
     );
   }
 
-  const model = env.GLM_MODEL || "glm-5.1";
   const thinking = parseThinking(env.GLM_THINKING);
 
   // GLM 5.1's published output limit is 131072 tokens (models.dev / opencode);
@@ -175,10 +216,7 @@ export function loadConfig(env = process.env) {
   const progress = parseProgress(env.GLM_PROGRESS);
 
   return Object.freeze({
-    endpoint,
-    baseUrl,
-    apiKey,
-    model,
+    models,
     thinking,
     maxTokens: Object.freeze(maxTokens),
     caps: Object.freeze(caps),
@@ -203,8 +241,16 @@ function parseProgress(raw) {
 
 /** Redact sensitive fields for logging. */
 export function redactedConfig(config) {
-  const { apiKey, ...rest } = config;
-  return { ...rest, apiKey: apiKey ? `***${apiKey.slice(-4)}` : null };
+  const models = Object.fromEntries(
+    Object.entries(config.models).map(([key, m]) => [
+      key,
+      {
+        ...m,
+        apiKey: m.apiKey ? `***${m.apiKey.slice(-4)}` : null,
+      },
+    ]),
+  );
+  return { ...config, models };
 }
 
 export { ENDPOINT_PROFILES };

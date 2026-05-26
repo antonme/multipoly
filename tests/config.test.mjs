@@ -11,9 +11,13 @@ const base = { GLM_API_KEY: "test-key" };
 
 test("config: defaults", () => {
   const c = loadConfig({ ...base });
-  assert.equal(c.endpoint, "zai-coding-plan");
-  assert.equal(c.baseUrl, ENDPOINT_PROFILES["zai-coding-plan"]);
-  assert.equal(c.model, "glm-5.1");
+  assert.equal(c.models.glm.configured, true);
+  assert.equal(c.models.glm.baseUrl, ENDPOINT_PROFILES["zai-coding-plan"]);
+  assert.equal(c.models.glm.model, "glm-5.1");
+  assert.equal(c.models.glm.apiKey, "test-key");
+  assert.equal(c.models.qwen.configured, false);
+  assert.equal(c.models.deepseek.configured, false);
+  assert.equal(c.models.composer.configured, false);
   assert.equal(c.thinking, "mode-default");
   assert.equal(c.maxTokens.review, 131072);
   assert.equal(c.maxTokens.consult, 131072);
@@ -40,7 +44,7 @@ test("config: GLM_PROGRESS parsed", () => {
 
 test("config: ZHIPU_API_KEY falls back when GLM_API_KEY is missing", () => {
   const c = loadConfig({ ZHIPU_API_KEY: "zk" });
-  assert.equal(c.apiKey, "zk");
+  assert.equal(c.models.glm.apiKey, "zk");
 });
 
 test("config: missing key throws AUTH", () => {
@@ -60,7 +64,7 @@ test("config: custom endpoint accepts GLM_BASE_URL and trims trailing slashes", 
     GLM_ENDPOINT: "custom",
     GLM_BASE_URL: "https://example.com/v1/////",
   });
-  assert.equal(c.baseUrl, "https://example.com/v1");
+  assert.equal(c.models.glm.baseUrl, "https://example.com/v1");
 });
 
 test("config: unknown endpoint rejected", () => {
@@ -72,7 +76,7 @@ test("config: unknown endpoint rejected", () => {
 
 test("config: bigmodel-cn endpoint resolves", () => {
   const c = loadConfig({ ...base, GLM_ENDPOINT: "bigmodel-cn" });
-  assert.equal(c.baseUrl, ENDPOINT_PROFILES["bigmodel-cn"]);
+  assert.equal(c.models.glm.baseUrl, ENDPOINT_PROFILES["bigmodel-cn"]);
 });
 
 test("config: thinking parsed", () => {
@@ -87,7 +91,7 @@ test("config: thinking parsed", () => {
 
 test("config: GLM_API_KEY wins over ZHIPU_API_KEY", () => {
   const c = loadConfig({ GLM_API_KEY: "glm", ZHIPU_API_KEY: "zk" });
-  assert.equal(c.apiKey, "glm");
+  assert.equal(c.models.glm.apiKey, "glm");
 });
 
 test("config: numeric overrides accepted", () => {
@@ -151,13 +155,13 @@ test("config: GLM_BASE_URL http allowed for loopback", () => {
     GLM_ENDPOINT: "custom",
     GLM_BASE_URL: "http://localhost:8080/v1",
   });
-  assert.equal(c.baseUrl, "http://localhost:8080/v1");
+  assert.equal(c.models.glm.baseUrl, "http://localhost:8080/v1");
   const c2 = loadConfig({
     ...base,
     GLM_ENDPOINT: "custom",
     GLM_BASE_URL: "http://127.0.0.1:8080/v1",
   });
-  assert.equal(c2.baseUrl, "http://127.0.0.1:8080/v1");
+  assert.equal(c2.models.glm.baseUrl, "http://127.0.0.1:8080/v1");
 });
 
 test("config: GLM_BASE_URL rejects file:// and garbage", () => {
@@ -184,7 +188,7 @@ test("config: GLM_BASE_URL accepts IPv6 loopback (bracketed hostname)", () => {
     GLM_ENDPOINT: "custom",
     GLM_BASE_URL: "http://[::1]:8080/v1",
   });
-  assert.equal(c.baseUrl, "http://[::1]:8080/v1");
+  assert.equal(c.models.glm.baseUrl, "http://[::1]:8080/v1");
 });
 
 test("config: GLM_BASE_URL accepts 127.x.x.x loopback range", () => {
@@ -193,7 +197,7 @@ test("config: GLM_BASE_URL accepts 127.x.x.x loopback range", () => {
     GLM_ENDPOINT: "custom",
     GLM_BASE_URL: "http://127.0.0.2:8080/v1",
   });
-  assert.equal(c.baseUrl, "http://127.0.0.2:8080/v1");
+  assert.equal(c.models.glm.baseUrl, "http://127.0.0.2:8080/v1");
 });
 
 test("config: GLM_BASE_URL accepts IPv4-mapped IPv6 loopback (any form)", () => {
@@ -204,13 +208,13 @@ test("config: GLM_BASE_URL accepts IPv4-mapped IPv6 loopback (any form)", () => 
     GLM_ENDPOINT: "custom",
     GLM_BASE_URL: "http://[::ffff:127.0.0.1]:8080/v1",
   });
-  assert.ok(c1.baseUrl.startsWith("http://[::ffff:"));
+  assert.ok(c1.models.glm.baseUrl.startsWith("http://[::ffff:"));
   const c2 = loadConfig({
     ...base,
     GLM_ENDPOINT: "custom",
     GLM_BASE_URL: "http://[::ffff:7fff:ffff]:8080/v1",
   });
-  assert.equal(c2.baseUrl, "http://[::ffff:7fff:ffff]:8080/v1");
+  assert.equal(c2.models.glm.baseUrl, "http://[::ffff:7fff:ffff]:8080/v1");
 });
 
 test("config: GLM_BASE_URL rejects 127-lookalike non-loopback host", () => {
@@ -241,4 +245,35 @@ test("config: GLM_BASE_URL rejects query/fragment", () => {
     () => loadConfig({ ...base, GLM_ENDPOINT: "custom", GLM_BASE_URL: "https://api.test/v1#x" }),
     (e) => e.code === "CONFIG",
   );
+});
+
+test("config: loads configured model endpoints independently", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "glm-key",
+    MULTIPOLY_QWEN_API_KEY: "qwen-key",
+    MULTIPOLY_QWEN_BASE_URL: "https://qwen.example/v1",
+    MULTIPOLY_QWEN_MODEL: "qwen3.7max",
+  });
+  assert.equal(c.models.glm.configured, true);
+  assert.equal(c.models.qwen.configured, true);
+  assert.equal(c.models.deepseek.configured, false);
+  assert.equal(c.models.composer.configured, false);
+  assert.equal(c.models.qwen.model, "qwen3.7max");
+  assert.equal(c.models.qwen.baseUrl, "https://qwen.example/v1");
+  assert.equal(c.models.qwen.apiKey, "qwen-key");
+});
+
+test("config: model-specific env vars override legacy GLM env vars", () => {
+  const c = loadConfig({
+    GLM_API_KEY: "legacy",
+    MULTIPOLY_GLM_API_KEY: "specific",
+  });
+  assert.equal(c.models.glm.apiKey, "specific");
+});
+
+test("config: missing qwen config does not prevent GLM-only startup", () => {
+  const c = loadConfig({ MULTIPOLY_GLM_API_KEY: "glm-key" });
+  assert.equal(c.models.glm.configured, true);
+  assert.equal(c.models.qwen.configured, false);
+  assert.equal(c.models.qwen.missing.length > 0, true);
 });
