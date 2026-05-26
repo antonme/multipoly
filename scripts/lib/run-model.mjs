@@ -1,6 +1,7 @@
 import { MultipolyError } from "./errors.mjs";
 import { streamChatCompletion } from "./client.mjs";
 import { runCliModel } from "./transport/cli.mjs";
+import { runAnthropicModel } from "./transport/anthropic.mjs";
 
 /**
  * Transport dispatcher: the single seam through which every model call flows,
@@ -33,6 +34,11 @@ export async function runModel(args) {
 
   if (transport === "cli") {
     return runCliModel(args);
+  }
+
+  if (transport === "anthropic") {
+    const { execFileImpl, ...anthropicArgs } = args;
+    return runAnthropicModel(anthropicArgs);
   }
 
   throw new MultipolyError(
