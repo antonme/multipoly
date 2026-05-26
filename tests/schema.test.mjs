@@ -69,3 +69,35 @@ test("schema: empty findings array is valid", () => {
     { valid: true },
   );
 });
+
+test("schema: null line/end_line/suggestion accepted (strict-mode nullable)", () => {
+  const r = validateReview({
+    schema_version: "1",
+    findings: [
+      { severity: "high", path: "a.ts", message: "x", line: null, end_line: null, suggestion: null },
+    ],
+    summary_md: "s",
+  });
+  assert.deepEqual(r, { valid: true });
+});
+
+test("schema: end_line < line rejected", () => {
+  const r = validateReview({
+    schema_version: "1",
+    findings: [{ severity: "high", path: "a.ts", message: "x", line: 50, end_line: 10 }],
+    summary_md: "s",
+  });
+  assert.equal(r.valid, false);
+});
+
+test("schema: end_line without line rejected (impossible range)", () => {
+  const r = validateReview({
+    schema_version: "1",
+    findings: [
+      { severity: "high", path: "a.ts", message: "x", line: null, end_line: 10 },
+    ],
+    summary_md: "s",
+  });
+  assert.equal(r.valid, false);
+  assert.match(r.reason, /end_line requires line/);
+});

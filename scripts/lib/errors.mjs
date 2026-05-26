@@ -11,6 +11,7 @@ export const ERROR_CODES = Object.freeze({
   TIMEOUT: "TIMEOUT",
   STREAM: "STREAM",
   SCHEMA: "SCHEMA",
+  BUDGET: "BUDGET",
   INTERNAL: "INTERNAL",
 });
 

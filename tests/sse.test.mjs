@@ -19,6 +19,35 @@ test("sse: single data event", async () => {
   assert.deepEqual(events, [{ type: "data", value: { a: 1 } }]);
 });
 
+test("sse: buffer cap rejects never-terminated event (DoS guard)", async () => {
+  // Fabricate a source that streams 9 MiB of a single unterminated `data:` line.
+  // With an 8 MiB buffer cap we expect a STREAM error before OOM.
+  async function* infiniteChunks() {
+    const chunk = enc.encode("x".repeat(1024 * 1024)); // 1 MiB 'x's
+    yield enc.encode("data: ");
+    for (let i = 0; i < 9; i++) yield chunk;
+  }
+  await assert.rejects(
+    collect(infiniteChunks()),
+    (e) => e.code === "STREAM" && /buffer exceeded/.test(e.message),
+  );
+});
+
+test("sse: multi-byte chars are budgeted by UTF-8 bytes, not UTF-16 chars", async () => {
+  // '한' is 3 UTF-8 bytes but 1 UTF-16 char. 3M copies = ~9 MB of UTF-8
+  // bytes (over the 8 MiB cap) but only ~3M UTF-16 chars (under any
+  // char-based cap). The cap must fire on byte budget, not char budget.
+  async function* chunks() {
+    const chunk = enc.encode("한".repeat(500_000)); // 1.5 MB of UTF-8
+    yield enc.encode("data: ");
+    for (let i = 0; i < 7; i++) yield chunk; // 10.5 MB undelimited
+  }
+  await assert.rejects(
+    collect(chunks()),
+    (e) => e.code === "STREAM" && /buffer exceeded/.test(e.message),
+  );
+});
+
 test("sse: [DONE] sentinel ends stream", async () => {
   const events = await collect(chunksFrom(['data: {"a":1}\n\n', "data: [DONE]\n\n"]));
   assert.equal(events.length, 2);

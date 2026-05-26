@@ -41,6 +41,7 @@ const baseConfig = {
   thinking: "mode-default",
   timeoutMs: 5000,
   maxTokens: { review: 8192, consult: 16384, freeform: 16384 },
+  progress: "off",
 };
 
 test("client: happy path streams content", async () => {
@@ -120,6 +121,63 @@ test("client: 429 retries with backoff", async () => {
   assert.equal(callCount, 3);
 });
 
+test("client: 429 with Retry-After > cap fails fast (no retry)", async () => {
+  // The server is asking for a wait longer than we are willing to block a
+  // request for. Previously we silently clamped to 60s and retried, which
+  // meant three failures inside the real rate-limit window and a confusing
+  // 429 surface. Now we surface the 429 immediately.
+  let calls = 0;
+  const fetchImpl = async () => {
+    calls++;
+    return new Response("rate", {
+      status: 429,
+      headers: { "retry-after": "900" }, // 15 minutes
+    });
+  };
+  await assert.rejects(
+    () =>
+      streamChatCompletion({
+        config: { ...baseConfig, timeoutMs: 2000 },
+        messages: [{ role: "user", content: "x" }],
+        mode: "consult",
+        fetchImpl,
+      }),
+    (e) => e.code === "HTTP" && /429/.test(e.message),
+  );
+  assert.equal(calls, 1, "no retries when Retry-After exceeds cap");
+});
+
+test("client: 429 with Retry-After within cap is honored (not silently clamped)", async () => {
+  let calls = 0;
+  let waitedMs = null;
+  const start = Date.now();
+  const fetchImpl = async () => {
+    calls++;
+    if (calls === 1) {
+      return new Response("rate", {
+        status: 429,
+        headers: { "retry-after": "2" }, // 2 seconds — within cap
+      });
+    }
+    waitedMs = Date.now() - start;
+    return new Response(
+      chunksToReadableStream([
+        'data: {"choices":[{"delta":{"content":"ok"}}]}\n\n',
+        "data: [DONE]\n\n",
+      ]),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+  };
+  const out = await streamChatCompletion({
+    config: { ...baseConfig, timeoutMs: 10_000 },
+    messages: [{ role: "user", content: "x" }],
+    mode: "consult",
+    fetchImpl,
+  });
+  assert.equal(out.content, "ok");
+  assert.ok(waitedMs >= 1800, `expected ~2s wait, saw ${waitedMs}ms`);
+});
+
 test("client: unknown 400 does NOT fall back from json_schema", async () => {
   const fetchImpl = async () => new Response("bad input", { status: 400 });
   await assert.rejects(
@@ -181,6 +239,31 @@ test("client: timeout aborts", async () => {
       }),
     (e) => e.code === "TIMEOUT",
   );
+});
+
+test("client: per-call timeoutMs overrides config.timeoutMs", async () => {
+  // config says 60s; the call passes 80ms. A server that never responds must
+  // trip the per-call budget, proving the override wins over config.
+  const fetchImpl = async (_url, opts) =>
+    new Promise((_resolve, reject) => {
+      opts.signal.addEventListener("abort", () => {
+        reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+      });
+    });
+  const start = Date.now();
+  await assert.rejects(
+    () =>
+      streamChatCompletion({
+        config: { ...baseConfig, timeoutMs: 60_000 },
+        messages: [{ role: "user", content: "x" }],
+        mode: "consult",
+        timeoutMs: 80,
+        fetchImpl,
+      }),
+    (e) => e.code === "TIMEOUT",
+  );
+  // Aborted on the 80ms per-call budget, not the 60s config one.
+  assert.ok(Date.now() - start < 5_000, "should abort on the per-call 80ms timeout");
 });
 
 test("client: timeout aborts stalled body after headers", async () => {

@@ -57,10 +57,11 @@ All via env vars. Required: an API key.
 | `GLM_ENDPOINT` | `zai-coding-plan` | One of `zai-coding-plan`, `bigmodel-cn`, `custom`. |
 | `GLM_BASE_URL` | — | Required when `GLM_ENDPOINT=custom`. |
 | `GLM_THINKING` | mode-default | `on` / `off` / `auto`. Default: on for review, off for consult/freeform. |
-| `GLM_MAX_TOKENS_REVIEW` | 8192 | |
-| `GLM_MAX_TOKENS_CONSULT` | 16384 | |
-| `GLM_MAX_TOKENS_FREEFORM` | 16384 | |
-| `GLM_TIMEOUT_MS` | 300000 | |
+| `GLM_MAX_TOKENS_REVIEW` | 131072 | GLM 5.1's published output ceiling. Reasoning + content share this budget in thinking mode. |
+| `GLM_MAX_TOKENS_CONSULT` | 131072 | |
+| `GLM_MAX_TOKENS_FREEFORM` | 131072 | |
+| `GLM_TIMEOUT_MS` | 600000 | Inactivity timeout (ms), range `[1, 3600000]`. The timer fires only if the upstream goes silent for this long; every SSE chunk (including reasoning deltas) resets it. A long-thinking review that keeps streaming will not trip it. Overridable per call via the `timeout_ms` argument. **This bounds only the GLM↔upstream stream — the MCP client (Claude Code / Codex / opencode) imposes its own tool-call timeout on top; see [Client-side timeout](#client-side-timeout).** |
+| `GLM_PROGRESS` | `heartbeat` | Live progress on stderr: `off` (silent), `heartbeat` (short summary every 3s), `reasoning` (streams the model's thinking tokens as they arrive). |
 | `GLM_PER_FILE_CAP_BYTES` | 262144 | Review mode: files larger than this are omitted. |
 | `GLM_TOTAL_CAP_BYTES` | 1572864 | Review mode: total bytes of inlined content. |
 | `GLM_FILE_COUNT_CAP` | 50 | Review mode. |
@@ -87,9 +88,12 @@ export ZHIPU_API_KEY="$(opencode ... )"  # or however you set it
 // or
 {
   "paths": ["src/foo.ts", "src/bar.ts"],
-  "focus": "API shape"
+  "focus": "API shape",
+  "timeout_ms": 540000 // optional per-call inactivity timeout override
 }
 ```
+
+All three tools accept an optional `timeout_ms` (integer, `[1, 3600000]`) that overrides `GLM_TIMEOUT_MS` for that single call.
 
 Returns JSON:
 
@@ -113,7 +117,8 @@ Returns JSON:
 ```jsonc
 {
   "prompt": "Is using a global lock here reasonable given X and Y?",
-  "paths": ["src/lock.ts"] // optional attached context
+  "paths": ["src/lock.ts"], // optional attached context
+  "timeout_ms": 540000      // optional
 }
 ```
 
@@ -122,10 +127,35 @@ Returns markdown.
 ### `glm_freeform`
 
 ```jsonc
-{ "prompt": "…" }
+{ "prompt": "…", "timeout_ms": 540000 /* optional */ }
 ```
 
 Returns markdown.
+
+## Client-side timeout
+
+`GLM_TIMEOUT_MS` / `timeout_ms` only govern the GLM↔upstream HTTP stream. The
+MCP **client** that launched this server enforces its own, separate tool-call
+timeout — and a long GLM 5.1 thinking review can easily exceed a client default:
+
+| Client | Setting | Default | How to raise |
+|---|---|---|---|
+| **Codex CLI** | `tool_timeout_sec` under `[mcp_servers.<id>]` in `~/.codex/config.toml` | 60s | Set `tool_timeout_sec = 600` (seconds, not ms) |
+| Claude Code | `MCP_TOOL_TIMEOUT` env (ms) | ~60s | Export `MCP_TOOL_TIMEOUT=600000` |
+
+Example `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.glm]
+command = "node"
+args = ["/Users/anton/dev/glm/scripts/glm-mcp.mjs"]
+startup_timeout_sec = 15
+tool_timeout_sec = 600
+```
+
+If the client kills the call first, no server-side setting can save it —
+raise the client timeout, lower `timeout_ms` to fail fast, or split the
+review into smaller calls.
 
 ## Slash commands
 

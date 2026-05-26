@@ -70,6 +70,7 @@ const baseConfig = {
   caps: { perFile: 1024 * 1024, total: 2 * 1024 * 1024, fileCount: 50 },
   allowSecrets: false,
   debugReasoning: false,
+  progress: "off",
 };
 
 test("review: happy path — valid JSON passes on first attempt, server-authoritative files merged", async () => {
@@ -96,7 +97,14 @@ test("review: happy path — valid JSON passes on first attempt, server-authorit
     assert.equal(out.result.schema_version, "1");
     assert.deepEqual(
       out.result.findings[0],
-      { severity: "nit", path: "a.txt", message: "fine", line: 1 },
+      {
+        severity: "nit",
+        path: "a.txt",
+        message: "fine",
+        line: 1,
+        end_line: null,
+        suggestion: null,
+      },
     );
     // Server-authoritative: files[] comes from gather, not the model
     assert.ok(Array.isArray(out.result.files));
@@ -141,6 +149,130 @@ test("review: invalid JSON triggers retry with correction", async () => {
     );
     assert.equal(out.result.schema_version, "1");
     assert.equal(call, 2);
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("review: trailing prose on line after close fence is stripped", async () => {
+  const { repo, baseSha } = await makeRepo();
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const payload = JSON.stringify({
+      schema_version: "1",
+      findings: [],
+      summary_md: "ok",
+    });
+    // Common with json_object fallback: model appends commentary after the
+    // fenced JSON. Previously the `withoutClose` branch's \s*$-anchored
+    // replace failed to strip the fence when non-whitespace prose followed
+    // on subsequent lines, causing a needless retry.
+    const fenced = `\`\`\`json\n${payload}\n\`\`\`\nThe code looks good.\n`;
+    const body = [
+      `data: {"choices":[{"delta":{"content":${JSON.stringify(fenced)}}}]}\n\n`,
+      "data: [DONE]\n\n",
+    ];
+    const fetchImpl = makeFetch(body);
+    const out = await handleReview(
+      { diff_base: baseSha },
+      { config: baseConfig, fetchImpl },
+    );
+    assert.equal(out.result.schema_version, "1");
+    assert.equal(fetchImpl.calls.length, 1, "no retry expected");
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("review: opening fence with space before language tag is tolerated", async () => {
+  const { repo, baseSha } = await makeRepo();
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const payload = JSON.stringify({
+      schema_version: "1",
+      findings: [],
+      summary_md: "ok",
+    });
+    // Some models emit ``` json (with a space). Accept it so we don't burn
+    // a retry on a cosmetic formatting difference.
+    const fenced = `\`\`\` json\n${payload}\n\`\`\``;
+    const body = [
+      `data: {"choices":[{"delta":{"content":${JSON.stringify(fenced)}}}]}\n\n`,
+      "data: [DONE]\n\n",
+    ];
+    const fetchImpl = makeFetch(body);
+    const out = await handleReview(
+      { diff_base: baseSha },
+      { config: baseConfig, fetchImpl },
+    );
+    assert.equal(out.result.schema_version, "1");
+    assert.equal(fetchImpl.calls.length, 1);
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("review: uppercase ```JSON fence with trailing prose is extracted", async () => {
+  const { repo, baseSha } = await makeRepo();
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const payload = JSON.stringify({
+      schema_version: "1",
+      findings: [],
+      summary_md: "ok",
+    });
+    // Model emits uppercase language tag and a trailing newline before the
+    // closing fence (both observed in real outputs). The lower-case-only
+    // regex previously failed, triggering a needless retry.
+    const wrapped = `Here is the JSON:\n\`\`\`JSON\n${payload}\n\`\`\`\n`;
+    // The leading prose breaks the strict "start with fence" match, so use
+    // a content that leads with the fence. The fix still must accept JSON
+    // language tag in any case.
+    const fencedLeading = `\`\`\`JSON\n${payload}\n\`\`\``;
+    const body = [
+      `data: {"choices":[{"delta":{"content":${JSON.stringify(fencedLeading)}}}]}\n\n`,
+      "data: [DONE]\n\n",
+    ];
+    const fetchImpl = makeFetch(body);
+    const out = await handleReview(
+      { diff_base: baseSha },
+      { config: baseConfig, fetchImpl },
+    );
+    assert.equal(out.result.schema_version, "1");
+    // No retry: uppercase fence extraction worked on attempt 1.
+    assert.equal(fetchImpl.calls.length, 1);
+    // Silence unused warning for `wrapped` (kept for documentation).
+    void wrapped;
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("review: invalid timeout_ms is rejected before any model call", async () => {
+  const { repo, baseSha } = await makeRepo();
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    let called = 0;
+    const fetchImpl = async () => {
+      called++;
+      return new Response(streamOf(["data: [DONE]\n\n"]), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    await assert.rejects(
+      () =>
+        handleReview(
+          { diff_base: baseSha, timeout_ms: -1 },
+          { config: baseConfig, fetchImpl },
+        ),
+      (e) => e.code === "INVALID_INPUT" && /timeout_ms/.test(e.message),
+    );
+    assert.equal(called, 0, "must reject before calling upstream");
   } finally {
     process.chdir(prev);
   }

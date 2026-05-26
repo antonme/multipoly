@@ -51,39 +51,71 @@ async function gatherReviewDiff({ diffBase, cwd, caps }) {
   const binariesInDiff = await getBinaryPathsInDiff(diffBase, top);
 
   // Containment check: reject any changed path whose realpath escapes the repo
-  // (can happen via in-repo symlinks pointing outside).
-  const containSet = new Set();
+  // (can happen via in-repo symlinks pointing outside). Keep the resolved
+  // realpath so the later read uses the canonical path, not a re-joined one.
+  const entries = [];
   const containOmitted = [];
   for (const rel of changed) {
     try {
-      await containPath(top, rel, { cwd: top });
-      containSet.add(rel);
+      const abs = await containPath(top, rel, { cwd: top });
+      entries.push({ rel, abs });
     } catch (e) {
-      containOmitted.push({
-        path: rel,
-        status: "listed_only",
-        reason: e instanceof GlmError ? `escapes repo root: ${e.message}` : String(e),
-      });
+      // Translate the tagged failure kind into a fixed, safe-to-render reason
+      // so the LLM-facing output is predictable and doesn't echo raw paths or
+      // internal error strings.
+      const kind = e instanceof GlmError ? e.details?.kind : null;
+      const reason =
+        kind === "escapes_root" ? "escapes repo root" :
+        kind === "missing" ? "file no longer exists" :
+        kind === "resolve_failed" ? "path resolution failed" :
+        "containment check failed";
+      containOmitted.push({ path: rel, status: "listed_only", reason });
     }
   }
-  const safeChanged = changed.filter((p) => containSet.has(p));
 
   const files = await classifyFiles({
-    relPaths: safeChanged,
-    rootRealpath: top,
+    entries,
     caps,
     forcedBinaries: binariesInDiff,
   });
   // Merge containment rejections back in so the model sees that they exist but weren't inlined.
   const allFiles = [...containOmitted, ...files];
 
+  // Share the caps.total budget across inlined files AND the diff so the
+  // total outbound payload can't be ~2× caps.total (files fill it, diff
+  // fills it again independently). Inlined files have first claim — we
+  // already know their byte usage — and the diff gets whatever remains.
+  // Compute the budget BEFORE the git call so we skip the diff fetch
+  // entirely when files already filled the total cap.
+  const inlinedFiles = files.filter((f) => f.status === "inlined");
+  const filesBytesUsed = inlinedFiles.reduce(
+    (sum, f) => sum + Buffer.byteLength(f.content, "utf8"),
+    0,
+  );
+  const diffBudget = Math.max(0, caps.total - filesBytesUsed);
+
   // Build diff scoped to inlined files ONLY. Omitted/listed files never leak content.
-  const inlinedPaths = files.filter((f) => f.status === "inlined").map((f) => f.path);
-  const diffText = inlinedPaths.length > 0
+  const inlinedPaths = inlinedFiles.map((f) => f.path);
+  let diffText = inlinedPaths.length > 0 && diffBudget > 0
     ? await getDiffText(diffBase, top, inlinedPaths)
     : "";
 
-  const truncated = allFiles.some((f) => f.status !== "inlined");
+  let diffTruncated = false;
+  const diffBytes = Buffer.byteLength(diffText, "utf8");
+  if (diffBytes > diffBudget) {
+    // Truncate by UTF-8 bytes, not UTF-16 code units, and let `toString` drop
+    // any incomplete trailing codepoint so we never emit a lone surrogate.
+    // Reserve the suffix bytes from the budget so the final length obeys
+    // diffBudget (and therefore caps.total) strictly.
+    const suffix = `\n…[diff truncated: ${diffBytes} bytes > remaining cap ${diffBudget} of ${caps.total} total]`;
+    const suffixBytes = Buffer.byteLength(suffix, "utf8");
+    const headBytes = Math.max(0, diffBudget - suffixBytes);
+    const buf = Buffer.from(diffText, "utf8");
+    diffText = buf.toString("utf8", 0, headBytes) + suffix;
+    diffTruncated = true;
+  }
+
+  const truncated = diffTruncated || allFiles.some((f) => f.status !== "inlined");
 
   return {
     mode: "diff",
@@ -103,15 +135,18 @@ async function gatherReviewPaths({ paths, cwd, caps }) {
     rootRealpath = await realpath(cwd);
   }
 
-  const relPaths = [];
+  // Resolve relative paths against the repo root, not the process cwd. If the
+  // MCP server was launched from a subdirectory, a caller passing "foo.ts"
+  // means <root>/foo.ts, not <cwd>/foo.ts.
+  const entries = [];
   for (const p of paths) {
-    const abs = await containPath(rootRealpath, p, { cwd });
-    relPaths.push(path.relative(rootRealpath, abs) || ".");
+    const abs = await containPath(rootRealpath, p, { cwd: rootRealpath });
+    const rel = path.relative(rootRealpath, abs) || ".";
+    entries.push({ rel, abs });
   }
 
   const files = await classifyFiles({
-    relPaths,
-    rootRealpath,
+    entries,
     caps,
     forcedBinaries: new Set(),
   });
@@ -125,14 +160,12 @@ async function gatherReviewPaths({ paths, cwd, caps }) {
   };
 }
 
-async function classifyFiles({ relPaths, rootRealpath, caps, forcedBinaries }) {
+async function classifyFiles({ entries, caps, forcedBinaries }) {
   const out = [];
   let bytesUsed = 0;
   let inlinedCount = 0;
 
-  for (const rel of relPaths) {
-    const abs = path.join(rootRealpath, rel);
-
+  for (const { rel, abs } of entries) {
     if (inlinedCount >= caps.fileCount) {
       out.push({ path: rel, status: "listed_only", reason: `over file-count cap (${caps.fileCount})` });
       continue;
@@ -194,8 +227,22 @@ async function classifyFiles({ relPaths, rootRealpath, caps, forcedBinaries }) {
       out.push({ path: rel, status: "omitted", reason: "over per-file cap" });
       continue;
     }
+    // Retroactive total-cap check. `readFileCapped` already clamps the
+    // buffer to min(size, cap), so the pure file-grew case is bounded.
+    // But UTF-8 expansion after invalid bytes (each → U+FFFD = 3 bytes)
+    // can make `actual` larger than `bytesRead`. Downgrade the file to
+    // listed_only if it would push the total past the cap.
+    const actual = Buffer.byteLength(content, "utf8");
+    if (bytesUsed + actual > caps.total) {
+      out.push({
+        path: rel,
+        status: "listed_only",
+        reason: `UTF-8 content would exceed total cap ${caps.total}`,
+      });
+      continue;
+    }
     out.push({ path: rel, status: "inlined", content });
-    bytesUsed += size;
+    bytesUsed += actual;
     inlinedCount++;
   }
 
@@ -224,7 +271,14 @@ export async function gatherConsult({ prompt, paths, cwd = process.cwd(), caps }
   const files = [];
   let bytesUsed = 0;
   for (const p of paths) {
-    const abs = await containPath(rootRealpath, p, { cwd });
+    if (files.length >= caps.fileCount) {
+      throw new GlmError(
+        "INVALID_INPUT",
+        `too many attached files (cap ${caps.fileCount}). Reduce the attachment set or raise GLM_FILE_COUNT_CAP.`,
+      );
+    }
+    // Resolve relative paths against the repo root, not the process cwd.
+    const abs = await containPath(rootRealpath, p, { cwd: rootRealpath });
     const rel = path.relative(rootRealpath, abs) || p;
     const size = await getSize(abs);
     if (size > caps.perFile) {
@@ -243,8 +297,25 @@ export async function gatherConsult({ prompt, paths, cwd = process.cwd(), caps }
       throw new GlmError("INVALID_INPUT", `attached file ${rel} is binary; refusing to send.`);
     }
     const { content } = await readFileCapped(abs, caps.perFile);
+    if (content === null) {
+      // TOCTOU: file grew past perFile cap between getSize and read.
+      throw new GlmError(
+        "INVALID_INPUT",
+        `attached file ${rel} grew past per-file cap during read.`,
+      );
+    }
+    // Retroactive total-cap check: the pre-read `size` passed, but UTF-8
+    // expansion of invalid bytes (each → U+FFFD = 3 bytes) or a mid-read
+    // file grow can push `actual` above `size`. Mirror classifyFiles.
+    const actual = Buffer.byteLength(content, "utf8");
+    if (bytesUsed + actual > caps.total) {
+      throw new GlmError(
+        "INVALID_INPUT",
+        `attached file ${rel} would push total past cap ${caps.total} after UTF-8 decoding. Reduce the attachment set or increase GLM_TOTAL_CAP_BYTES.`,
+      );
+    }
     files.push({ path: rel, content });
-    bytesUsed += size;
+    bytesUsed += actual;
   }
 
   return { prompt, files };

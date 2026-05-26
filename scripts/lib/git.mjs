@@ -53,11 +53,14 @@ export async function validateRef(ref, cwd) {
  * Returns repo-relative paths.
  */
 export async function getChangedFiles(base, cwd) {
+  // -z emits NUL-separated paths so filenames containing newlines or tabs
+  // survive intact. Without -z, git would C-quote such paths with embedded
+  // escapes and our naïve newline split would mangle them.
   const out = await git(
-    ["diff", "--no-renames", "--name-only", "--diff-filter=ACMR", `${base}...HEAD`],
+    ["diff", "--no-renames", "-z", "--name-only", "--diff-filter=ACMR", `${base}...HEAD`],
     cwd,
   );
-  return out.split("\n").map((s) => s.trim()).filter(Boolean);
+  return out.split("\0").filter((s) => s.length > 0);
 }
 
 /**
@@ -79,14 +82,24 @@ export async function getDiffText(base, cwd, paths = null) {
  * We pass --no-renames so each row has a single path in the third column.
  */
 export async function getBinaryPathsInDiff(base, cwd) {
-  const out = await git(["diff", "--no-renames", "--numstat", `${base}...HEAD`], cwd);
+  // --numstat -z emits rows as `added<TAB>deleted<TAB>path\0`. With -z, git
+  // does NOT C-quote paths, so a path containing embedded tabs or newlines
+  // is delivered literally — splitting on the first two tabs only (limit 3)
+  // recovers the full path exactly.
+  const out = await git(["diff", "--no-renames", "-z", "--numstat", `${base}...HEAD`], cwd);
   const binaries = new Set();
-  for (const line of out.split("\n")) {
-    if (!line) continue;
-    const parts = line.split("\t");
-    if (parts.length >= 3 && parts[0] === "-" && parts[1] === "-") {
-      // With --no-renames, parts[2..] is the single path (may contain tabs in theory).
-      binaries.add(parts.slice(2).join("\t"));
+  for (const row of out.split("\0")) {
+    if (!row) continue;
+    // Manual two-tab split so a tab in the path doesn't split path parts.
+    const t1 = row.indexOf("\t");
+    if (t1 < 0) continue;
+    const t2 = row.indexOf("\t", t1 + 1);
+    if (t2 < 0) continue;
+    const added = row.slice(0, t1);
+    const deleted = row.slice(t1 + 1, t2);
+    const path = row.slice(t2 + 1);
+    if (added === "-" && deleted === "-" && path.length > 0) {
+      binaries.add(path);
     }
   }
   return binaries;

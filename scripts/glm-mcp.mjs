@@ -21,18 +21,20 @@ import {
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { loadConfig, redactedConfig } from "./lib/config.mjs";
+import { loadConfig, redactedConfig, resolveCallTimeoutMs, TIMEOUT_BOUNDS } from "./lib/config.mjs";
 import { GlmError, logError } from "./lib/errors.mjs";
 import { handleReview } from "./lib/review.mjs";
 import { handleConsult } from "./lib/consult.mjs";
 import { handleFreeform } from "./lib/freeform.mjs";
+import { scan } from "./lib/secrets.mjs";
 
 const TOOLS = [
   {
     name: "glm_review",
     description:
       "Delegate a code review to GLM 5.1 and receive structured findings. " +
-      "Supply a git ref for diff-based review (preferred) or a list of file paths. " +
+      "Supply exactly one of: `diff_base` (git ref for diff-based review, preferred) " +
+      "or `paths` (list of file paths). " +
       "Returns JSON with per-finding severity/path/line/message/suggestion.",
     inputSchema: {
       type: "object",
@@ -40,17 +42,29 @@ const TOOLS = [
       properties: {
         diff_base: {
           type: "string",
-          description: "Git ref to diff HEAD against (e.g. 'main', 'origin/main', a SHA).",
+          description:
+            "Git ref to diff HEAD against (e.g. 'main', 'origin/main', a SHA). " +
+            "Mutually exclusive with `paths`.",
         },
         paths: {
           type: "array",
           items: { type: "string" },
           minItems: 1,
-          description: "Explicit file paths (repo-relative or absolute) to review.",
+          description:
+            "Explicit file paths (repo-relative or absolute) to review. " +
+            "Mutually exclusive with `diff_base`.",
         },
         focus: { type: "string", description: "Optional steering text for the reviewer." },
+        timeout_ms: {
+          type: "integer",
+          minimum: TIMEOUT_BOUNDS.min,
+          maximum: TIMEOUT_BOUNDS.max,
+          description:
+            "Optional override for the upstream stream inactivity timeout (ms). " +
+            "Defaults to GLM_TIMEOUT_MS (600000). NOTE: this cannot exceed the MCP " +
+            "client's own tool-call timeout (e.g. Codex's tool_timeout_sec).",
+        },
       },
-      oneOf: [{ required: ["diff_base"] }, { required: ["paths"] }],
     },
   },
   {
@@ -69,6 +83,15 @@ const TOOLS = [
           items: { type: "string" },
           description: "Optional files to attach verbatim as context.",
         },
+        timeout_ms: {
+          type: "integer",
+          minimum: TIMEOUT_BOUNDS.min,
+          maximum: TIMEOUT_BOUNDS.max,
+          description:
+            "Optional override for the upstream stream inactivity timeout (ms). " +
+            "Defaults to GLM_TIMEOUT_MS (600000). NOTE: this cannot exceed the MCP " +
+            "client's own tool-call timeout (e.g. Codex's tool_timeout_sec).",
+        },
       },
     },
   },
@@ -82,6 +105,15 @@ const TOOLS = [
       required: ["prompt"],
       properties: {
         prompt: { type: "string", minLength: 1 },
+        timeout_ms: {
+          type: "integer",
+          minimum: TIMEOUT_BOUNDS.min,
+          maximum: TIMEOUT_BOUNDS.max,
+          description:
+            "Optional override for the upstream stream inactivity timeout (ms). " +
+            "Defaults to GLM_TIMEOUT_MS (600000). NOTE: this cannot exceed the MCP " +
+            "client's own tool-call timeout (e.g. Codex's tool_timeout_sec).",
+        },
       },
     },
   },
@@ -142,6 +174,16 @@ function main() {
   process.stderr.write(
     `glm-mcp ready | model=${config.model} endpoint=${config.endpoint}\n`,
   );
+  if (config.progress === "reasoning") {
+    // Live reasoning tokens stream to stderr without passing through the
+    // secret scanner — unlike GLM_DEBUG_REASONING=1, which scans before
+    // emitting. Operators enabling this mode should be aware the stream
+    // can contain verbatim file/prompt content.
+    process.stderr.write(
+      `glm-mcp WARNING: GLM_PROGRESS=reasoning streams raw reasoning tokens to stderr unfiltered. ` +
+        `Use GLM_PROGRESS=heartbeat for production.\n`,
+    );
+  }
 }
 
 const HANDLERS = {
@@ -155,9 +197,9 @@ const HANDLERS = {
  * rather than rely on a heavy JSON-schema lib; the surface is tiny.
  */
 const ALLOWED_KEYS = Object.freeze({
-  glm_review: new Set(["diff_base", "paths", "focus"]),
-  glm_consult: new Set(["prompt", "paths"]),
-  glm_freeform: new Set(["prompt"]),
+  glm_review: new Set(["diff_base", "paths", "focus", "timeout_ms"]),
+  glm_consult: new Set(["prompt", "paths", "timeout_ms"]),
+  glm_freeform: new Set(["prompt", "timeout_ms"]),
 });
 
 function rejectUnknownKeys(name, input) {
@@ -175,6 +217,9 @@ function validateToolInput(name, raw) {
     throw new GlmError("INVALID_INPUT", `${name}: arguments must be an object`);
   }
   rejectUnknownKeys(name, input);
+  // Shared across all three tools. Throws INVALID_INPUT on a bad value;
+  // returns undefined when absent (handler falls back to config.timeoutMs).
+  if ("timeout_ms" in input) resolveCallTimeoutMs(input.timeout_ms);
   if (name === "glm_review") {
     const hasBase = "diff_base" in input;
     const hasPaths = "paths" in input;
@@ -232,7 +277,32 @@ function buildSuccessResponse(name, result, reasoning, config) {
     blocks.push({ type: "text", text: result });
   }
   if (config.debugReasoning && reasoning) {
-    blocks.push({ type: "text", text: `--- reasoning ---\n${reasoning}` });
+    // The scanner only runs over outbound prompts pre-flight; reasoning is
+    // the model's output and may echo file content that included secrets
+    // the scanner missed. Scan before surfacing, and redact if anything is
+    // flagged (unless the operator has explicitly allowed secrets).
+    //
+    // A scanner failure (e.g., pathological regex behavior on adversarial
+    // input) must not lose the primary tool result. Fall back to the
+    // redaction path on any exception.
+    let clean;
+    try {
+      ({ clean } = scan(reasoning, "reasoning"));
+    } catch (e) {
+      logError(new GlmError("INTERNAL", `reasoning secret-scan failed: ${e?.message ?? e}`, { cause: e }));
+      clean = false;
+    }
+    if (clean || config.allowSecrets) {
+      blocks.push({ type: "text", text: `--- reasoning ---\n${reasoning}` });
+    } else {
+      blocks.push({
+        type: "text",
+        text:
+          `--- reasoning (redacted) ---\n` +
+          `Model reasoning was withheld (scanner flagged it or failed). ` +
+          `Set GLM_ALLOW_SECRETS=1 to include it anyway.`,
+      });
+    }
   }
   return { content: blocks };
 }

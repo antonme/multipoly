@@ -3,6 +3,8 @@ import { gatherConsult } from "./gather.mjs";
 import { scanMany, formatHitsForError } from "./secrets.mjs";
 import { streamChatCompletion } from "./client.mjs";
 import { CONSULT_SYSTEM_PROMPT, renderConsultUserMessage } from "./prompts.mjs";
+import { assertContentBudget } from "./budget.mjs";
+import { resolveCallTimeoutMs } from "./config.mjs";
 
 export async function handleConsult(input, { config, fetchImpl } = {}) {
   const gathered = await gatherConsult({
@@ -27,11 +29,16 @@ export async function handleConsult(input, { config, fetchImpl } = {}) {
     { role: "user", content: renderConsultUserMessage(gathered.prompt, gathered.files) },
   ];
 
-  const { content, reasoning } = await streamChatCompletion({
+  const attempt = await streamChatCompletion({
     config,
     messages,
     mode: "consult",
+    timeoutMs: resolveCallTimeoutMs(input.timeout_ms),
     fetchImpl,
   });
-  return { result: content, reasoning };
+  const { truncated } = assertContentBudget(attempt, config.maxTokens.consult, "consult");
+  const result = truncated
+    ? `${attempt.content}\n\n> ⚠ Output truncated at GLM_MAX_TOKENS_CONSULT (${config.maxTokens.consult}). Raise the cap for a complete answer.`
+    : attempt.content;
+  return { result, reasoning: attempt.reasoning };
 }

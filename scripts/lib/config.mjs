@@ -5,6 +5,33 @@ const ENDPOINT_PROFILES = Object.freeze({
   "bigmodel-cn": "https://open.bigmodel.cn/api/paas/v4",
 });
 
+// Shared bounds for the upstream stream inactivity timeout, applied to both
+// the GLM_TIMEOUT_MS env var and the per-call `timeout_ms` tool argument so
+// they can't disagree. Max stays below Node's setTimeout 32-bit overflow.
+export const TIMEOUT_BOUNDS = Object.freeze({ min: 1, max: 3_600_000 });
+
+/**
+ * Validate a per-call timeout override (the `timeout_ms` tool argument).
+ * Returns the integer ms, or undefined when not supplied. Throws
+ * INVALID_INPUT on a malformed or out-of-range value so the caller gets a
+ * clear error instead of a silently-ignored argument.
+ */
+export function resolveCallTimeoutMs(raw) {
+  if (raw === undefined || raw === null) return undefined;
+  if (
+    typeof raw !== "number" ||
+    !Number.isInteger(raw) ||
+    raw < TIMEOUT_BOUNDS.min ||
+    raw > TIMEOUT_BOUNDS.max
+  ) {
+    throw new GlmError(
+      "INVALID_INPUT",
+      `timeout_ms must be an integer in [${TIMEOUT_BOUNDS.min}, ${TIMEOUT_BOUNDS.max}] ms, got ${JSON.stringify(raw)}`,
+    );
+  }
+  return raw;
+}
+
 function parseBool(raw, fallback) {
   if (raw === undefined || raw === "") return fallback;
   const v = String(raw).toLowerCase();
@@ -13,13 +40,62 @@ function parseBool(raw, fallback) {
   return fallback;
 }
 
-function parseInteger(raw, fallback, { min = 1 } = {}) {
+function parseInteger(raw, fallback, { min = 1, max = Number.MAX_SAFE_INTEGER } = {}) {
   if (raw === undefined || raw === "") return fallback;
   const n = Number(raw);
-  if (!Number.isFinite(n) || !Number.isInteger(n) || n < min) {
-    throw new GlmError("CONFIG", `expected integer >= ${min}, got ${JSON.stringify(raw)}`);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n < min || n > max) {
+    throw new GlmError(
+      "CONFIG",
+      `expected integer in [${min}, ${max}], got ${JSON.stringify(raw)}`,
+    );
   }
   return n;
+}
+
+/**
+ * Validate a caller-supplied GLM_BASE_URL. The API key is sent as a bearer to
+ * this URL, so arbitrary schemes (file://, ftp://, http://) or empty hosts
+ * would be a credential-exfiltration risk. Require https by default; allow
+ * http only for loopback hosts (dev proxies).
+ */
+function validateCustomBaseUrl(raw) {
+  const trimmed = String(raw).trim().replace(/\/+$/, "");
+  let u;
+  try {
+    u = new URL(trimmed);
+  } catch {
+    throw new GlmError("CONFIG", `GLM_BASE_URL is not a valid URL: ${JSON.stringify(raw)}`);
+  }
+  if (u.username || u.password) {
+    throw new GlmError("CONFIG", `GLM_BASE_URL must not contain userinfo`);
+  }
+  if (!u.hostname) {
+    throw new GlmError("CONFIG", `GLM_BASE_URL must have a hostname`);
+  }
+  if (u.search || u.hash) {
+    // A query or fragment would be clobbered when the client appends
+    // `/chat/completions`, so reject at parse time rather than misroute later.
+    throw new GlmError("CONFIG", `GLM_BASE_URL must not contain a query or fragment`);
+  }
+  // WHATWG URL returns IPv6 hosts in bracket form (e.g. "[::1]"). Strip the
+  // brackets before comparing against loopback literals. Accept the full
+  // 127.0.0.0/8 range plus IPv6 loopback variants (including the v4-mapped
+  // form ::ffff:127.0.0.1) so local dev proxies aren't rejected on
+  // platforms that prefer them.
+  const host = u.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  // WHATWG URL normalizes "::ffff:127.0.0.1" to "::ffff:7f00:1", so the
+  // IPv4-mapped loopback range lands as "::ffff:7f[00-ff]:[0-ffff]".
+  const isLoopback =
+    host === "localhost" ||
+    host === "::1" ||
+    /^127(?:\.\d{1,3}){3}$/.test(host) ||
+    /^::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}$/.test(host);
+  if (u.protocol === "https:") return trimmed;
+  if (u.protocol === "http:" && isLoopback) return trimmed;
+  throw new GlmError(
+    "CONFIG",
+    `GLM_BASE_URL must use https:// (http:// allowed only for loopback), got ${u.protocol}//${u.hostname}`,
+  );
 }
 
 function parseThinking(raw) {
@@ -38,7 +114,7 @@ export function loadConfig(env = process.env) {
     if (!env.GLM_BASE_URL) {
       throw new GlmError("CONFIG", "GLM_ENDPOINT=custom requires GLM_BASE_URL");
     }
-    baseUrl = env.GLM_BASE_URL.replace(/\/+$/, "");
+    baseUrl = validateCustomBaseUrl(env.GLM_BASE_URL);
   } else if (ENDPOINT_PROFILES[endpoint]) {
     baseUrl = ENDPOINT_PROFILES[endpoint];
   } else {
@@ -49,7 +125,11 @@ export function loadConfig(env = process.env) {
     );
   }
 
-  const apiKey = env.GLM_API_KEY || env.ZHIPU_API_KEY;
+  // Trim before falling through: a whitespace-only GLM_API_KEY (common in
+  // misconfigured shell exports: `export GLM_API_KEY= "$(cmd)"`) previously
+  // won the OR and produced `Authorization: Bearer    ` → 401, even when
+  // ZHIPU_API_KEY held a valid key.
+  const apiKey = (env.GLM_API_KEY || "").trim() || (env.ZHIPU_API_KEY || "").trim();
   if (!apiKey) {
     throw new GlmError(
       "AUTH",
@@ -60,10 +140,16 @@ export function loadConfig(env = process.env) {
   const model = env.GLM_MODEL || "glm-5.1";
   const thinking = parseThinking(env.GLM_THINKING);
 
+  // GLM 5.1's published output limit is 131072 tokens (models.dev / opencode);
+  // reasoning tokens share that budget with content. Defaulting below the
+  // model's spec causes multi-file reviews to emit zero content bytes after
+  // spending the budget on reasoning. Keep defaults at the model ceiling; users
+  // can lower via env vars if they want tighter caps.
+  const MODEL_OUTPUT_CEILING = 131072;
   const maxTokens = {
-    review: parseInteger(env.GLM_MAX_TOKENS_REVIEW, 8192),
-    consult: parseInteger(env.GLM_MAX_TOKENS_CONSULT, 16384),
-    freeform: parseInteger(env.GLM_MAX_TOKENS_FREEFORM, 16384),
+    review: parseInteger(env.GLM_MAX_TOKENS_REVIEW, MODEL_OUTPUT_CEILING),
+    consult: parseInteger(env.GLM_MAX_TOKENS_CONSULT, MODEL_OUTPUT_CEILING),
+    freeform: parseInteger(env.GLM_MAX_TOKENS_FREEFORM, MODEL_OUTPUT_CEILING),
   };
 
   const caps = {
@@ -72,9 +158,21 @@ export function loadConfig(env = process.env) {
     fileCount: parseInteger(env.GLM_FILE_COUNT_CAP, 50),
   };
 
-  const timeoutMs = parseInteger(env.GLM_TIMEOUT_MS, 300_000);
+  // Default 600s: GLM 5.1 in thinking mode can stream reasoning for several
+  // minutes on a large multi-file review before the first content byte. This
+  // is an INACTIVITY timeout (every SSE chunk resets it), so a healthy long
+  // review never trips it; 600s only bounds a genuinely stalled upstream.
+  // Cap at 1h, comfortably below Node's setTimeout 32-bit overflow
+  // (2^31-1 ms ≈ 24.8d, beyond which the timer wraps and fires immediately).
+  // NOTE: this only governs the GLM<->upstream stream. The MCP *client*
+  // (Claude Code, Codex, opencode) imposes its own tool-call timeout on top —
+  // e.g. Codex's is a fixed 120s — which this value cannot extend. A per-call
+  // `timeout_ms` argument can lower this for a single call but likewise can't
+  // exceed the client's ceiling.
+  const timeoutMs = parseInteger(env.GLM_TIMEOUT_MS, 600_000, TIMEOUT_BOUNDS);
   const allowSecrets = parseBool(env.GLM_ALLOW_SECRETS, false);
   const debugReasoning = parseBool(env.GLM_DEBUG_REASONING, false);
+  const progress = parseProgress(env.GLM_PROGRESS);
 
   return Object.freeze({
     endpoint,
@@ -87,7 +185,20 @@ export function loadConfig(env = process.env) {
     timeoutMs,
     allowSecrets,
     debugReasoning,
+    progress,
   });
+}
+
+function parseProgress(raw) {
+  if (raw === undefined || raw === "") return "heartbeat";
+  const v = String(raw).toLowerCase();
+  if (v === "off" || v === "none" || v === "0" || v === "false") return "off";
+  if (v === "heartbeat" || v === "on" || v === "1" || v === "true") return "heartbeat";
+  if (v === "reasoning" || v === "full") return "reasoning";
+  throw new GlmError(
+    "CONFIG",
+    `GLM_PROGRESS must be one of off|heartbeat|reasoning, got ${JSON.stringify(raw)}`,
+  );
 }
 
 /** Redact sensitive fields for logging. */

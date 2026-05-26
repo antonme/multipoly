@@ -1,6 +1,16 @@
 import { realpath, stat, open } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import path from "node:path";
 import { GlmError } from "./errors.mjs";
+
+// O_NOFOLLOW rejects symlinks at open time on Linux/macOS/BSD. Windows
+// doesn't define it in the same way; we fall back to default read flags
+// there. This narrows the TOCTOU window between realpath() containment
+// and the subsequent read: a symlink swapped in after containment would
+// be refused at open.
+const READ_FLAGS = fsConstants.O_NOFOLLOW !== undefined
+  ? fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW
+  : "r";
 
 /**
  * Resolve candidate via realpath, assert it is inside (or equal to) rootRealpath.
@@ -16,14 +26,25 @@ export async function containPath(rootRealpath, candidate, { cwd = process.cwd()
   try {
     resolved = await realpath(absolute);
   } catch (e) {
+    // Tag the error kind so callers can render a meaningful reason without
+    // re-parsing the message string. `kind` is not rendered into the LLM-facing
+    // prompt — callers translate it into a fixed taxonomy.
     if (e.code === "ENOENT") {
-      throw new GlmError("FS", `path does not exist: ${candidate}`, { cause: e });
+      throw new GlmError("FS", `path does not exist: ${candidate}`, {
+        cause: e,
+        details: { kind: "missing" },
+      });
     }
-    throw new GlmError("FS", `cannot resolve path: ${candidate}: ${e.message}`, { cause: e });
+    throw new GlmError("FS", `cannot resolve path: ${candidate}: ${e.message}`, {
+      cause: e,
+      details: { kind: "resolve_failed" },
+    });
   }
   const root = rootRealpath.endsWith(path.sep) ? rootRealpath : rootRealpath + path.sep;
   if (resolved !== rootRealpath && !resolved.startsWith(root)) {
-    throw new GlmError("FS", `path escapes root: ${candidate}`);
+    throw new GlmError("FS", `path escapes root: ${candidate}`, {
+      details: { kind: "escapes_root" },
+    });
   }
   return resolved;
 }
@@ -34,7 +55,7 @@ export async function containPath(rootRealpath, candidate, { cwd = process.cwd()
 export async function isBinaryFile(absPath, sniffBytes = 4096) {
   let fh;
   try {
-    fh = await open(absPath, "r");
+    fh = await open(absPath, READ_FLAGS);
     const buf = Buffer.alloc(sniffBytes);
     const { bytesRead } = await fh.read(buf, 0, sniffBytes, 0);
     for (let i = 0; i < bytesRead; i++) {
@@ -73,12 +94,15 @@ export async function readFileCapped(absPath, cap, { allowTruncate = false } = {
   }
   let fh;
   try {
-    fh = await open(absPath, "r");
+    // O_NOFOLLOW rejects symlink races between stat and read (see READ_FLAGS
+    // above). Slice the buffer to the actual bytesRead — if the file shrunk
+    // between stat and read we'd otherwise emit trailing NUL bytes.
+    fh = await open(absPath, READ_FLAGS);
     const readLen = Math.min(size, cap);
     const buf = Buffer.alloc(readLen);
-    await fh.read(buf, 0, readLen, 0);
+    const { bytesRead } = await fh.read(buf, 0, readLen, 0);
     return {
-      content: buf.toString("utf8"),
+      content: buf.toString("utf8", 0, bytesRead),
       size,
       truncated: size > cap,
       overCap: false,

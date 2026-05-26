@@ -9,6 +9,10 @@
  * `additionalProperties: false` on every object). The server-authoritative
  * `truncated` and `files` fields are merged post-parse, not emitted by the model.
  */
+// OpenAI-style strict mode requires every property in `properties` to be in
+// `required`; fields that are semantically optional must instead be nullable
+// (union with "null"). Otherwise the upstream rejects the schema and we fall
+// back to json_object — losing structured-output enforcement on every call.
 export const REVIEW_SCHEMA = Object.freeze({
   type: "object",
   additionalProperties: false,
@@ -20,14 +24,14 @@ export const REVIEW_SCHEMA = Object.freeze({
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["severity", "path", "message"],
+        required: ["severity", "path", "line", "end_line", "message", "suggestion"],
         properties: {
           severity: { type: "string", enum: ["blocker", "high", "medium", "low", "nit"] },
           path: { type: "string", minLength: 1 },
-          line: { type: "integer", minimum: 1 },
-          end_line: { type: "integer", minimum: 1 },
+          line: { type: ["integer", "null"], minimum: 1 },
+          end_line: { type: ["integer", "null"], minimum: 1 },
           message: { type: "string", minLength: 1 },
-          suggestion: { type: "string" },
+          suggestion: { type: ["string", "null"] },
         },
       },
     },
@@ -87,14 +91,22 @@ export function validateReview(obj) {
     if (typeof f.message !== "string" || f.message.length === 0) {
       return { valid: false, reason: `findings[${i}].message must be a non-empty string` };
     }
-    if (f.line !== undefined && (!Number.isInteger(f.line) || f.line < 1)) {
-      return { valid: false, reason: `findings[${i}].line must be a positive integer` };
+    if (f.line != null && (!Number.isInteger(f.line) || f.line < 1)) {
+      return { valid: false, reason: `findings[${i}].line must be a positive integer or null` };
     }
-    if (f.end_line !== undefined && (!Number.isInteger(f.end_line) || f.end_line < 1)) {
-      return { valid: false, reason: `findings[${i}].end_line must be a positive integer` };
+    if (f.end_line != null && (!Number.isInteger(f.end_line) || f.end_line < 1)) {
+      return { valid: false, reason: `findings[${i}].end_line must be a positive integer or null` };
     }
-    if (f.suggestion !== undefined && typeof f.suggestion !== "string") {
-      return { valid: false, reason: `findings[${i}].suggestion must be a string` };
+    if (f.line != null && f.end_line != null && f.end_line < f.line) {
+      return { valid: false, reason: `findings[${i}].end_line must be >= line` };
+    }
+    // An end_line without a line is a nonsense range — reject so callers
+    // never render `line=null, end_line=N` in a UI.
+    if (f.line == null && f.end_line != null) {
+      return { valid: false, reason: `findings[${i}].end_line requires line` };
+    }
+    if (f.suggestion != null && typeof f.suggestion !== "string") {
+      return { valid: false, reason: `findings[${i}].suggestion must be a string or null` };
     }
   }
   return { valid: true };
