@@ -200,7 +200,7 @@ class ProgressReporter {
     this.start_ms = Date.now();
     this.lastHeartbeat = this.start_ms;
     process.stderr.write(
-      `[glm ${this.callMode} ${this.correlationId}] streaming…\n`,
+      `[multipoly ${this.callMode} ${this.correlationId}] streaming…\n`,
     );
   }
 
@@ -209,7 +209,7 @@ class ProgressReporter {
     this.reasoningChars += delta.length;
     if (this.mode === "reasoning") {
       if (!this.reasoningEmittedAny) {
-        process.stderr.write(`[glm ${this.callMode}] thinking:\n`);
+        process.stderr.write(`[multipoly ${this.callMode}] thinking:\n`);
         this.reasoningEmittedAny = true;
       }
       process.stderr.write(delta);
@@ -224,7 +224,7 @@ class ProgressReporter {
     if (this.mode === "reasoning" && this.heartbeatPhase !== "content") {
       // Close out the reasoning dump with a newline so the next line is clean.
       if (this.reasoningEmittedAny) process.stderr.write("\n");
-      process.stderr.write(`[glm ${this.callMode}] generating…\n`);
+      process.stderr.write(`[multipoly ${this.callMode}] generating…\n`);
     }
     this.heartbeatPhase = "content";
     if (this.mode === "heartbeat") this.maybeHeartbeat("generating");
@@ -238,7 +238,7 @@ class ProgressReporter {
     this.heartbeatPhase = phase;
     const elapsed = Math.round((now - this.start_ms) / 1000);
     process.stderr.write(
-      `[glm ${this.callMode}] ${phase} reasoning=${this.reasoningChars}c content=${this.contentChars}c elapsed=${elapsed}s\n`,
+      `[multipoly ${this.callMode}] ${phase} reasoning=${this.reasoningChars}c content=${this.contentChars}c elapsed=${elapsed}s\n`,
     );
   }
 
@@ -247,7 +247,7 @@ class ProgressReporter {
     const elapsed = Math.round((Date.now() - this.start_ms) / 1000);
     const tag = aborted ? "aborted" : `done${finishReason ? `:${finishReason}` : ""}`;
     process.stderr.write(
-      `[glm ${this.callMode}] ${tag} reasoning=${reasoningChars}c content=${contentChars}c elapsed=${elapsed}s\n`,
+      `[multipoly ${this.callMode}] ${tag} reasoning=${reasoningChars}c content=${contentChars}c elapsed=${elapsed}s\n`,
     );
   }
 }

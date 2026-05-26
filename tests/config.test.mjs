@@ -106,6 +106,39 @@ test("config: numeric overrides accepted", () => {
   assert.equal(c.caps.perFile, 1024);
 });
 
+test("config: MULTIPOLY server-wide env vars override legacy GLM env vars", () => {
+  const c = loadConfig({
+    ...base,
+    GLM_THINKING: "off",
+    MULTIPOLY_THINKING: "on",
+    GLM_MAX_TOKENS_REVIEW: "1000",
+    MULTIPOLY_MAX_TOKENS_REVIEW: "2000",
+    GLM_TIMEOUT_MS: "60000",
+    MULTIPOLY_TIMEOUT_MS: "70000",
+    GLM_PROGRESS: "off",
+    MULTIPOLY_PROGRESS: "heartbeat",
+    GLM_ALLOW_SECRETS: "0",
+    MULTIPOLY_ALLOW_SECRETS: "1",
+    GLM_DEBUG_REASONING: "0",
+    MULTIPOLY_DEBUG_REASONING: "1",
+    GLM_PER_FILE_CAP_BYTES: "1024",
+    MULTIPOLY_PER_FILE_CAP_BYTES: "2048",
+    GLM_TOTAL_CAP_BYTES: "4096",
+    MULTIPOLY_TOTAL_CAP_BYTES: "8192",
+    GLM_FILE_COUNT_CAP: "5",
+    MULTIPOLY_FILE_COUNT_CAP: "9",
+  });
+  assert.equal(c.thinking, "on");
+  assert.equal(c.maxTokens.review, 2000);
+  assert.equal(c.timeoutMs, 70000);
+  assert.equal(c.progress, "heartbeat");
+  assert.equal(c.allowSecrets, true);
+  assert.equal(c.debugReasoning, true);
+  assert.equal(c.caps.perFile, 2048);
+  assert.equal(c.caps.total, 8192);
+  assert.equal(c.caps.fileCount, 9);
+});
+
 test("config: resolveCallTimeoutMs — absent returns undefined", () => {
   assert.equal(resolveCallTimeoutMs(undefined), undefined);
   assert.equal(resolveCallTimeoutMs(null), undefined);

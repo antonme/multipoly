@@ -33,14 +33,14 @@ export function assertContentBudget(attempt, maxTokens, mode) {
   const truncated = attempt.finishReason === "length";
   if (!strictlyEmpty && !truncated) return { truncated: false };
 
-  const envVar = `GLM_MAX_TOKENS_${mode.toUpperCase()}`;
+  const envVar = `MULTIPOLY_MAX_TOKENS_${mode.toUpperCase()}`;
   const details = { finishReason: attempt.finishReason, usage: attempt.usage };
 
   if (strictlyEmpty && truncated) {
     throw new GlmError(
       "BUDGET",
       `model exhausted max_tokens (${maxTokens}) during reasoning and emitted no content. ` +
-        `Raise ${envVar}, reduce the number of files per call, or set GLM_THINKING=off.`,
+        `Raise ${envVar}, reduce the number of files per call, or set MULTIPOLY_THINKING=off.`,
       { details },
     );
   }
@@ -49,7 +49,7 @@ export function assertContentBudget(attempt, maxTokens, mode) {
       "BUDGET",
       `model returned empty content (finish_reason=${attempt.finishReason ?? "null"}). ` +
         `For GLM 5.1 in thinking mode the reasoning budget may have consumed max_tokens. ` +
-        `Raise ${envVar} or set GLM_THINKING=off.`,
+        `Raise ${envVar} or set MULTIPOLY_THINKING=off.`,
       { details },
     );
   }

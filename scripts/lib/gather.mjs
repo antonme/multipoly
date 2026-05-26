@@ -274,7 +274,7 @@ export async function gatherConsult({ prompt, paths, cwd = process.cwd(), caps }
     if (files.length >= caps.fileCount) {
       throw new GlmError(
         "INVALID_INPUT",
-        `too many attached files (cap ${caps.fileCount}). Reduce the attachment set or raise GLM_FILE_COUNT_CAP.`,
+        `too many attached files (cap ${caps.fileCount}). Reduce the attachment set or raise MULTIPOLY_FILE_COUNT_CAP.`,
       );
     }
     // Resolve relative paths against the repo root, not the process cwd.
@@ -284,13 +284,13 @@ export async function gatherConsult({ prompt, paths, cwd = process.cwd(), caps }
     if (size > caps.perFile) {
       throw new GlmError(
         "INVALID_INPUT",
-        `attached file ${rel} is ${size} bytes (over per-file cap ${caps.perFile}). Split the file or increase GLM_PER_FILE_CAP_BYTES.`,
+        `attached file ${rel} is ${size} bytes (over per-file cap ${caps.perFile}). Split the file or increase MULTIPOLY_PER_FILE_CAP_BYTES.`,
       );
     }
     if (bytesUsed + size > caps.total) {
       throw new GlmError(
         "INVALID_INPUT",
-        `attached files exceed total cap ${caps.total} bytes. Reduce the attachment set or increase GLM_TOTAL_CAP_BYTES.`,
+        `attached files exceed total cap ${caps.total} bytes. Reduce the attachment set or increase MULTIPOLY_TOTAL_CAP_BYTES.`,
       );
     }
     if (await isBinaryFile(abs)) {
@@ -311,7 +311,7 @@ export async function gatherConsult({ prompt, paths, cwd = process.cwd(), caps }
     if (bytesUsed + actual > caps.total) {
       throw new GlmError(
         "INVALID_INPUT",
-        `attached file ${rel} would push total past cap ${caps.total} after UTF-8 decoding. Reduce the attachment set or increase GLM_TOTAL_CAP_BYTES.`,
+        `attached file ${rel} would push total past cap ${caps.total} after UTF-8 decoding. Reduce the attachment set or increase MULTIPOLY_TOTAL_CAP_BYTES.`,
       );
     }
     files.push({ path: rel, content });

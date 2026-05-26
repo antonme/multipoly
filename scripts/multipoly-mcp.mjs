@@ -175,12 +175,12 @@ function main() {
   process.stderr.write(`multipoly-mcp ready | models=${configuredModels || "none"}\n`);
   if (config.progress === "reasoning") {
     // Live reasoning tokens stream to stderr without passing through the
-    // secret scanner — unlike GLM_DEBUG_REASONING=1, which scans before
+    // secret scanner — unlike MULTIPOLY_DEBUG_REASONING=1, which scans before
     // emitting. Operators enabling this mode should be aware the stream
     // can contain verbatim file/prompt content.
     process.stderr.write(
-      `multipoly-mcp WARNING: GLM_PROGRESS=reasoning streams raw reasoning tokens to stderr unfiltered. ` +
-        `Use GLM_PROGRESS=heartbeat for production.\n`,
+      `multipoly-mcp WARNING: MULTIPOLY_PROGRESS=reasoning streams raw reasoning tokens to stderr unfiltered. ` +
+        `Use MULTIPOLY_PROGRESS=heartbeat for production.\n`,
     );
   }
 }
@@ -328,7 +328,7 @@ function buildSuccessResponse(name, result, reasoning, config) {
         text:
           `--- reasoning (redacted) ---\n` +
           `Model reasoning was withheld (scanner flagged it or failed). ` +
-          `Set GLM_ALLOW_SECRETS=1 to include it anyway.`,
+          `Set MULTIPOLY_ALLOW_SECRETS=1 to include it anyway.`,
       });
     }
   }

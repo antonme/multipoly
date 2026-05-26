@@ -23,8 +23,6 @@ export const CONSULT_SYSTEM_PROMPT = `You are a senior engineer giving a second 
 - Be concise. Markdown with light structure (short sections or bullets) is fine.
 - No sycophancy, no "great question" openers.`;
 
-export const FREEFORM_SYSTEM_PROMPT = `You are a capable, terse assistant. Answer directly. Use markdown when helpful.`;
-
 /**
  * Wrap `content` in a fenced code block using a fence longer than any run of
  * backticks inside the content. Prevents a reviewed file that itself contains

@@ -7,8 +7,8 @@ const ENDPOINT_PROFILES = Object.freeze({
 });
 
 // Shared bounds for the upstream stream inactivity timeout, applied to both
-// the GLM_TIMEOUT_MS env var and the per-call `timeout_ms` tool argument so
-// they can't disagree. Max stays below Node's setTimeout 32-bit overflow.
+// the env-derived timeout and the per-call `timeout_ms` tool argument so they
+// can't disagree. Max stays below Node's setTimeout 32-bit overflow.
 export const TIMEOUT_BOUNDS = Object.freeze({ min: 1, max: 3_600_000 });
 
 /**
@@ -164,7 +164,7 @@ function parseThinking(raw) {
   if (["on", "1", "true", "yes"].includes(v)) return "on";
   if (["off", "0", "false", "no"].includes(v)) return "off";
   if (v === "auto") return "auto";
-  throw new GlmError("CONFIG", `GLM_THINKING must be one of on|off|auto, got ${JSON.stringify(raw)}`);
+  throw new GlmError("CONFIG", `MULTIPOLY_THINKING must be one of on|off|auto, got ${JSON.stringify(raw)}`);
 }
 
 export function loadConfig(env = process.env) {
@@ -179,7 +179,7 @@ export function loadConfig(env = process.env) {
     );
   }
 
-  const thinking = parseThinking(env.GLM_THINKING);
+  const thinking = parseThinking(env.MULTIPOLY_THINKING ?? env.GLM_THINKING);
 
   // GLM 5.1's published output limit is 131072 tokens (models.dev / opencode);
   // reasoning tokens share that budget with content. Defaulting below the
@@ -188,15 +188,15 @@ export function loadConfig(env = process.env) {
   // can lower via env vars if they want tighter caps.
   const MODEL_OUTPUT_CEILING = 131072;
   const maxTokens = {
-    review: parseInteger(env.GLM_MAX_TOKENS_REVIEW, MODEL_OUTPUT_CEILING),
-    consult: parseInteger(env.GLM_MAX_TOKENS_CONSULT, MODEL_OUTPUT_CEILING),
-    freeform: parseInteger(env.GLM_MAX_TOKENS_FREEFORM, MODEL_OUTPUT_CEILING),
+    review: parseInteger(env.MULTIPOLY_MAX_TOKENS_REVIEW ?? env.GLM_MAX_TOKENS_REVIEW, MODEL_OUTPUT_CEILING),
+    consult: parseInteger(env.MULTIPOLY_MAX_TOKENS_CONSULT ?? env.GLM_MAX_TOKENS_CONSULT, MODEL_OUTPUT_CEILING),
+    freeform: parseInteger(env.MULTIPOLY_MAX_TOKENS_FREEFORM ?? env.GLM_MAX_TOKENS_FREEFORM, MODEL_OUTPUT_CEILING),
   };
 
   const caps = {
-    perFile: parseInteger(env.GLM_PER_FILE_CAP_BYTES, 256 * 1024),
-    total: parseInteger(env.GLM_TOTAL_CAP_BYTES, 1536 * 1024),
-    fileCount: parseInteger(env.GLM_FILE_COUNT_CAP, 50),
+    perFile: parseInteger(env.MULTIPOLY_PER_FILE_CAP_BYTES ?? env.GLM_PER_FILE_CAP_BYTES, 256 * 1024),
+    total: parseInteger(env.MULTIPOLY_TOTAL_CAP_BYTES ?? env.GLM_TOTAL_CAP_BYTES, 1536 * 1024),
+    fileCount: parseInteger(env.MULTIPOLY_FILE_COUNT_CAP ?? env.GLM_FILE_COUNT_CAP, 50),
   };
 
   // Default 600s: GLM 5.1 in thinking mode can stream reasoning for several
@@ -210,10 +210,10 @@ export function loadConfig(env = process.env) {
   // e.g. Codex's is a fixed 120s — which this value cannot extend. A per-call
   // `timeout_ms` argument can lower this for a single call but likewise can't
   // exceed the client's ceiling.
-  const timeoutMs = parseInteger(env.GLM_TIMEOUT_MS, 600_000, TIMEOUT_BOUNDS);
-  const allowSecrets = parseBool(env.GLM_ALLOW_SECRETS, false);
-  const debugReasoning = parseBool(env.GLM_DEBUG_REASONING, false);
-  const progress = parseProgress(env.GLM_PROGRESS);
+  const timeoutMs = parseInteger(env.MULTIPOLY_TIMEOUT_MS ?? env.GLM_TIMEOUT_MS, 600_000, TIMEOUT_BOUNDS);
+  const allowSecrets = parseBool(env.MULTIPOLY_ALLOW_SECRETS ?? env.GLM_ALLOW_SECRETS, false);
+  const debugReasoning = parseBool(env.MULTIPOLY_DEBUG_REASONING ?? env.GLM_DEBUG_REASONING, false);
+  const progress = parseProgress(env.MULTIPOLY_PROGRESS ?? env.GLM_PROGRESS);
 
   return Object.freeze({
     models,
@@ -235,7 +235,7 @@ function parseProgress(raw) {
   if (v === "reasoning" || v === "full") return "reasoning";
   throw new GlmError(
     "CONFIG",
-    `GLM_PROGRESS must be one of off|heartbeat|reasoning, got ${JSON.stringify(raw)}`,
+    `MULTIPOLY_PROGRESS must be one of off|heartbeat|reasoning, got ${JSON.stringify(raw)}`,
   );
 }
 
