@@ -6,11 +6,8 @@ import {
   loadModelRegistry,
   CLI_KINDS,
   ANTHROPIC_VERSION,
+  validateEnvVarName,
 } from "./models.mjs";
-
-// An environment variable NAME (not value): used to validate authTokenEnv,
-// which names the env var whose value a cli transport injects into the child.
-const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 const ENDPOINT_PROFILES = Object.freeze({
   "zai-coding-plan": "https://api.z.ai/api/coding/paas/v4",
@@ -146,17 +143,6 @@ function resolveModelMaxTokens(env, key, prefix, serverMaxTokens) {
     key === "glm" || serverMaxTokens.explicit.consult ? serverMaxTokens.values.consult : undefined,
   );
   return Object.freeze({ review, consult });
-}
-
-function validateEnvVarName(raw, label) {
-  const v = String(raw).trim();
-  if (!ENV_NAME_RE.test(v)) {
-    throw new MultipolyError(
-      "CONFIG",
-      `${label} must be a valid environment variable NAME (letters/digits/underscore, no leading digit), got ${JSON.stringify(raw)}`,
-    );
-  }
-  return v;
 }
 
 function parseCwdMode(raw, label) {
@@ -301,16 +287,31 @@ function loadCliModelConfig(env, key, info, serverMaxTokens) {
     // Registry validation should have caught this; defensive.
     throw new MultipolyError("CONFIG", `${prefix}: unknown cli kind ${JSON.stringify(cliKind)}`);
   }
-  const binary = (env[`${prefix}_CLI`] || "").trim() || kindDef.binary;
-  const model = (env[`${prefix}_MODEL`] || "").trim() || info.defaultModel || kindDef.defaultModel || null;
-  const authTokenEnvRaw = (env[`${prefix}_AUTH_TOKEN_ENV`] || "").trim();
+  // Env vars take precedence over file-declared (info.*) values, which in turn
+  // fall back to the cli-kind defaults. This lets a registry-file model be
+  // tuned per-deployment via env without editing the file.
+  const binary = (env[`${prefix}_CLI`] || "").trim() || info.binary || kindDef.binary;
+  const model =
+    (env[`${prefix}_MODEL`] || "").trim() || info.defaultModel || kindDef.defaultModel || null;
+  const authTokenEnvRaw = (env[`${prefix}_AUTH_TOKEN_ENV`] || "").trim() || info.authTokenEnv || "";
   const authTokenEnv = authTokenEnvRaw
     ? validateEnvVarName(authTokenEnvRaw, `${prefix}_AUTH_TOKEN_ENV`)
     : null;
-  const cwdMode = parseCwdMode(env[`${prefix}_CWD`], `${prefix}_CWD`);
-  const unsafe = parseBool(env[`${prefix}_UNSAFE`], false);
-  const reasoningEffort = (env[`${prefix}_REASONING_EFFORT`] || "").trim() || null;
-  const enabled = parseBool(env[`${prefix}_ENABLED`], false);
+  const cwdRaw =
+    env[`${prefix}_CWD`] !== undefined && env[`${prefix}_CWD`] !== ""
+      ? env[`${prefix}_CWD`]
+      : info.cwdMode;
+  const cwdMode = parseCwdMode(cwdRaw, `${prefix}_CWD`);
+  const unsafe =
+    env[`${prefix}_UNSAFE`] !== undefined && env[`${prefix}_UNSAFE`] !== ""
+      ? parseBool(env[`${prefix}_UNSAFE`], false)
+      : Boolean(info.unsafe);
+  const reasoningEffort =
+    (env[`${prefix}_REASONING_EFFORT`] || "").trim() || info.reasoningEffort || null;
+  const enabled =
+    env[`${prefix}_ENABLED`] !== undefined && env[`${prefix}_ENABLED`] !== ""
+      ? parseBool(env[`${prefix}_ENABLED`], false)
+      : Boolean(info.enabled);
   const timeoutMs = parseInteger(env[`${prefix}_TIMEOUT_MS`], undefined, TIMEOUT_BOUNDS);
   const maxTokens = resolveModelMaxTokens(env, key, prefix, serverMaxTokens);
 

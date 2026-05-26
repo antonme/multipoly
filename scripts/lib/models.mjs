@@ -1,4 +1,22 @@
+import { readFileSync } from "node:fs";
 import { MultipolyError } from "./errors.mjs";
+import { scanMany, formatHitsForError } from "./secrets.mjs";
+
+// An environment variable NAME (not value): used to validate apiKeyEnv /
+// authTokenEnv, which name the env var whose value a transport reads — the
+// secret itself never lives in config or the registry file.
+export const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+export function validateEnvVarName(raw, label) {
+  const v = String(raw).trim();
+  if (!ENV_NAME_RE.test(v)) {
+    throw new MultipolyError(
+      "CONFIG",
+      `${label} must be a valid environment variable NAME (letters/digits/underscore, no leading digit), got ${JSON.stringify(raw)}`,
+    );
+  }
+  return v;
+}
 
 // Reserved model keys:
 //  - synthesizer sentinels (harness/none/caller),
@@ -135,11 +153,9 @@ export function loadModelRegistry(env = process.env) {
     keys.push("opus");
   }
 
-  const raw = (env.MULTIPOLY_MODELS || "").trim();
-  if (!raw) return { keys: Object.freeze(keys), info: Object.freeze(info) };
-
   const seen = new Set(keys);
-  for (const entry of raw.split(",")) {
+  const raw = (env.MULTIPOLY_MODELS || "").trim();
+  for (const entry of raw ? raw.split(",") : []) {
     const key = entry.trim().toLowerCase();
     if (!key) continue;
     if (!MODEL_KEY_RE.test(key)) {
@@ -160,7 +176,7 @@ export function loadModelRegistry(env = process.env) {
     seen.add(key);
     keys.push(key);
     const prefix = envPrefixForModel(key);
-    const transport = parseTransport(env[`${prefix}_TRANSPORT`], prefix);
+    const transport = parseTransport(env[`${prefix}_TRANSPORT`], `${prefix}_TRANSPORT`);
     const base = {
       key,
       transport,
@@ -173,40 +189,168 @@ export function loadModelRegistry(env = process.env) {
       supportsThinking: parseThinkingFlag(env[`${prefix}_THINKING`]),
     };
     if (transport === "cli") {
-      base.cliKind = parseCliKind(env[`${prefix}_CLI_KIND`], prefix);
+      base.cliKind = parseCliKind(env[`${prefix}_CLI_KIND`], `${prefix}_CLI_KIND`);
     }
     info[key] = Object.freeze(base);
   }
+
+  loadModelsFileInto(env, { keys, info, seen });
   return { keys: Object.freeze(keys), info: Object.freeze(info) };
 }
 
-function parseTransport(raw, prefix) {
+function parseTransport(raw, label) {
   const v = (raw || "").trim().toLowerCase();
   if (!v) return "http";
   if (!TRANSPORTS.includes(v)) {
     throw new MultipolyError(
       "CONFIG",
-      `${prefix}_TRANSPORT must be one of ${TRANSPORTS.join(", ")}, got ${JSON.stringify(raw)}`,
+      `${label} must be one of ${TRANSPORTS.join(", ")}, got ${JSON.stringify(raw)}`,
     );
   }
   return v;
 }
 
-function parseCliKind(raw, prefix) {
+function parseCliKind(raw, label) {
   const v = (raw || "").trim().toLowerCase();
   if (!v) {
     throw new MultipolyError(
       "CONFIG",
-      `${prefix}_CLI_KIND is required for a cli transport; one of ${Object.keys(CLI_KINDS).join(", ")}`,
+      `${label} is required for a cli transport; one of ${Object.keys(CLI_KINDS).join(", ")}`,
     );
   }
   if (!Object.prototype.hasOwnProperty.call(CLI_KINDS, v)) {
     throw new MultipolyError(
       "CONFIG",
-      `${prefix}_CLI_KIND must be one of ${Object.keys(CLI_KINDS).join(", ")}, got ${JSON.stringify(raw)}`,
+      `${label} must be one of ${Object.keys(CLI_KINDS).join(", ")}, got ${JSON.stringify(raw)}`,
     );
   }
   return v;
+}
+
+// Fields a registry-file model entry may declare. Deliberately excludes any
+// secret-bearing field: credentials live in env, named via apiKeyEnv /
+// authTokenEnv. There is also no argv/args field — argv is built by the cli
+// transport from the controlled cliKind recipe, never supplied by config.
+const FILE_ENTRY_FIELDS = new Set([
+  "transport",
+  "displayName",
+  "model",
+  "baseUrl",
+  "apiKeyEnv",
+  "supportsThinking",
+  "cliKind",
+  "binary",
+  "authTokenEnv",
+  "cwd",
+  "unsafe",
+  "reasoningEffort",
+  "enabled",
+]);
+
+/**
+ * Merge models from an explicit JSON registry file into the in-progress
+ * registry. Loaded ONLY from `MULTIPOLY_MODELS_FILE` (an explicit path) —
+ * never auto-discovered from cwd, because the MCP server commonly runs inside
+ * the repo under review and a repo-local file naming CLI binaries would be a
+ * code-execution footgun. Mutates `keys`/`info`/`seen` in place.
+ */
+function loadModelsFileInto(env, { keys, info, seen }) {
+  const path = (env.MULTIPOLY_MODELS_FILE || "").trim();
+  if (!path) return;
+
+  let raw;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (e) {
+    throw new MultipolyError("CONFIG", `MULTIPOLY_MODELS_FILE could not be read (${path}): ${e.message}`);
+  }
+  let doc;
+  try {
+    doc = JSON.parse(raw);
+  } catch (e) {
+    throw new MultipolyError("CONFIG", `MULTIPOLY_MODELS_FILE is not valid JSON (${path}): ${e.message}`);
+  }
+  if (!doc || typeof doc !== "object" || typeof doc.models !== "object" || doc.models === null) {
+    throw new MultipolyError("CONFIG", `MULTIPOLY_MODELS_FILE must be a JSON object with a "models" object`);
+  }
+
+  for (const [rawKey, entry] of Object.entries(doc.models)) {
+    const key = String(rawKey).trim().toLowerCase();
+    const where = `MULTIPOLY_MODELS_FILE model ${JSON.stringify(rawKey)}`;
+    if (!MODEL_KEY_RE.test(key)) {
+      throw new MultipolyError("CONFIG", `${where} is not a valid model key (lowercase letters/digits, leading letter).`);
+    }
+    if (RESERVED_MODEL_KEYS.has(key)) {
+      throw new MultipolyError("CONFIG", `${where} is a reserved word.`);
+    }
+    if (seen.has(key)) {
+      throw new MultipolyError("CONFIG", `${where} duplicates a builtin or earlier model.`);
+    }
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      throw new MultipolyError("CONFIG", `${where} must be an object.`);
+    }
+    for (const field of Object.keys(entry)) {
+      if (!FILE_ENTRY_FIELDS.has(field)) {
+        throw new MultipolyError(
+          "CONFIG",
+          `${where} has unknown field ${JSON.stringify(field)} (secrets and argv are not allowed in the registry file; use apiKeyEnv/authTokenEnv to name env vars).`,
+        );
+      }
+    }
+    // No string value may contain a secret — the file is for shapes, not keys.
+    const scanPieces = Object.entries(entry)
+      .filter(([, v]) => typeof v === "string")
+      .map(([k, v]) => ({ text: v, label: `${where}.${k}` }));
+    const scanned = scanMany(scanPieces);
+    if (!scanned.clean) {
+      throw new MultipolyError(
+        "CONFIG",
+        `${where} contains a value that looks like a secret:\n${formatHitsForError(scanned.hits)}\nKeep credentials in env vars and reference them via apiKeyEnv/authTokenEnv.`,
+      );
+    }
+
+    seen.add(key);
+    keys.push(key);
+    info[key] = Object.freeze(fileEntryToInfo(key, entry, where));
+  }
+}
+
+function fileEntryToInfo(key, entry, where) {
+  const transport = parseTransport(entry.transport, `${where} transport`);
+  const base = {
+    key,
+    transport,
+    displayName: (typeof entry.displayName === "string" && entry.displayName.trim()) || key,
+    defaultModel: typeof entry.model === "string" && entry.model.trim() ? entry.model.trim() : null,
+    defaultBaseUrl:
+      typeof entry.baseUrl === "string" && entry.baseUrl.trim()
+        ? entry.baseUrl.trim()
+        : transport === "anthropic"
+          ? ANTHROPIC_DEFAULT_BASE_URL
+          : null,
+    apiKeyEnv: entry.apiKeyEnv
+      ? Object.freeze([validateEnvVarName(entry.apiKeyEnv, `${where} apiKeyEnv`)])
+      : Object.freeze([]),
+    supportsThinking: Boolean(entry.supportsThinking),
+  };
+  if (transport === "cli") {
+    base.cliKind = parseCliKind(entry.cliKind, `${where} cliKind`);
+    if (typeof entry.binary === "string" && entry.binary.trim()) base.binary = entry.binary.trim();
+    if (entry.authTokenEnv) base.authTokenEnv = validateEnvVarName(entry.authTokenEnv, `${where} authTokenEnv`);
+    if (entry.cwd !== undefined) {
+      const c = String(entry.cwd).trim().toLowerCase();
+      if (c !== "repo" && c !== "temp") {
+        throw new MultipolyError("CONFIG", `${where} cwd must be 'repo' or 'temp', got ${JSON.stringify(entry.cwd)}`);
+      }
+      base.cwdMode = c;
+    }
+    if (typeof entry.unsafe === "boolean") base.unsafe = entry.unsafe;
+    if (typeof entry.reasoningEffort === "string" && entry.reasoningEffort.trim()) {
+      base.reasoningEffort = entry.reasoningEffort.trim();
+    }
+    if (typeof entry.enabled === "boolean") base.enabled = entry.enabled;
+  }
+  return base;
 }
 
 function parseThinkingFlag(raw) {
