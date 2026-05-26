@@ -1,7 +1,7 @@
 import { MultipolyError } from "./errors.mjs";
 import { gatherConsult } from "./gather.mjs";
 import { scanMany, formatHitsForError } from "./secrets.mjs";
-import { streamChatCompletion } from "./client.mjs";
+import { runModel } from "./run-model.mjs";
 import { CONSULT_SYSTEM_PROMPT, renderConsultUserMessage } from "./prompts.mjs";
 import { assertContentBudget } from "./budget.mjs";
 import { resolveCallTimeoutMs, resolveMaxTokensForModel } from "./config.mjs";
@@ -36,14 +36,15 @@ export async function prepareConsult(input, { config, cwd = process.cwd() } = {}
   };
 }
 
-export async function runPreparedConsult(modelKey, prepared, { config, fetchImpl } = {}) {
-  const attempt = await streamChatCompletion({
+export async function runPreparedConsult(modelKey, prepared, { config, fetchImpl, execFileImpl } = {}) {
+  const attempt = await runModel({
     config,
     modelKey,
     messages: prepared.messages,
     mode: "consult",
     timeoutMs: prepared.timeoutMs,
     fetchImpl,
+    execFileImpl,
   });
   const maxTokens = resolveMaxTokensForModel(config, modelKey, "consult");
   const { truncated } = assertContentBudget(attempt, maxTokens, "consult", {

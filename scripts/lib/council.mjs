@@ -2,7 +2,7 @@ import { MultipolyError } from "./errors.mjs";
 import { MODEL_KEYS, modelSupportsThinking } from "./models.mjs";
 import { prepareReview, runPreparedReview } from "./model-review.mjs";
 import { prepareConsult, runPreparedConsult } from "./model-consult.mjs";
-import { streamChatCompletion } from "./client.mjs";
+import { runModel } from "./run-model.mjs";
 import {
   COUNCIL_REVIEW_SYNTHESIS_PROMPT,
   COUNCIL_CONSULT_SYNTHESIS_PROMPT,
@@ -116,10 +116,10 @@ function serializeError(e) {
  * Run every council member in parallel and collect results. Throws COUNCIL if
  * fewer than two members succeed (a council needs a quorum to be meaningful).
  */
-async function runCouncilMembers({ models, prepared, runPrepared, config, fetchImpl }) {
+async function runCouncilMembers({ models, prepared, runPrepared, config, fetchImpl, execFileImpl }) {
   const settled = await Promise.allSettled(
     models.map(async (modelKey) => {
-      const out = await runPrepared(modelKey, prepared, { config, fetchImpl });
+      const out = await runPrepared(modelKey, prepared, { config, fetchImpl, execFileImpl });
       return [modelKey, out.result];
     }),
   );
@@ -227,6 +227,7 @@ async function synthesizeCouncilReview({
   memberResults,
   timeoutMs,
   fetchImpl,
+  execFileImpl,
 }) {
   const messages = [
     { role: "system", content: COUNCIL_REVIEW_SYNTHESIS_PROMPT },
@@ -244,7 +245,7 @@ async function synthesizeCouncilReview({
     json_schema: { name: "council_review", strict: true, schema: COUNCIL_REVIEW_SCHEMA },
   };
 
-  const attempt1 = await streamChatCompletion({
+  const attempt1 = await runModel({
     config,
     modelKey: synthesizer,
     messages,
@@ -252,6 +253,7 @@ async function synthesizeCouncilReview({
     responseFormat,
     timeoutMs,
     fetchImpl,
+    execFileImpl,
   });
   const maxTokens = resolveMaxTokensForModel(config, synthesizer, "review");
   const budgetContext = budgetContextFor(config, synthesizer);
@@ -262,7 +264,7 @@ async function synthesizeCouncilReview({
   let reasoning = attempt1.reasoning;
 
   if (!validation.valid) {
-    const attempt2 = await streamChatCompletion({
+    const attempt2 = await runModel({
       config,
       modelKey: synthesizer,
       messages: [
@@ -279,6 +281,7 @@ async function synthesizeCouncilReview({
       responseFormat: attempt1.fellBackFromJsonSchema ? { type: "json_object" } : responseFormat,
       timeoutMs,
       fetchImpl,
+      execFileImpl,
     });
     assertContentBudget(attempt2, maxTokens, "review", budgetContext);
     if (attempt2.reasoning) reasoning = attempt2.reasoning;
@@ -378,7 +381,7 @@ function buildHarnessConsultResult({ models, memberResults, successful, input })
   return parts.join("\n") + individual;
 }
 
-export async function handleCouncilReview(input, { config, fetchImpl } = {}) {
+export async function handleCouncilReview(input, { config, fetchImpl, execFileImpl } = {}) {
   const models = resolveCouncilModels(input, config);
   const target = resolveSynthesisTarget(input, config);
   const prepared = await prepareReview(input, { config });
@@ -389,6 +392,7 @@ export async function handleCouncilReview(input, { config, fetchImpl } = {}) {
     runPrepared: runPreparedReview,
     config,
     fetchImpl,
+    execFileImpl,
   });
 
   if (target.mode === "harness") {
@@ -407,6 +411,7 @@ export async function handleCouncilReview(input, { config, fetchImpl } = {}) {
       memberResults,
       timeoutMs: prepared.timeoutMs,
       fetchImpl,
+      execFileImpl,
     });
   } catch (err) {
     throw councilSynthesisError(err, memberResults);
@@ -429,7 +434,7 @@ export async function handleCouncilReview(input, { config, fetchImpl } = {}) {
   };
 }
 
-export async function handleCouncilConsult(input, { config, fetchImpl } = {}) {
+export async function handleCouncilConsult(input, { config, fetchImpl, execFileImpl } = {}) {
   const models = resolveCouncilModels(input, config);
   const target = resolveSynthesisTarget(input, config);
   const prepared = await prepareConsult(input, { config });
@@ -440,6 +445,7 @@ export async function handleCouncilConsult(input, { config, fetchImpl } = {}) {
     runPrepared: runPreparedConsult,
     config,
     fetchImpl,
+    execFileImpl,
   });
 
   if (target.mode === "harness") {
@@ -449,7 +455,7 @@ export async function handleCouncilConsult(input, { config, fetchImpl } = {}) {
   assertMemberOutputsClean(consultMemberSecretPieces(memberResults), config);
 
   try {
-    const attempt = await streamChatCompletion({
+    const attempt = await runModel({
       config,
       modelKey: target.key,
       messages: [
@@ -465,6 +471,7 @@ export async function handleCouncilConsult(input, { config, fetchImpl } = {}) {
       mode: "consult",
       timeoutMs: prepared.timeoutMs,
       fetchImpl,
+      execFileImpl,
     });
     const maxTokens = resolveMaxTokensForModel(config, target.key, "consult");
     const { truncated } = assertContentBudget(attempt, maxTokens, "consult", budgetContextFor(config, target.key));
