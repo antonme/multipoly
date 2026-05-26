@@ -355,9 +355,12 @@ export function defaultExecFile(file, args, opts) {
       });
       child.stdin.end(opts.input ?? "");
     }
-    // Don't let a runaway detached child pin the parent's event loop: we always
-    // resolve/reject from close/error/timeout, so we don't need the ref.
-    child.unref();
+    // NOTE: do NOT child.unref() here. We always settle this promise from the
+    // close/error/timeout handlers, so the child legitimately keeps the loop
+    // alive until then. unref'ing a detached child lets a quiet event loop
+    // drain before close fires ("Promise resolution is still pending but the
+    // event loop has already resolved"), which the timeout/maxBuffer/ENOENT
+    // tests hit on CI.
   });
 }
 
