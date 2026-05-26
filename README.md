@@ -174,6 +174,27 @@ Per-cli env (`<K>` is the model key, e.g. `COMPOSER`):
 > **macOS keychain (cursor).** `cursor-agent` reads `CURSOR_API_KEY` from the
 > login keychain; on a headless/locked session it fails to authenticate.
 
+Notes from live verification:
+
+- **codex** runs in an isolated `CODEX_HOME` (the operator's config/MCP/rules
+  don't auto-load); its `auth.json` is copied in so login still works. A
+  ChatGPT-account codex rejects unsupported model ids — set
+  `MULTIPOLY_<K>_MODEL` to a model your account allows (the codex default works).
+- **kimi** model ids look like `kimi-code/kimi-for-coding`; output uses
+  `--quiet` so only the final message is returned.
+- **gemini**'s prompt is passed on argv (`-p`), so prefer another transport for
+  very large reviews.
+
+Example — enable codex as a council-eligible cli model:
+
+```
+MULTIPOLY_MODELS=cdx
+MULTIPOLY_CDX_TRANSPORT=cli
+MULTIPOLY_CDX_CLI_KIND=codex
+MULTIPOLY_CDX_ENABLED=1
+MULTIPOLY_CDX_MODEL=gpt-5.5
+```
+
 ### JSON registry file
 
 For declarative setups, point `MULTIPOLY_MODELS_FILE` at an explicit JSON path

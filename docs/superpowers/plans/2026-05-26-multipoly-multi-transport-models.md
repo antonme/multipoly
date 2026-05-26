@@ -77,10 +77,15 @@ Cross-cutting (from r7 `external-cli-runtime.ts`):
 
 ---
 
-## Verification points (carry into execution / Task 7 smoke test)
-- kimi: implemented with the prompt on **stdin** (not `--prompt`, which would leak reviewed code into argv + risk E2BIG). Verify kimi actually reads stdin in `--print --plan` mode, and that `--plan` holds read-only under `--print/--afk`.
-- cursor-agent: `--trust` is passed to skip the workspace-trust prompt (else it hangs to timeout); macOS keychain must be unlocked for `CURSOR_API_KEY`. Verify both.
-- anthropic: structured-output shape `output_config.format` confirmed against live docs (GA, no name/strict, streaming-compatible, max_tokens required); confirm `anthropic-version: 2023-06-01` and event names against the live API on the first real call.
-- claude: `--tools "" --strict-mcp-config` keeps OAuth (NOT `--bare`, which forces api-key auth); verify read-only holds.
-- codex: isolation via `CODEX_HOME` temp + `--sandbox read-only` (the plan's earlier `--ignore-user-config/--ignore-rules` flags do not exist on the installed codex). Verify.
-- All cli kinds: a first real smoke test per kind (costs money / consumes subscriptions — gate behind explicit user go-ahead).
+## Verification — live smoke test results (Task 7, 2026-05-27)
+
+Ran one real read-only consult per kind via `scripts/smoke-cli.mjs` (a gated
+manual tool, not part of the suite). Results and what they fixed:
+
+- **claude — PASS.** `-p --model haiku --output-format text --tools "" --strict-mcp-config`, prompt on stdin. OAuth preserved (no `--bare`).
+- **codex — PASS** (model `gpt-5.5`). Fixed two real bugs the smoke surfaced: (1) the isolated `CODEX_HOME` temp dir is now created (codex refuses to start otherwise), and (2) isolating `CODEX_HOME` stripped auth, so we now seed it with a copy of the operator's `~/.codex/auth.json` (config/MCP/rules stay isolated, auth works). NOTE: a ChatGPT-account codex rejects unsupported model ids (e.g. `gpt-5.1-codex`) — set `MULTIPOLY_<K>_MODEL` to a supported id (the account default works).
+- **gemini — PASS** (model `gemini-2.5-flash`). Fixed: the prompt now goes in `-p` (gemini's headless prompt) instead of a "task is on stdin" meta-instruction that confused the model. Caveat: gemini's prompt is in argv (large reviews could approach the OS argv limit).
+- **kimi — PASS** (model `kimi-code/kimi-for-coding`). Uses `--quiet --plan -m <model>` with the prompt on stdin: `--quiet` = `--print --output-format text --final-message-only` (clean final message, no transcript noise), `--plan` keeps it read-only under `--print`'s implied `--afk`.
+- **agy — PASS.** `--print --sandbox --add-dir <cwd>`, prompt on stdin (weak sandbox; opt-in unsafe).
+- **cursor — config-gated (not run live):** correctly fail-fasts when `CURSOR_API_KEY` is unset; needs an authenticated cursor-agent + unlocked macOS keychain to smoke. `--mode plan --trust` recipe in place.
+- **anthropic (opus) — NOT run live** (user opted out of the paid Anthropic smoke). Structured-output shape `output_config.format` confirmed against live docs; first real call should confirm `anthropic-version: 2023-06-01` + event names.

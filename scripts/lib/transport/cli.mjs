@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, copyFileSync } from "node:fs";
+import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { MultipolyError } from "../errors.mjs";
 import { CLI_KINDS } from "../models.mjs";
@@ -71,6 +71,22 @@ export async function runCliModel(args) {
   try {
     const childCwd = m.cwdMode === "temp" ? (tempCwd = mkdtempSync(join(tmpdir(), "multipoly-cwd-"))) : repoCwd;
     const recipe = buildInvocation({ kind: m.cliKind, binary, model: m.model, cwd: childCwd, reasoningEffort: m.reasoningEffort, prompt, scratch });
+
+    // codex authenticates from $CODEX_HOME/auth.json. We isolate CODEX_HOME to
+    // an empty temp dir (so the operator's config.toml / MCP servers / rules
+    // don't auto-load), which also strips auth — so seed JUST the credential
+    // file from the operator's real codex home. The temp home (and this copy)
+    // is removed in the finally below.
+    if (m.cliKind === "codex" && recipe.env?.CODEX_HOME) {
+      const srcAuth = join(env.CODEX_HOME || join(homedir(), ".codex"), "auth.json");
+      if (existsSync(srcAuth)) {
+        try {
+          copyFileSync(srcAuth, join(recipe.env.CODEX_HOME, "auth.json"));
+        } catch {
+          /* best-effort; codex will surface its own auth error if missing */
+        }
+      }
+    }
 
     const childEnv = { ...env, ...recipe.env };
     let stdout;
@@ -175,6 +191,10 @@ export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, pro
       };
     case "codex": {
       const lastMessageFile = join(scratch, "codex-last-message.txt");
+      // codex refuses to start if CODEX_HOME doesn't exist — create the
+      // isolated home up front (it can't reach the operator's ~/.codex).
+      const codexHome = join(scratch, "codex-home");
+      mkdirSync(codexHome, { recursive: true });
       const args = ["exec"];
       if (reasoningEffort) args.push("-c", `model_reasoning_effort="${reasoningEffort}"`);
       args.push(
@@ -193,7 +213,7 @@ export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, pro
         args,
         stdin: prompt,
         // Isolate codex from the operator's ~/.codex config/profiles/rules.
-        env: { CODEX_HOME: join(scratch, "codex-home") },
+        env: { CODEX_HOME: codexHome },
         lastMessageFile,
       };
     }
@@ -219,9 +239,14 @@ export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, pro
       };
     }
     case "gemini":
+      // gemini's `-p` IS the prompt in headless mode (it's appended to stdin if
+      // any). A separate "task is on stdin" meta-instruction confused the model
+      // (it ignored stdin), so pass the full prompt as `-p`. Note: this puts the
+      // prompt in argv — very large gemini reviews could approach the OS argv
+      // limit; prefer another transport for huge inputs.
       return {
-        args: ["-m", model, "-o", "text", "--approval-mode", "plan", "-p", "Complete the task described on stdin."],
-        stdin: prompt,
+        args: ["-m", model, "-o", "text", "--approval-mode", "plan", "-p", prompt],
+        stdin: "",
         env: { GEMINI_CLI_TRUST_WORKSPACE: "true" },
       };
     case "agy":
@@ -233,12 +258,13 @@ export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, pro
         env: {},
       };
     case "kimi":
-      // Deliver the prompt on stdin, NOT via --prompt: a full review/diff in
-      // argv leaks reviewed code (and any allowed secret) into the process
-      // table and risks E2BIG on large reviews. (Whether kimi reads stdin in
-      // --print mode is a Task 7 verification point.)
+      // --quiet = `--print --output-format text --final-message-only`, so the
+      // output is just the final assistant message (no TurnBegin/ThinkPart
+      // transcript noise). --print implies --afk (auto-runs writes), so --plan
+      // is mandatory to keep it read-only. Prompt on stdin (NOT --prompt, which
+      // would leak reviewed code into argv and risk E2BIG on large reviews).
       return {
-        args: ["--print", "--plan", "-m", model],
+        args: ["--quiet", "--plan", "-m", model],
         stdin: prompt,
         env: {},
       };

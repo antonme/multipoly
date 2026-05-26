@@ -187,7 +187,7 @@ test("cli: kimi — print + plan (read-only) + model, prompt on stdin (not argv)
     env: {},
   });
   const { args, opts } = cap[0];
-  assert.ok(args.includes("--print"));
+  assert.ok(args.includes("--quiet")); // = --print --output-format text --final-message-only
   assert.ok(args.includes("--plan")); // mandatory read-only (--print implies --afk)
   assert.deepEqual(args.slice(args.indexOf("-m"), args.indexOf("-m") + 2), ["-m", "the-model"]);
   // The prompt must NOT be in argv (leaks reviewed code / risks E2BIG).
