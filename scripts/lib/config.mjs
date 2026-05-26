@@ -321,6 +321,8 @@ function loadCliModelConfig(env, key, info, serverMaxTokens) {
   const missing = [];
   if (!enabled) missing.push(`${prefix}_ENABLED=1`);
   if (kindDef.weakSandbox && !unsafe) missing.push(`${prefix}_UNSAFE=1 (weak sandbox)`);
+  // Kinds that emit a --model/-m flag need a model id; agy has no model flag.
+  if (!kindDef.noModelFlag && !model) missing.push(`${prefix}_MODEL`);
 
   return Object.freeze({
     key,

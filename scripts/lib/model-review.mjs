@@ -52,7 +52,7 @@ export async function prepareReview(input, { config, cwd = process.cwd() } = {})
   };
 }
 
-export async function runPreparedReview(modelKey, prepared, { config, fetchImpl, execFileImpl } = {}) {
+export async function runPreparedReview(modelKey, prepared, { config, fetchImpl, execFileImpl, cwd } = {}) {
   const responseFormat = {
     type: "json_schema",
     json_schema: {
@@ -71,6 +71,7 @@ export async function runPreparedReview(modelKey, prepared, { config, fetchImpl,
     timeoutMs: prepared.timeoutMs,
     fetchImpl,
     execFileImpl,
+    cwd,
   });
 
   const maxTokens = resolveMaxTokensForModel(config, modelKey, "review");
@@ -104,6 +105,7 @@ export async function runPreparedReview(modelKey, prepared, { config, fetchImpl,
       timeoutMs: prepared.timeoutMs,
       fetchImpl,
       execFileImpl,
+      cwd,
     });
     assertContentBudget(attempt2, maxTokens, "review", budgetContext);
     if (attempt2.reasoning) reasoning = attempt2.reasoning;
@@ -129,9 +131,9 @@ export async function runPreparedReview(modelKey, prepared, { config, fetchImpl,
   };
 }
 
-export async function handleModelReview(modelKey, input, { config, fetchImpl, cwd } = {}) {
+export async function handleModelReview(modelKey, input, { config, fetchImpl, execFileImpl, cwd } = {}) {
   const prepared = await prepareReview(input, { config, cwd });
-  return runPreparedReview(modelKey, prepared, { config, fetchImpl });
+  return runPreparedReview(modelKey, prepared, { config, fetchImpl, execFileImpl, cwd });
 }
 
 function safeTruncate(s, max) {

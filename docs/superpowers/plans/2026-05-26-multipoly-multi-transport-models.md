@@ -77,8 +77,10 @@ Cross-cutting (from r7 `external-cli-runtime.ts`):
 
 ---
 
-## Verification points (carry into execution)
-- kimi: confirm `--prompt` vs stdin and that `--plan` holds read-only under `--print/--afk`.
-- cursor-agent: macOS keychain must be unlocked; document the failure mode.
-- anthropic: confirm current `anthropic-version` and streaming event names against live API (web).
-- All cli kinds: a first real smoke test per kind (costs money — gate behind explicit user go-ahead).
+## Verification points (carry into execution / Task 7 smoke test)
+- kimi: implemented with the prompt on **stdin** (not `--prompt`, which would leak reviewed code into argv + risk E2BIG). Verify kimi actually reads stdin in `--print --plan` mode, and that `--plan` holds read-only under `--print/--afk`.
+- cursor-agent: `--trust` is passed to skip the workspace-trust prompt (else it hangs to timeout); macOS keychain must be unlocked for `CURSOR_API_KEY`. Verify both.
+- anthropic: structured-output shape `output_config.format` confirmed against live docs (GA, no name/strict, streaming-compatible, max_tokens required); confirm `anthropic-version: 2023-06-01` and event names against the live API on the first real call.
+- claude: `--tools "" --strict-mcp-config` keeps OAuth (NOT `--bare`, which forces api-key auth); verify read-only holds.
+- codex: isolation via `CODEX_HOME` temp + `--sandbox read-only` (the plan's earlier `--ignore-user-config/--ignore-rules` flags do not exist on the installed codex). Verify.
+- All cli kinds: a first real smoke test per kind (costs money / consumes subscriptions — gate behind explicit user go-ahead).

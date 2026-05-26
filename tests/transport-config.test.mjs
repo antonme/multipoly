@@ -127,6 +127,31 @@ test("transport: agy requires explicit unsafe opt-in (weak sandbox)", () => {
   assert.equal(withUnsafe.models.a.unsafe, true);
 });
 
+test("transport: an enabled cli model that emits a model flag needs a model id", () => {
+  // claude takes --model, so an enabled claude model without a model is
+  // unconfigured (not silently spawning with `--model null`).
+  const c = loadConfig({
+    ...glm,
+    MULTIPOLY_MODELS: "cc",
+    MULTIPOLY_CC_TRANSPORT: "cli",
+    MULTIPOLY_CC_CLI_KIND: "claude",
+    MULTIPOLY_CC_ENABLED: "1",
+  });
+  assert.equal(c.models.cc.configured, false);
+  assert.ok(c.models.cc.missing.some((m) => /MODEL/.test(m)));
+
+  // agy has no model flag, so it does not require one.
+  const a = loadConfig({
+    ...glm,
+    MULTIPOLY_MODELS: "aa",
+    MULTIPOLY_AA_TRANSPORT: "cli",
+    MULTIPOLY_AA_CLI_KIND: "agy",
+    MULTIPOLY_AA_ENABLED: "1",
+    MULTIPOLY_AA_UNSAFE: "1",
+  });
+  assert.equal(a.models.aa.configured, true);
+});
+
 test("transport: invalid transport value is a CONFIG error", () => {
   assert.throws(
     () =>

@@ -118,7 +118,10 @@ Set `ANTHROPIC_API_KEY` and an `opus` model (Claude Opus 4.7) is auto-registered
 as `opus_review` / `opus_consult` and becomes council-selectable. Override the
 endpoint with `ANTHROPIC_BASE_URL`. Review JSON uses Anthropic's native
 structured outputs; if the endpoint rejects the schema, it transparently falls
-back to prompt-instructed JSON. A custom anthropic model:
+back to prompt-instructed JSON. Anthropic requires `max_tokens`; when no
+model-specific cap is set it defaults to 16384 — raise
+`MULTIPOLY_OPUS_MAX_TOKENS_REVIEW` (or the server-wide cap) for large reviews.
+A custom anthropic model:
 
 ```
 MULTIPOLY_MODELS=haiku
@@ -159,8 +162,11 @@ Per-cli env (`<K>` is the model key, e.g. `COMPOSER`):
 > **⚠️ Trust boundary (cli, repo cwd).** By default a cli agent runs in the
 > **repo working directory** so it can explore beyond the files multipoly
 > gathered (a richer review). This means **the agent may read the entire
-> workspace, including files multipoly never gathered or secret-scanned** — the
-> pre-flight secret scan only covers the gathered/inlined payload. Set
+> workspace, including files multipoly never gathered or secret-scanned** (e.g.
+> `.env`, private keys) — the pre-flight secret scan only covers the
+> gathered/inlined payload. A prompt-injected instruction inside reviewed code
+> could direct the agent to read such a file. The agent runs read-only, so it
+> can't exfiltrate via writes, but treat its output accordingly. Set
 > `MULTIPOLY_<K>_CWD=temp` to run the agent in an isolated empty directory
 > instead (tighter boundary, no repo exploration). CLI agents also consume your
 > local subscription/quota, and their token usage is reported as unknown.

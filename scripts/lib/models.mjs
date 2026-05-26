@@ -52,7 +52,8 @@ export const CLI_KINDS = Object.freeze({
   codex: Object.freeze({ binary: "codex" }),
   cursor: Object.freeze({ binary: "cursor-agent", defaultModel: "composer-2.5" }),
   gemini: Object.freeze({ binary: "gemini" }),
-  agy: Object.freeze({ binary: "agy", weakSandbox: true }),
+  // agy has no --model flag and only a weak sandbox.
+  agy: Object.freeze({ binary: "agy", weakSandbox: true, noModelFlag: true }),
   kimi: Object.freeze({ binary: "kimi" }),
 });
 

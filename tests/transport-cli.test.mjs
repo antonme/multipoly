@@ -176,7 +176,7 @@ test("cli: agy — minimal flags, no --model, add-dir cwd", async () => {
   assert.equal(args.includes("--model"), false);
 });
 
-test("cli: kimi — print + plan (read-only) + model + prompt", async () => {
+test("cli: kimi — print + plan (read-only) + model, prompt on stdin (not argv)", async () => {
   const cap = [];
   await runModel({
     config: cliConfig("kimi"),
@@ -186,11 +186,51 @@ test("cli: kimi — print + plan (read-only) + model + prompt", async () => {
     execFileImpl: fakeExec("kimi out", cap),
     env: {},
   });
-  const { args } = cap[0];
+  const { args, opts } = cap[0];
   assert.ok(args.includes("--print"));
   assert.ok(args.includes("--plan")); // mandatory read-only (--print implies --afk)
   assert.deepEqual(args.slice(args.indexOf("-m"), args.indexOf("-m") + 2), ["-m", "the-model"]);
-  assert.ok(args.includes("--prompt"));
+  // The prompt must NOT be in argv (leaks reviewed code / risks E2BIG).
+  assert.equal(args.includes("--prompt"), false);
+  assert.ok(opts.input.includes("Review this."));
+});
+
+test("cli: an unconfigured model is refused before spawning (opt-in gate)", async () => {
+  const cap = [];
+  const cfg = cliConfig("cursor");
+  cfg.models.m.configured = false;
+  cfg.models.m.missing = ["MULTIPOLY_M_ENABLED=1"];
+  await assert.rejects(
+    () => runModel({ config: cfg, modelKey: "m", messages, mode: "consult", execFileImpl: fakeExec("x", cap), env: {} }),
+    (e) => e.code === "CONFIG" && /not configured/.test(e.message),
+  );
+  assert.equal(cap.length, 0, "must not spawn an unconfigured cli model");
+});
+
+test("cli: per-model timeout override is passed to the child", async () => {
+  const cap = [];
+  await runModel({
+    config: cliConfig("claude", { timeoutMs: 12345 }),
+    modelKey: "m",
+    messages,
+    mode: "consult",
+    execFileImpl: fakeExec("ok", cap),
+    env: {},
+  });
+  assert.equal(cap[0].opts.timeout, 12345);
+});
+
+test("cli: secret-shaped stderr is withheld from the surfaced error", async () => {
+  const leakyExec = () => {
+    const e = new Error("agent crashed");
+    // Unrelated env secret echoed to stderr (not the auth token).
+    e.stderr = "Traceback: using OPENAI_API_KEY=sk-proj-ABCDEF1234567890ABCDEF1234567890\n";
+    throw e;
+  };
+  await assert.rejects(
+    () => runModel({ config: cliConfig("claude"), modelKey: "m", messages, mode: "consult", execFileImpl: leakyExec, env: {} }),
+    (e) => /withheld/.test(e.message) && !/sk-proj-ABCDEF/.test(e.message),
+  );
 });
 
 test("cli: empty output is a failure (not a 0-finding success)", async () => {

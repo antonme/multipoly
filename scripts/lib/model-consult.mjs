@@ -36,7 +36,7 @@ export async function prepareConsult(input, { config, cwd = process.cwd() } = {}
   };
 }
 
-export async function runPreparedConsult(modelKey, prepared, { config, fetchImpl, execFileImpl } = {}) {
+export async function runPreparedConsult(modelKey, prepared, { config, fetchImpl, execFileImpl, cwd } = {}) {
   const attempt = await runModel({
     config,
     modelKey,
@@ -45,6 +45,7 @@ export async function runPreparedConsult(modelKey, prepared, { config, fetchImpl
     timeoutMs: prepared.timeoutMs,
     fetchImpl,
     execFileImpl,
+    cwd,
   });
   const maxTokens = resolveMaxTokensForModel(config, modelKey, "consult");
   const { truncated } = assertContentBudget(attempt, maxTokens, "consult", {
@@ -57,7 +58,7 @@ export async function runPreparedConsult(modelKey, prepared, { config, fetchImpl
   return { result, reasoning: attempt.reasoning };
 }
 
-export async function handleModelConsult(modelKey, input, { config, fetchImpl, cwd } = {}) {
+export async function handleModelConsult(modelKey, input, { config, fetchImpl, execFileImpl, cwd } = {}) {
   const prepared = await prepareConsult(input, { config, cwd });
-  return runPreparedConsult(modelKey, prepared, { config, fetchImpl });
+  return runPreparedConsult(modelKey, prepared, { config, fetchImpl, execFileImpl, cwd });
 }

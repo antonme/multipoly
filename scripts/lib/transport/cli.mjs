@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MultipolyError } from "../errors.mjs";
 import { CLI_KINDS } from "../models.mjs";
+import { scan } from "../secrets.mjs";
 
 const MAX_BUFFER = 64 * 1024 * 1024;
 
@@ -30,6 +31,18 @@ export async function runCliModel(args) {
   const m = config?.models?.[modelKey];
   if (!m || m.transport !== "cli") {
     throw new MultipolyError("CONFIG", `model "${modelKey}" is not a cli transport`);
+  }
+  // Refuse to spawn an unconfigured/un-opted-in cli model. Every model's tools
+  // are advertised regardless of `configured`, so without this guard a direct
+  // `composer_review` / `<agy>_consult` call would shell out to the agent and
+  // bypass the MULTIPOLY_<K>_ENABLED (and agy UNSAFE) opt-in gate. Mirrors the
+  // http (client.mjs) and anthropic (anthropic.mjs) configured checks.
+  if (!m.configured) {
+    throw new MultipolyError(
+      "CONFIG",
+      `${modelKey} is not configured: missing ${(m.missing ?? []).join(", ")}`,
+      { details: { model: modelKey, missing: m.missing } },
+    );
   }
   const kindDef = CLI_KINDS[m.cliKind];
   if (!kindDef) {
@@ -67,7 +80,7 @@ export async function runCliModel(args) {
           cwd: childCwd,
           input: recipe.stdin,
           encoding: "utf8",
-          timeout: timeoutMs ?? config?.timeoutMs ?? 600000,
+          timeout: timeoutMs ?? m.timeoutMs ?? config?.timeoutMs ?? 600000,
           maxBuffer: MAX_BUFFER,
           env: childEnv,
         }),
@@ -76,7 +89,7 @@ export async function runCliModel(args) {
       const secrets = m.authTokenEnv && env[m.authTokenEnv] ? [env[m.authTokenEnv]] : [];
       throw new MultipolyError(
         "CLI",
-        `${m.cliKind} cli failed: ${redact(sanitizeExecError(err), { paths: [childCwd, scratch], secrets })}`,
+        `${m.cliKind} cli failed: ${buildErrorMessage(err, { paths: [childCwd, scratch], secrets })}`,
         { cause: err },
       );
     }
@@ -198,6 +211,7 @@ export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, pro
           "plan",
           "--workspace",
           cwd,
+          "--trust", // skip the interactive workspace-trust prompt (else it hangs to timeout)
           `Read ${promptFile} and complete the task described inside. Do not write any files; emit only the requested output as your final message.`,
         ],
         stdin: "", // cursor-agent ignores stdin in --print mode
@@ -219,9 +233,13 @@ export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, pro
         env: {},
       };
     case "kimi":
+      // Deliver the prompt on stdin, NOT via --prompt: a full review/diff in
+      // argv leaks reviewed code (and any allowed secret) into the process
+      // table and risks E2BIG on large reviews. (Whether kimi reads stdin in
+      // --print mode is a Task 7 verification point.)
       return {
-        args: ["--print", "--plan", "-m", model, "--prompt", prompt],
-        stdin: "",
+        args: ["--print", "--plan", "-m", model],
+        stdin: prompt,
         env: {},
       };
     default:
@@ -235,7 +253,7 @@ export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, pro
  * orphan. Mirrors the execFileSync(input/timeout/maxBuffer) contract; resolves
  * stdout, rejects with stdout/stderr attached on non-zero exit / timeout.
  */
-function defaultExecFile(file, args, opts) {
+export function defaultExecFile(file, args, opts) {
   return new Promise((resolve, reject) => {
     const child = spawn(file, args, {
       cwd: opts.cwd,
@@ -262,6 +280,7 @@ function defaultExecFile(file, args, opts) {
       }
     };
 
+    let errBytes = 0;
     child.stdout.on("data", (b) => {
       outBytes += b.length;
       if (outBytes > opts.maxBuffer) {
@@ -271,7 +290,16 @@ function defaultExecFile(file, args, opts) {
       }
       stdout.push(b);
     });
-    child.stderr.on("data", (b) => stderr.push(b));
+    child.stderr.on("data", (b) => {
+      // Cap stderr too: a noisy/broken agent could otherwise exhaust memory.
+      errBytes += b.length;
+      if (errBytes > opts.maxBuffer) {
+        overflow = true;
+        killGroup();
+        return;
+      }
+      stderr.push(b);
+    });
     child.on("error", (err) => {
       if (timer) clearTimeout(timer);
       reject(err);
@@ -301,6 +329,9 @@ function defaultExecFile(file, args, opts) {
       });
       child.stdin.end(opts.input ?? "");
     }
+    // Don't let a runaway detached child pin the parent's event loop: we always
+    // resolve/reject from close/error/timeout, so we don't need the ref.
+    child.unref();
   });
 }
 
@@ -310,16 +341,30 @@ function withIo(err, stdout, stderr) {
   return err;
 }
 
-function sanitizeExecError(err) {
-  const base = err?.message ?? String(err);
-  const stderr = err?.stderr ? `\n${err.stderr}` : "";
-  return (base + stderr).slice(0, 4000);
+/**
+ * Build a safe, surfaced error message from a failed child. The child inherits
+ * the full parent env (agents need HOME/PATH/their own creds), so its stderr
+ * may echo an UNRELATED secret (OPENAI_API_KEY, GITHUB_TOKEN, …) — and with the
+ * repo cwd, file content the gathered-payload scan never saw. So:
+ *   1. redact the known auth-token value + scratch/cwd paths, then
+ *   2. secret-scan the stderr; if anything secret-shaped remains, withhold the
+ *      stderr entirely rather than surface it.
+ * The structured `cause` is preserved separately for local debugging.
+ */
+function buildErrorMessage(err, { paths = [], secrets = [] } = {}) {
+  const base = redact(err?.message ?? String(err), { paths, secrets });
+  if (!err?.stderr) return base.slice(0, 4000);
+  const redactedStderr = redact(String(err.stderr), { paths, secrets });
+  const stderrPart = scan(redactedStderr, "cli-stderr").clean
+    ? redactedStderr
+    : "[stderr withheld: secret-shaped content detected]";
+  return `${base}\n${stderrPart}`.slice(0, 4000);
 }
 
 /**
- * Redact known secret values and absolute scratch/cwd paths from a string
- * before it is surfaced in an error. Best-effort: the structured cause is
- * preserved separately for debugging.
+ * Redact known secret values and absolute scratch/cwd paths from a string.
+ * Best-effort literal masking; secret DETECTION (for withholding) is done by
+ * the scanner in buildErrorMessage.
  */
 function redact(text, { paths = [], secrets = [] } = {}) {
   let out = text;

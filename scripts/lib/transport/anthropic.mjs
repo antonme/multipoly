@@ -136,6 +136,7 @@ async function runOnce({ m, body, timeoutMs, correlationId, fetchImpl }) {
   let reasoning = "";
   let finishReason = null;
   let usage = null;
+  let sawStop = false;
   try {
     for await (const ev of parseSseStream(bodyToAsyncIterable(res.body, refresh))) {
       refresh();
@@ -156,8 +157,12 @@ async function runOnce({ m, body, timeoutMs, correlationId, fetchImpl }) {
           if (v.delta?.stop_reason) finishReason = finishFromStop(v.delta.stop_reason);
           usage = mergeUsage(usage, v.usage);
           break;
-        // ping / content_block_start / content_block_stop / message_stop /
-        // unknown future events: nothing to accumulate.
+        case "message_stop":
+          // Anthropic's explicit end-of-message marker (there is no [DONE]).
+          sawStop = true;
+          break;
+        // ping / content_block_start / content_block_stop / unknown future
+        // events: nothing to accumulate.
         default:
           break;
       }
@@ -169,6 +174,15 @@ async function runOnce({ m, body, timeoutMs, correlationId, fetchImpl }) {
     throw e;
   } finally {
     clearTimeout(timer);
+  }
+
+  // A stream that ended without `message_stop` was truncated mid-flight;
+  // surfacing the partial content as a valid answer would be wrong (a partial
+  // review JSON, a cut-off consult). Fail so the caller can retry/error.
+  if (!sawStop) {
+    throw new MultipolyError("STREAM", "anthropic stream ended before message_stop (truncated response)", {
+      correlationId,
+    });
   }
 
   return { content, reasoning, finishReason, usage: finalizeUsage(usage) };
