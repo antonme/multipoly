@@ -105,7 +105,18 @@ npm test
 
 Result: passed, 123 tests, 0 failures.
 
-At the time this context file was written, Task 1 spec-compliance review had been dispatched but its result had not yet been incorporated into this file.
+Task 1 review status:
+
+- Spec compliance review: approved, no findings.
+- Code quality review: initially found stale package identity in `package-lock.json`.
+- Follow-up fix: `package-lock.json` top-level and root package names were changed from `glm-mcp` to `multipoly-mcp`.
+
+Task 1 is ready for follow-up verification after the package-lock fix:
+
+```bash
+GLM_API_KEY=dummy npm run health
+npm test
+```
 
 ## Important Implementation Notes
 
