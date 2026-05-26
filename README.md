@@ -1,6 +1,6 @@
 # multipoly - multimodel MCP plugin
 
-Multipoly exposes multiple coding models through one MCP server. It supports direct model-specific review/consult tools and council tools that run multiple models in parallel and synthesize with Qwen.
+Multipoly exposes multiple coding models through one MCP server. It supports direct model-specific review/consult tools and council tools that run multiple models in parallel and, by default, hand their outputs back to the calling harness to synthesize (or merge server-side with a configured synthesizer model).
 
 ## Tools
 
@@ -8,7 +8,7 @@ Multipoly exposes multiple coding models through one MCP server. It supports dir
 |---|---|
 | `glm_review`, `qwen_review`, `deepseek_review`, `composer_review` | Structured code review from one model |
 | `glm_consult`, `qwen_consult`, `deepseek_consult`, `composer_consult` | Design/implementation consultation from one model |
-| `council_review`, `council_consult` | Parallel member calls plus Qwen synthesis |
+| `council_review`, `council_consult` | Parallel member calls; harness-side synthesis by default, or server-side with a configured synthesizer |
 
 ## Install
 
@@ -55,13 +55,28 @@ Configure any subset of models. A model-specific tool returns a typed config err
 | DeepSeek | `MULTIPOLY_DEEPSEEK_API_KEY`, `MULTIPOLY_DEEPSEEK_BASE_URL`; optional `MULTIPOLY_DEEPSEEK_MODEL` |
 | Composer | `MULTIPOLY_COMPOSER_API_KEY`, `MULTIPOLY_COMPOSER_BASE_URL`; optional `MULTIPOLY_COMPOSER_MODEL` |
 
-GLM also accepts legacy `GLM_API_KEY` and `ZHIPU_API_KEY` for compatibility.
+Compatibility aliases are accepted for API keys: GLM also accepts `GLM_API_KEY` and `ZHIPU_API_KEY`; Qwen accepts `QWEN_API_KEY`; DeepSeek accepts `DEEPSEEK_API_KEY`; Composer accepts `COMPOSER_API_KEY`.
+
+### Custom models
+
+Beyond the four builtins, you can register additional models without code changes via `MULTIPOLY_MODELS` (comma-separated keys). Each custom key `<K>` (lowercase, starting with a letter; may not collide with a builtin or the reserved words `harness`/`none`/`caller`) is configured from:
+
+| Env | Required | Notes |
+|---|---|---|
+| `MULTIPOLY_<K>_API_KEY` | yes | |
+| `MULTIPOLY_<K>_BASE_URL` | yes | https (http allowed only for loopback) |
+| `MULTIPOLY_<K>_MODEL` | yes | upstream model id |
+| `MULTIPOLY_<K>_DISPLAY_NAME` | no | defaults to the key |
+| `MULTIPOLY_<K>_THINKING` | no | `1`/`true` if the model accepts the `thinking` request field |
+
+For example, `MULTIPOLY_MODELS=kimi` plus `MULTIPOLY_KIMI_API_KEY`/`_BASE_URL`/`_MODEL` exposes `kimi_review`, `kimi_consult`, and makes `kimi` selectable as a council member or synthesizer. A custom model missing a required field is simply left unconfigured (not fatal), exactly like a builtin.
 
 Server-wide settings:
 
 | Var | Default | Notes |
 |---|---|---|
 | `MULTIPOLY_THINKING` | mode-default | `on` / `off` / `auto`. Default: on for review, off for consult. |
+| `MULTIPOLY_SYNTHESIZER` | (unset) | Default council synthesizer: a model key (`glm`/`qwen`/`deepseek`/`composer`), or `harness`/`none`/`caller` to defer to the calling harness. Unset = defer. Overridable per-call. |
 | `MULTIPOLY_MAX_TOKENS_REVIEW` | 131072 | Output-token cap for review and council review synthesis. |
 | `MULTIPOLY_MAX_TOKENS_CONSULT` | 131072 | Output-token cap for consult and council consult synthesis. |
 | `MULTIPOLY_TIMEOUT_MS` | 600000 | Upstream stream inactivity timeout in ms, range `[1, 3600000]`. |
@@ -73,6 +88,10 @@ Server-wide settings:
 | `MULTIPOLY_DEBUG_REASONING` | 0 | Surface `reasoning_content` as a second text block. |
 
 Legacy `GLM_*` names are still accepted for server-wide settings during migration.
+
+`MULTIPOLY_THINKING` is only sent to models that declare support for the `thinking` request field; currently that is the GLM profile. Non-GLM profiles omit the field even when the server-wide setting is `on`.
+
+The 131072 token default is GLM-specific. Non-GLM profiles omit `max_tokens` by default so their provider default applies. Set `MULTIPOLY_MAX_TOKENS_REVIEW` / `MULTIPOLY_MAX_TOKENS_CONSULT` to apply one cap to every model, or use model-specific caps such as `MULTIPOLY_QWEN_MAX_TOKENS_REVIEW` and `MULTIPOLY_QWEN_MAX_TOKENS_CONSULT`.
 
 ## Tool Reference
 
@@ -132,12 +151,21 @@ Council tools accept the same review/consult arguments plus:
 ```jsonc
 {
   "models": ["glm", "qwen"],
-  "synthesizer": "qwen",
+  "synthesizer": "qwen",        // optional — see below
   "include_individual_results": false
 }
 ```
 
-`models` defaults to all configured models. `synthesizer` defaults to `qwen`.
+`models` defaults to all configured models.
+
+**Synthesis** is opt-in. By default — when no `synthesizer` argument is passed and `MULTIPOLY_SYNTHESIZER` is unset — the council runs the members in parallel and returns each member's output (per-member strict findings for review, answers for consult) plus a merge directive, leaving the final synthesis to the calling harness model. No extra model call is made.
+
+To merge server-side instead, set a `synthesizer`:
+
+- A model key (`glm`, `qwen`, `deepseek`, `composer`) runs that model as the synthesizer. If the named model isn't configured, resolution falls through the chain `chosen → qwen → deepseek → glm → composer` and uses the first configured model.
+- `harness` / `none` / `caller` forces the default defer-to-harness behavior even when `MULTIPOLY_SYNTHESIZER` names a model.
+
+The per-call `synthesizer` argument overrides the `MULTIPOLY_SYNTHESIZER` env default. When server-side synthesis runs, member outputs are re-scanned for secrets before being sent to the synthesizer provider.
 
 ## Client-Side Timeout
 

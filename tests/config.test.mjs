@@ -15,13 +15,15 @@ test("config: defaults", () => {
   assert.equal(c.models.glm.baseUrl, ENDPOINT_PROFILES["zai-coding-plan"]);
   assert.equal(c.models.glm.model, "glm-5.1");
   assert.equal(c.models.glm.apiKey, "test-key");
+  assert.deepEqual(c.models.glm.maxTokens, { review: 131072, consult: 131072 });
   assert.equal(c.models.qwen.configured, false);
+  assert.deepEqual(c.models.qwen.maxTokens, { review: undefined, consult: undefined });
   assert.equal(c.models.deepseek.configured, false);
   assert.equal(c.models.composer.configured, false);
   assert.equal(c.thinking, "mode-default");
   assert.equal(c.maxTokens.review, 131072);
   assert.equal(c.maxTokens.consult, 131072);
-  assert.equal(c.maxTokens.freeform, 131072);
+  assert.equal("freeform" in c.maxTokens, false);
   assert.equal(c.timeoutMs, 600000);
   assert.equal(c.allowSecrets, false);
   assert.equal(c.debugReasoning, false);
@@ -137,6 +139,16 @@ test("config: MULTIPOLY server-wide env vars override legacy GLM env vars", () =
   assert.equal(c.caps.perFile, 2048);
   assert.equal(c.caps.total, 8192);
   assert.equal(c.caps.fileCount, 9);
+});
+
+test("config: dead freeform token env var is ignored", () => {
+  const c = loadConfig({
+    ...base,
+    MULTIPOLY_MAX_TOKENS_FREEFORM: "not-an-integer",
+    GLM_MAX_TOKENS_FREEFORM: "-5",
+  });
+  assert.equal(c.maxTokens.review, 131072);
+  assert.equal("freeform" in c.maxTokens, false);
 });
 
 test("config: resolveCallTimeoutMs — absent returns undefined", () => {
@@ -280,6 +292,21 @@ test("config: GLM_BASE_URL rejects query/fragment", () => {
   );
 });
 
+test("config: non-GLM base URL errors name the model-specific env var", () => {
+  assert.throws(
+    () =>
+      loadConfig({
+        MULTIPOLY_GLM_API_KEY: "glm-key",
+        MULTIPOLY_QWEN_API_KEY: "qwen-key",
+        MULTIPOLY_QWEN_BASE_URL: "http://qwen.example/v1",
+      }),
+    (e) =>
+      e.code === "CONFIG" &&
+      /MULTIPOLY_QWEN_BASE_URL/.test(e.message) &&
+      !/GLM_BASE_URL/.test(e.message),
+  );
+});
+
 test("config: loads configured model endpoints independently", () => {
   const c = loadConfig({
     MULTIPOLY_GLM_API_KEY: "glm-key",
@@ -294,6 +321,30 @@ test("config: loads configured model endpoints independently", () => {
   assert.equal(c.models.qwen.model, "qwen3.7max");
   assert.equal(c.models.qwen.baseUrl, "https://qwen.example/v1");
   assert.equal(c.models.qwen.apiKey, "qwen-key");
+  assert.deepEqual(c.models.qwen.maxTokens, { review: undefined, consult: undefined });
+});
+
+test("config: model-specific max token env vars configure non-GLM caps", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "glm-key",
+    MULTIPOLY_QWEN_API_KEY: "qwen-key",
+    MULTIPOLY_QWEN_BASE_URL: "https://qwen.example/v1",
+    MULTIPOLY_QWEN_MAX_TOKENS_REVIEW: "32768",
+    MULTIPOLY_QWEN_MAX_TOKENS_CONSULT: "16384",
+  });
+  assert.deepEqual(c.models.qwen.maxTokens, { review: 32768, consult: 16384 });
+});
+
+test("config: server-wide max token env vars apply to every configured model", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "glm-key",
+    MULTIPOLY_QWEN_API_KEY: "qwen-key",
+    MULTIPOLY_QWEN_BASE_URL: "https://qwen.example/v1",
+    MULTIPOLY_MAX_TOKENS_REVIEW: "4096",
+    MULTIPOLY_MAX_TOKENS_CONSULT: "2048",
+  });
+  assert.deepEqual(c.models.glm.maxTokens, { review: 4096, consult: 2048 });
+  assert.deepEqual(c.models.qwen.maxTokens, { review: 4096, consult: 2048 });
 });
 
 test("config: model-specific env vars override legacy GLM env vars", () => {
@@ -302,6 +353,96 @@ test("config: model-specific env vars override legacy GLM env vars", () => {
     MULTIPOLY_GLM_API_KEY: "specific",
   });
   assert.equal(c.models.glm.apiKey, "specific");
+});
+
+test("config: MULTIPOLY_MODELS registers an env-defined custom model", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "kimi",
+    MULTIPOLY_KIMI_API_KEY: "k",
+    MULTIPOLY_KIMI_BASE_URL: "https://kimi.example/v1",
+    MULTIPOLY_KIMI_MODEL: "kimi-k2",
+    MULTIPOLY_KIMI_DISPLAY_NAME: "Kimi K2",
+    MULTIPOLY_KIMI_THINKING: "1",
+  });
+  assert.ok(c.modelKeys.includes("kimi"));
+  assert.equal(c.models.kimi.configured, true);
+  assert.equal(c.models.kimi.model, "kimi-k2");
+  assert.equal(c.models.kimi.baseUrl, "https://kimi.example/v1");
+  assert.equal(c.models.kimi.displayName, "Kimi K2");
+  assert.equal(c.models.kimi.supportsThinking, true);
+  // Builtins are still present alongside customs.
+  assert.ok(c.modelKeys.includes("glm"));
+});
+
+test("config: a custom model missing its base URL is unconfigured, not fatal", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "kimi",
+    MULTIPOLY_KIMI_API_KEY: "k",
+    MULTIPOLY_KIMI_MODEL: "kimi-k2",
+  });
+  assert.equal(c.models.kimi.configured, false);
+  assert.equal(c.models.glm.configured, true);
+});
+
+test("config: MULTIPOLY_MODELS rejects builtin collisions, reserved words, and bad names", () => {
+  for (const bad of ["glm", "council", "harness", "none", "caller", "Bad-Name", "1kimi", "constructor", "prototype"]) {
+    assert.throws(
+      () => loadConfig({ MULTIPOLY_GLM_API_KEY: "g", MULTIPOLY_MODELS: bad }),
+      (e) => e.code === "CONFIG",
+      `expected ${bad} rejected`,
+    );
+  }
+});
+
+test("config: a custom model can be the synthesizer via env and per-call", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "kimi",
+    MULTIPOLY_KIMI_API_KEY: "k",
+    MULTIPOLY_KIMI_BASE_URL: "https://kimi.example/v1",
+    MULTIPOLY_KIMI_MODEL: "kimi-k2",
+    MULTIPOLY_SYNTHESIZER: "kimi",
+  });
+  assert.equal(c.synthesizer, "kimi");
+});
+
+test("config: MULTIPOLY_SYNTHESIZER parsed and normalized", () => {
+  // Unset means "no preferred synthesizer" → council defers to the harness.
+  assert.equal(loadConfig({ ...base }).synthesizer, undefined);
+  assert.equal(loadConfig({ ...base, MULTIPOLY_SYNTHESIZER: "qwen" }).synthesizer, "qwen");
+  // "harness"/"none"/"caller" all normalize to the defer sentinel.
+  assert.equal(loadConfig({ ...base, MULTIPOLY_SYNTHESIZER: "HARNESS" }).synthesizer, "harness");
+  assert.equal(loadConfig({ ...base, MULTIPOLY_SYNTHESIZER: "none" }).synthesizer, "harness");
+  assert.equal(loadConfig({ ...base, MULTIPOLY_SYNTHESIZER: "caller" }).synthesizer, "harness");
+  // An unknown model name is a config error.
+  assert.throws(
+    () => loadConfig({ ...base, MULTIPOLY_SYNTHESIZER: "gpt9" }),
+    (e) => e.code === "CONFIG",
+  );
+});
+
+test("config: malformed legacy GLM_ENDPOINT does not block a non-GLM startup", () => {
+  // A stray legacy GLM_ENDPOINT in the environment must not prevent a
+  // qwen-only deployment from starting: GLM isn't keyed, so its endpoint
+  // is irrelevant.
+  const c = loadConfig({
+    MULTIPOLY_QWEN_API_KEY: "qwen-key",
+    MULTIPOLY_QWEN_BASE_URL: "https://qwen.example/v1",
+    GLM_ENDPOINT: "garbage-typo",
+  });
+  assert.equal(c.models.qwen.configured, true);
+  assert.equal(c.models.glm.configured, false);
+});
+
+test("config: malformed GLM_ENDPOINT still throws when GLM is keyed", () => {
+  // When GLM IS being configured (has a key), a bad endpoint is a real
+  // misconfiguration and must surface.
+  assert.throws(
+    () => loadConfig({ GLM_API_KEY: "k", GLM_ENDPOINT: "garbage-typo" }),
+    (e) => e.code === "CONFIG",
+  );
 });
 
 test("config: missing qwen config does not prevent GLM-only startup", () => {

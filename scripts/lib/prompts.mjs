@@ -28,11 +28,28 @@ export const CONSULT_SYSTEM_PROMPT = `You are a senior engineer giving a second 
  * backticks inside the content. Prevents a reviewed file that itself contains
  * ``` from breaking out of the fence and injecting prompt text.
  */
-function safeFence(content, lang = "") {
+export function safeFence(content, lang = "") {
   const runs = String(content).match(/`{3,}/g) || [];
   const maxRun = runs.reduce((m, s) => Math.max(m, s.length), 2);
   const delim = "`".repeat(maxRun + 1);
   return `${delim}${lang}\n${content}\n${delim}`;
+}
+
+export function stripCodeFence(text) {
+  const s = String(text);
+  const labeled = s.match(/(?:^|\r?\n)\s*(`{3,})\s*json\s*\r?\n/i);
+  if (labeled) return stripFenceAt(s, labeled.index + labeled[0].search(/`{3,}/));
+  const leading = s.match(/^\s*(`{3,})(?:\s*json)?\s*\r?\n/i);
+  if (!leading) return text;
+  return stripFenceAt(s, leading.index + leading[0].search(/`{3,}/));
+}
+
+function stripFenceAt(text, fenceStart) {
+  const openMatch = text.slice(fenceStart).match(/^(`{3,})(?:\s*json)?\s*\r?\n/i);
+  if (!openMatch) return text;
+  const afterOpen = text.slice(fenceStart + openMatch[0].length);
+  const closing = openMatch[1].replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return afterOpen.replace(new RegExp(`\\r?\\n\\s*${closing}\\s*(?:\\r?\\n[\\s\\S]*)?$`), "");
 }
 
 /**
@@ -118,7 +135,7 @@ export function renderConsultUserMessage(prompt, files) {
   return parts.join("\n\n");
 }
 
-export const COUNCIL_REVIEW_SYNTHESIS_PROMPT = `You are Qwen acting as a council chair.
+export const COUNCIL_REVIEW_SYNTHESIS_PROMPT = `You are a council chair synthesizing review outputs from multiple models.
 
 You will receive structured review outputs from multiple models. Merge them into one high-signal review.
 
@@ -128,7 +145,7 @@ Rules:
 - Preserve material disagreements in summary_md.
 - Output STRICT JSON matching the provided schema. No prose outside JSON.`;
 
-export const COUNCIL_CONSULT_SYNTHESIS_PROMPT = `You are Qwen acting as a council chair.
+export const COUNCIL_CONSULT_SYNTHESIS_PROMPT = `You are a council chair synthesizing answers from multiple models.
 
 You will receive answers from multiple models. Produce one concise final answer.
 
@@ -141,19 +158,19 @@ Rules:
 export function renderCouncilReviewSynthesisMessage({ originalPrompt, memberResults, schema }) {
   return [
     "# Original review request",
-    originalPrompt,
+    safeFence(originalPrompt, "json"),
     "# Member review outputs",
-    JSON.stringify(memberResults, null, 2),
+    safeFence(JSON.stringify(memberResults, null, 2), "json"),
     "# Required output schema",
-    JSON.stringify(schema, null, 2),
+    safeFence(JSON.stringify(schema, null, 2), "json"),
   ].join("\n\n");
 }
 
 export function renderCouncilConsultSynthesisMessage({ originalPrompt, memberResults }) {
   return [
     "# Original consult request",
-    originalPrompt,
+    safeFence(originalPrompt),
     "# Member consult outputs",
-    JSON.stringify(memberResults, null, 2),
+    safeFence(JSON.stringify(memberResults, null, 2), "json"),
   ].join("\n\n");
 }

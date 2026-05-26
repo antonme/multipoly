@@ -5,7 +5,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { handleReview } from "../scripts/lib/review.mjs";
+import { handleModelReview } from "../scripts/lib/model-review.mjs";
+
+// These tests cover the single-model review path via the GLM model key.
+const handleReview = (input, ctx) => handleModelReview("glm", input, ctx);
 
 const execFileP = promisify(execFile);
 const enc = new TextEncoder();
@@ -225,6 +228,33 @@ test("review: opening fence with space before language tag is tolerated", async 
   }
 });
 
+test("review: longer markdown fences are tolerated", async () => {
+  const { repo, baseSha } = await makeRepo();
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const payload = JSON.stringify({
+      schema_version: "1",
+      findings: [],
+      summary_md: "ok",
+    });
+    const fenced = `\`\`\`\`json\n${payload}\n\`\`\`\``;
+    const body = [
+      `data: {"choices":[{"delta":{"content":${JSON.stringify(fenced)}}}]}\n\n`,
+      "data: [DONE]\n\n",
+    ];
+    const fetchImpl = makeFetch(body);
+    const out = await handleReview(
+      { diff_base: baseSha },
+      { config: baseConfig, fetchImpl },
+    );
+    assert.equal(out.result.schema_version, "1");
+    assert.equal(fetchImpl.calls.length, 1);
+  } finally {
+    process.chdir(prev);
+  }
+});
+
 test("review: uppercase ```JSON fence with trailing prose is extracted", async () => {
   const { repo, baseSha } = await makeRepo();
   const prev = process.cwd();
@@ -239,12 +269,8 @@ test("review: uppercase ```JSON fence with trailing prose is extracted", async (
     // closing fence (both observed in real outputs). The lower-case-only
     // regex previously failed, triggering a needless retry.
     const wrapped = `Here is the JSON:\n\`\`\`JSON\n${payload}\n\`\`\`\n`;
-    // The leading prose breaks the strict "start with fence" match, so use
-    // a content that leads with the fence. The fix still must accept JSON
-    // language tag in any case.
-    const fencedLeading = `\`\`\`JSON\n${payload}\n\`\`\``;
     const body = [
-      `data: {"choices":[{"delta":{"content":${JSON.stringify(fencedLeading)}}}]}\n\n`,
+      `data: {"choices":[{"delta":{"content":${JSON.stringify(wrapped)}}}]}\n\n`,
       "data: [DONE]\n\n",
     ];
     const fetchImpl = makeFetch(body);

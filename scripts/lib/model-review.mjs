@@ -1,4 +1,4 @@
-import { GlmError } from "./errors.mjs";
+import { MultipolyError } from "./errors.mjs";
 import { gatherReview } from "./gather.mjs";
 import { scanMany, formatHitsForError } from "./secrets.mjs";
 import { streamChatCompletion } from "./client.mjs";
@@ -6,10 +6,12 @@ import {
   REVIEW_SYSTEM_PROMPT,
   REVIEW_JSON_ONLY_PREFIX,
   renderReviewUserMessage,
+  stripCodeFence,
 } from "./prompts.mjs";
-import { REVIEW_SCHEMA, validateReview } from "./schema.mjs";
+import { REVIEW_SCHEMA, validateReview, normalizeFindings } from "./schema.mjs";
 import { assertContentBudget } from "./budget.mjs";
-import { resolveCallTimeoutMs } from "./config.mjs";
+import { resolveCallTimeoutMs, resolveMaxTokensForModel } from "./config.mjs";
+import { modelSupportsThinking } from "./models.mjs";
 
 export async function prepareReview(input, { config, cwd = process.cwd() } = {}) {
   const gathered = await gatherReview({
@@ -31,7 +33,7 @@ export async function prepareReview(input, { config, cwd = process.cwd() } = {})
   }
   const secretScan = scanMany(pieces);
   if (!secretScan.clean && !config.allowSecrets) {
-    throw new GlmError(
+    throw new MultipolyError(
       "SECRET",
       `Potential secrets detected in outbound payload:\n${formatHitsForError(secretScan.hits)}\nSet MULTIPOLY_ALLOW_SECRETS=1 to override.`,
     );
@@ -70,7 +72,12 @@ export async function runPreparedReview(modelKey, prepared, { config, fetchImpl 
     fetchImpl,
   });
 
-  assertContentBudget(attempt1, config.maxTokens.review, "review");
+  const maxTokens = resolveMaxTokensForModel(config, modelKey, "review");
+  const budgetContext = {
+    modelKey,
+    supportsThinking: modelSupportsThinking(config, modelKey),
+  };
+  assertContentBudget(attempt1, maxTokens, "review", budgetContext);
 
   let parsed = tryParseJson(attempt1.content);
   let validation = parsed.ok ? validateReview(parsed.value) : { valid: false, reason: parsed.error };
@@ -96,31 +103,22 @@ export async function runPreparedReview(modelKey, prepared, { config, fetchImpl 
       timeoutMs: prepared.timeoutMs,
       fetchImpl,
     });
-    assertContentBudget(attempt2, config.maxTokens.review, "review");
+    assertContentBudget(attempt2, maxTokens, "review", budgetContext);
     if (attempt2.reasoning) reasoning = attempt2.reasoning;
     parsed = tryParseJson(attempt2.content);
     validation = parsed.ok ? validateReview(parsed.value) : { valid: false, reason: parsed.error };
     if (!validation.valid) {
-      throw new GlmError("SCHEMA", `${modelKey} review output failed validation: ${validation.reason}`, {
+      throw new MultipolyError("SCHEMA", `${modelKey} review output failed validation: ${validation.reason}`, {
         details: { rawPrefix: attempt2.content.slice(0, 200) },
       });
     }
   }
 
-  const normalizedFindings = parsed.value.findings.map((f) => ({
-    severity: f.severity,
-    path: f.path,
-    line: f.line ?? null,
-    end_line: f.end_line ?? null,
-    message: f.message,
-    suggestion: f.suggestion ?? null,
-  }));
-
   return {
     result: {
       schema_version: "1",
       model: modelKey,
-      findings: normalizedFindings,
+      findings: normalizeFindings(parsed.value.findings),
       summary_md: parsed.value.summary_md,
       truncated: prepared.gathered.truncated,
       files: prepared.gathered.files.map(({ content, ...rest }) => rest),
@@ -149,11 +147,4 @@ function tryParseJson(text) {
   } catch (e) {
     return { ok: false, error: e.message };
   }
-}
-
-function stripCodeFence(text) {
-  const openMatch = text.match(/^\s*```(?:\s*json)?\s*\r?\n/i);
-  if (!openMatch) return text;
-  const afterOpen = text.slice(openMatch[0].length);
-  return afterOpen.replace(/\r?\n\s*```\s*(?:\r?\n[\s\S]*)?$/, "");
 }

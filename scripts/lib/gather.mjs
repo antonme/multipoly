@@ -1,6 +1,6 @@
 import path from "node:path";
 import { realpath } from "node:fs/promises";
-import { GlmError } from "./errors.mjs";
+import { MultipolyError } from "./errors.mjs";
 import {
   isGitRepo,
   getToplevel,
@@ -27,9 +27,9 @@ export async function gatherReview({ diffBase, paths, cwd = process.cwd(), caps 
   const hasBase = typeof diffBase === "string" && diffBase.length > 0;
   const hasPaths = Array.isArray(paths) && paths.length > 0;
   if (hasBase === hasPaths) {
-    throw new GlmError(
+    throw new MultipolyError(
       "INVALID_INPUT",
-      "glm_review requires exactly one of `diff_base` or `paths`",
+      "review requires exactly one of `diff_base` or `paths`",
     );
   }
 
@@ -41,7 +41,7 @@ export async function gatherReview({ diffBase, paths, cwd = process.cwd(), caps 
 
 async function gatherReviewDiff({ diffBase, cwd, caps }) {
   if (!(await isGitRepo(cwd))) {
-    throw new GlmError("GIT", `not a git repository: ${cwd}`);
+    throw new MultipolyError("GIT", `not a git repository: ${cwd}`);
   }
   const topRaw = await getToplevel(cwd);
   const top = await realpath(topRaw);
@@ -63,7 +63,7 @@ async function gatherReviewDiff({ diffBase, cwd, caps }) {
       // Translate the tagged failure kind into a fixed, safe-to-render reason
       // so the LLM-facing output is predictable and doesn't echo raw paths or
       // internal error strings.
-      const kind = e instanceof GlmError ? e.details?.kind : null;
+      const kind = e instanceof MultipolyError ? e.details?.kind : null;
       const reason =
         kind === "escapes_root" ? "escapes repo root" :
         kind === "missing" ? "file no longer exists" :
@@ -184,7 +184,7 @@ async function classifyFiles({ entries, caps, forcedBinaries }) {
       out.push({
         path: rel,
         status: "listed_only",
-        reason: e instanceof GlmError ? e.message : String(e),
+        reason: e instanceof MultipolyError ? e.message : String(e),
       });
       continue;
     }
@@ -217,7 +217,7 @@ async function classifyFiles({ entries, caps, forcedBinaries }) {
       out.push({
         path: rel,
         status: "listed_only",
-        reason: e instanceof GlmError ? e.message : String(e),
+        reason: e instanceof MultipolyError ? e.message : String(e),
       });
       continue;
     }
@@ -255,7 +255,7 @@ async function classifyFiles({ entries, caps, forcedBinaries }) {
  */
 export async function gatherConsult({ prompt, paths, cwd = process.cwd(), caps }) {
   if (typeof prompt !== "string" || prompt.trim().length === 0) {
-    throw new GlmError("INVALID_INPUT", "prompt must be a non-empty string");
+    throw new MultipolyError("INVALID_INPUT", "prompt must be a non-empty string");
   }
   if (!paths || paths.length === 0) {
     return { prompt, files: [] };
@@ -272,7 +272,7 @@ export async function gatherConsult({ prompt, paths, cwd = process.cwd(), caps }
   let bytesUsed = 0;
   for (const p of paths) {
     if (files.length >= caps.fileCount) {
-      throw new GlmError(
+      throw new MultipolyError(
         "INVALID_INPUT",
         `too many attached files (cap ${caps.fileCount}). Reduce the attachment set or raise MULTIPOLY_FILE_COUNT_CAP.`,
       );
@@ -282,24 +282,24 @@ export async function gatherConsult({ prompt, paths, cwd = process.cwd(), caps }
     const rel = path.relative(rootRealpath, abs) || p;
     const size = await getSize(abs);
     if (size > caps.perFile) {
-      throw new GlmError(
+      throw new MultipolyError(
         "INVALID_INPUT",
         `attached file ${rel} is ${size} bytes (over per-file cap ${caps.perFile}). Split the file or increase MULTIPOLY_PER_FILE_CAP_BYTES.`,
       );
     }
     if (bytesUsed + size > caps.total) {
-      throw new GlmError(
+      throw new MultipolyError(
         "INVALID_INPUT",
         `attached files exceed total cap ${caps.total} bytes. Reduce the attachment set or increase MULTIPOLY_TOTAL_CAP_BYTES.`,
       );
     }
     if (await isBinaryFile(abs)) {
-      throw new GlmError("INVALID_INPUT", `attached file ${rel} is binary; refusing to send.`);
+      throw new MultipolyError("INVALID_INPUT", `attached file ${rel} is binary; refusing to send.`);
     }
     const { content } = await readFileCapped(abs, caps.perFile);
     if (content === null) {
       // TOCTOU: file grew past perFile cap between getSize and read.
-      throw new GlmError(
+      throw new MultipolyError(
         "INVALID_INPUT",
         `attached file ${rel} grew past per-file cap during read.`,
       );
@@ -309,7 +309,7 @@ export async function gatherConsult({ prompt, paths, cwd = process.cwd(), caps }
     // file grow can push `actual` above `size`. Mirror classifyFiles.
     const actual = Buffer.byteLength(content, "utf8");
     if (bytesUsed + actual > caps.total) {
-      throw new GlmError(
+      throw new MultipolyError(
         "INVALID_INPUT",
         `attached file ${rel} would push total past cap ${caps.total} after UTF-8 decoding. Reduce the attachment set or increase MULTIPOLY_TOTAL_CAP_BYTES.`,
       );

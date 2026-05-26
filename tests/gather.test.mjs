@@ -90,7 +90,10 @@ test("gather: review total cap triggers listed_only", async () => {
 test("gather: review rejects both diff_base and paths missing", async () => {
   await assert.rejects(
     () => gatherReview({ cwd: process.cwd(), caps: defaultCaps }),
-    (e) => e.code === "INVALID_INPUT",
+    (e) =>
+      e.code === "INVALID_INPUT" &&
+      /review requires exactly one/.test(e.message) &&
+      !/glm_review/.test(e.message),
   );
 });
 

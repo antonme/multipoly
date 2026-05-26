@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { validateReview, validateCouncilReview } from "../scripts/lib/schema.mjs";
+import { COUNCIL_REVIEW_SCHEMA, validateReview, validateCouncilReview } from "../scripts/lib/schema.mjs";
 
 const valid = {
   schema_version: "1",
@@ -102,25 +102,33 @@ test("schema: end_line without line rejected (impossible range)", () => {
   assert.match(r.reason, /end_line requires line/);
 });
 
-test("schema: council review requires synthesizer and at least two models", () => {
+test("schema: council review synthesis validates only model-owned fields", () => {
   assert.deepEqual(
     validateCouncilReview({
       schema_version: "1",
-      synthesizer: "qwen",
-      models: ["glm", "qwen"],
       findings: [],
       summary_md: "ok",
     }),
     { valid: true },
   );
 
-  const tooFew = validateCouncilReview({
+  assert.deepEqual(
+    validateCouncilReview({
+      schema_version: "1",
+      synthesizer: "qwen3.7max",
+      models: ["not-a-server-model"],
+      findings: [],
+      summary_md: "ok",
+    }),
+    { valid: true },
+  );
+
+  assert.equal(COUNCIL_REVIEW_SCHEMA.required.includes("synthesizer"), false);
+  assert.equal(COUNCIL_REVIEW_SCHEMA.required.includes("models"), false);
+
+  const missingSummary = validateCouncilReview({
     schema_version: "1",
-    synthesizer: "qwen",
-    models: ["glm"],
     findings: [],
-    summary_md: "ok",
   });
-  assert.equal(tooFew.valid, false);
-  assert.match(tooFew.reason, /at least two/);
+  assert.equal(missingSummary.valid, false);
 });

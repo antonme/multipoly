@@ -46,6 +46,8 @@ const baseConfig = {
       baseUrl: "https://api.test/v1",
       apiKey: "k",
       model: "glm-5.1",
+      supportsThinking: true,
+      maxTokens: { review: 8192, consult: 16384 },
     },
   },
   thinking: "mode-default",
@@ -96,7 +98,64 @@ test("client: sends request to selected model config", async () => {
   assert.equal(fetchImpl.calls[0].url, "https://qwen.example/v1/chat/completions");
   const sent = JSON.parse(fetchImpl.calls[0].opts.body);
   assert.equal(sent.model, "qwen3.7max");
+  assert.equal(sent.thinking, undefined);
+  assert.equal(sent.max_tokens, undefined);
   assert.equal(fetchImpl.calls[0].opts.headers.authorization, "Bearer qwen-key");
+});
+
+test("client: hand-built non-GLM model config without maxTokens omits global cap", async () => {
+  const fetchImpl = makeFetch({});
+  await streamChatCompletion({
+    config: {
+      ...baseConfig,
+      maxTokens: { review: 99999, consult: 88888 },
+      models: {
+        qwen: {
+          configured: true,
+          key: "qwen",
+          displayName: "Qwen",
+          baseUrl: "https://qwen.example/v1",
+          apiKey: "qwen-key",
+          model: "qwen3.7max",
+          supportsThinking: false,
+        },
+      },
+    },
+    modelKey: "qwen",
+    messages: [{ role: "user", content: "hi" }],
+    mode: "review",
+    fetchImpl,
+  });
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.equal(sent.max_tokens, undefined);
+});
+
+test("client: sends explicit non-GLM max token cap when configured", async () => {
+  const fetchImpl = makeFetch({});
+  await streamChatCompletion({
+    config: {
+      ...baseConfig,
+      models: {
+        qwen: {
+          configured: true,
+          key: "qwen",
+          displayName: "Qwen",
+          baseUrl: "https://qwen.example/v1",
+          apiKey: "qwen-key",
+          model: "qwen3.7max",
+          maxTokens: { review: 32768, consult: 16384 },
+          supportsThinking: false,
+        },
+      },
+    },
+    modelKey: "qwen",
+    messages: [{ role: "user", content: "hi" }],
+    mode: "review",
+    fetchImpl,
+  });
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.equal(sent.max_tokens, 32768);
+  assert.equal(sent.thinking, undefined);
 });
 
 test("client: review mode enables thinking by default", async () => {
@@ -340,4 +399,49 @@ test("client: timeout aborts stalled body after headers", async () => {
       }),
     (e) => e.code === "TIMEOUT",
   );
+});
+
+test("client: reasoning progress skips generating line when no reasoning emitted", async () => {
+  const fetchImpl = makeFetch({
+    chunks: [
+      'data: {"choices":[{"delta":{"content":"one"}}]}\n\n',
+      'data: {"choices":[{"delta":{"content":"two"}}]}\n\n',
+      "data: [DONE]\n\n",
+    ],
+  });
+  const writes = [];
+  const originalWrite = process.stderr.write;
+  process.stderr.write = function patchedWrite(chunk, ...args) {
+    writes.push(String(chunk));
+    if (typeof args.at(-1) === "function") args.at(-1)();
+    return true;
+  };
+  try {
+    const out = await streamChatCompletion({
+      config: {
+        ...baseConfig,
+        progress: "reasoning",
+        models: {
+          qwen: {
+            configured: true,
+            key: "qwen",
+            displayName: "Qwen",
+            baseUrl: "https://qwen.example/v1",
+            apiKey: "qwen-key",
+            model: "qwen3.7max",
+            supportsThinking: false,
+            maxTokens: { review: undefined, consult: undefined },
+          },
+        },
+      },
+      modelKey: "qwen",
+      messages: [{ role: "user", content: "hi" }],
+      mode: "consult",
+      fetchImpl,
+    });
+    assert.equal(out.content, "onetwo");
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+  assert.equal(writes.some((s) => /generating/.test(s)), false);
 });

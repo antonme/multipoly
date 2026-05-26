@@ -19,8 +19,14 @@ import {
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
 
-import { loadConfig, redactedConfig, resolveCallTimeoutMs, TIMEOUT_BOUNDS } from "./lib/config.mjs";
-import { GlmError, logError } from "./lib/errors.mjs";
+import {
+  loadConfig,
+  redactedConfig,
+  resolveCallTimeoutMs,
+  TIMEOUT_BOUNDS,
+  normalizeSynthesizerChoice,
+} from "./lib/config.mjs";
+import { MultipolyError, logError } from "./lib/errors.mjs";
 import { MODEL_KEYS, MODEL_INFO } from "./lib/models.mjs";
 import { handleModelReview } from "./lib/model-review.mjs";
 import { handleModelConsult } from "./lib/model-consult.mjs";
@@ -37,6 +43,7 @@ const TIMEOUT_ARG_SCHEMA = {
 const REVIEW_TOOL_SCHEMA = {
   type: "object",
   additionalProperties: false,
+  description: "Exactly one of diff_base or paths is required.",
   properties: {
     diff_base: { type: "string", description: "Git ref to diff HEAD against." },
     paths: { type: "array", items: { type: "string" }, minItems: 1 },
@@ -56,65 +63,85 @@ const CONSULT_TOOL_SCHEMA = {
   },
 };
 
-const COUNCIL_REVIEW_TOOL_SCHEMA = {
-  ...REVIEW_TOOL_SCHEMA,
-  properties: {
-    ...REVIEW_TOOL_SCHEMA.properties,
+// Council extra properties depend on the active model registry (the enums must
+// list the real model keys), so they're built per-registry rather than static.
+function councilExtraProperties(modelKeys) {
+  return {
     models: {
       type: "array",
-      items: { type: "string", enum: MODEL_KEYS },
+      items: { type: "string", enum: [...modelKeys] },
       minItems: 2,
       description: "Optional council member models. Defaults to all configured models.",
     },
-    synthesizer: { type: "string", enum: MODEL_KEYS, description: "Defaults to qwen." },
-    include_individual_results: { type: "boolean" },
-  },
-};
-
-const COUNCIL_CONSULT_TOOL_SCHEMA = {
-  ...CONSULT_TOOL_SCHEMA,
-  properties: {
-    ...CONSULT_TOOL_SCHEMA.properties,
-    models: {
-      type: "array",
-      items: { type: "string", enum: MODEL_KEYS },
-      minItems: 2,
-      description: "Optional council member models. Defaults to all configured models.",
+    synthesizer: {
+      type: "string",
+      enum: [...modelKeys, "harness", "none", "caller"],
+      description:
+        "A model key to synthesize server-side (falls through to the next configured model if unconfigured), " +
+        "or 'harness'/'none'/'caller' to return member outputs for the calling harness to synthesize. " +
+        "Defaults to MULTIPOLY_SYNTHESIZER, else defers to the harness.",
     },
-    synthesizer: { type: "string", enum: MODEL_KEYS, description: "Defaults to qwen." },
     include_individual_results: { type: "boolean" },
-  },
-};
+  };
+}
 
-export function buildTools() {
+const BUILTIN_REGISTRY = { keys: MODEL_KEYS, info: MODEL_INFO };
+
+/**
+ * Build the advertised tool list for a model registry ({ keys, info }).
+ * Defaults to the builtin registry so callers/tests can invoke it with no args.
+ */
+export function buildTools(registry = BUILTIN_REGISTRY) {
+  const extra = councilExtraProperties(registry.keys);
+  const councilReviewSchema = {
+    ...REVIEW_TOOL_SCHEMA,
+    properties: { ...REVIEW_TOOL_SCHEMA.properties, ...extra },
+  };
+  const councilConsultSchema = {
+    ...CONSULT_TOOL_SCHEMA,
+    properties: { ...CONSULT_TOOL_SCHEMA.properties, ...extra },
+  };
+
   const tools = [];
-  for (const key of MODEL_KEYS) {
-    const info = MODEL_INFO[key];
+  for (const key of registry.keys) {
+    const displayName = registry.info[key]?.displayName ?? key;
     tools.push({
       name: `${key}_review`,
-      description: `Delegate a structured code review to ${info.displayName}.`,
+      description: `Delegate a structured code review to ${displayName}. Supply exactly one of diff_base or paths.`,
       inputSchema: REVIEW_TOOL_SCHEMA,
     });
     tools.push({
       name: `${key}_consult`,
-      description: `Ask ${info.displayName} for a design or implementation consultation.`,
+      description: `Ask ${displayName} for a design or implementation consultation.`,
       inputSchema: CONSULT_TOOL_SCHEMA,
     });
   }
   tools.push({
     name: "council_review",
-    description: "Run multiple model reviews in parallel, then synthesize with Qwen.",
-    inputSchema: COUNCIL_REVIEW_TOOL_SCHEMA,
+    description:
+      "Run multiple model reviews in parallel. By default returns each model's findings for you (the calling harness) to merge; " +
+      "set `synthesizer` (or MULTIPOLY_SYNTHESIZER) to a model to merge server-side instead. Supply exactly one of diff_base or paths.",
+    inputSchema: councilReviewSchema,
   });
   tools.push({
     name: "council_consult",
-    description: "Run multiple model consultations in parallel, then synthesize with Qwen.",
-    inputSchema: COUNCIL_CONSULT_TOOL_SCHEMA,
+    description:
+      "Run multiple model consultations in parallel. By default returns each model's answer for you (the calling harness) to synthesize; " +
+      "set `synthesizer` (or MULTIPOLY_SYNTHESIZER) to a model to synthesize server-side instead.",
+    inputSchema: councilConsultSchema,
   });
   return tools;
 }
 
-const TOOLS = buildTools();
+/** Derive a tool-building registry ({ keys, info }) from a loaded config. */
+function registryFromConfig(config) {
+  return {
+    keys: config.modelKeys,
+    info: Object.fromEntries(
+      config.modelKeys.map((k) => [k, { key: k, displayName: config.models[k]?.displayName ?? k }]),
+    ),
+  };
+}
 
 function main() {
   const args = new Set(process.argv.slice(2));
@@ -144,17 +171,22 @@ function main() {
     { capabilities: { tools: {} } },
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: TOOLS }));
+  // Tools and handlers reflect the loaded registry (builtins + any custom
+  // models from MULTIPOLY_MODELS), so env-defined models are fully exposed.
+  const tools = buildTools(registryFromConfig(config));
+  const handlers = buildHandlers(config.modelKeys);
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { name, arguments: input } = req.params;
-    const handler = HANDLERS[name];
+    const handler = handlers[name];
     if (!handler) {
       // Unknown tool is a protocol error, not an application result.
       throw new McpError(ErrorCode.MethodNotFound, `unknown tool: ${name}`);
     }
     try {
-      validateToolInput(name, input);
+      validateToolInput(name, input, config.modelKeys);
       const { result, reasoning } = await handler(input || {}, { config });
       return buildSuccessResponse(name, result, reasoning, config);
     } catch (e) {
@@ -185,14 +217,16 @@ function main() {
   }
 }
 
-const HANDLERS = Object.fromEntries([
-  ...MODEL_KEYS.flatMap((key) => [
-    [`${key}_review`, (input, ctx) => handleModelReview(key, input, ctx)],
-    [`${key}_consult`, (input, ctx) => handleModelConsult(key, input, ctx)],
-  ]),
-  ["council_review", handleCouncilReview],
-  ["council_consult", handleCouncilConsult],
-]);
+function buildHandlers(modelKeys) {
+  return Object.fromEntries([
+    ...modelKeys.flatMap((key) => [
+      [`${key}_review`, (input, ctx) => handleModelReview(key, input, ctx)],
+      [`${key}_consult`, (input, ctx) => handleModelConsult(key, input, ctx)],
+    ]),
+    ["council_review", handleCouncilReview],
+    ["council_consult", handleCouncilConsult],
+  ]);
+}
 
 /**
  * Minimal runtime input validation for the tools. We do this ourselves
@@ -202,97 +236,113 @@ const REVIEW_KEYS = new Set(["diff_base", "paths", "focus", "timeout_ms"]);
 const CONSULT_KEYS = new Set(["prompt", "paths", "timeout_ms"]);
 const COUNCIL_EXTRA_KEYS = new Set(["models", "synthesizer", "include_individual_results"]);
 
+// Map each tool name to its allowed argument keys. Exported so a test can
+// assert this stays in lockstep with the advertised inputSchema properties.
+export const TOOL_KEY_SPEC = Object.fromEntries([
+  ...MODEL_KEYS.flatMap((key) => [
+    [`${key}_review`, REVIEW_KEYS],
+    [`${key}_consult`, CONSULT_KEYS],
+  ]),
+  ["council_review", new Set([...REVIEW_KEYS, ...COUNCIL_EXTRA_KEYS])],
+  ["council_consult", new Set([...CONSULT_KEYS, ...COUNCIL_EXTRA_KEYS])],
+]);
+
 function rejectUnknownKeys(name, input, allowed) {
   for (const k of Object.keys(input)) {
     if (!allowed.has(k)) {
-      throw new GlmError("INVALID_INPUT", `${name}: unknown argument '${k}'`);
+      throw new MultipolyError("INVALID_INPUT", `${name}: unknown argument '${k}'`);
     }
   }
 }
 
-function validateToolInput(name, raw) {
+function validateToolInput(name, raw, modelKeys = MODEL_KEYS) {
   const input = raw || {};
   if (typeof input !== "object" || Array.isArray(input)) {
-    throw new GlmError("INVALID_INPUT", `${name}: arguments must be an object`);
+    throw new MultipolyError("INVALID_INPUT", `${name}: arguments must be an object`);
   }
   // Shared across all three tools. Throws INVALID_INPUT on a bad value;
   // returns undefined when absent (handler falls back to config.timeoutMs).
   if ("timeout_ms" in input) resolveCallTimeoutMs(input.timeout_ms);
   if (name.endsWith("_review")) {
-    validateReviewInput(name, input, name.startsWith("council_"));
+    validateReviewInput(name, input, name.startsWith("council_"), modelKeys);
     return;
   }
   if (name.endsWith("_consult")) {
-    validateConsultInput(name, input, name.startsWith("council_"));
+    validateConsultInput(name, input, name.startsWith("council_"), modelKeys);
     return;
   }
-  throw new GlmError("INVALID_INPUT", `unknown tool shape: ${name}`);
+  throw new MultipolyError("INVALID_INPUT", `unknown tool shape: ${name}`);
 }
 
 function allowedKeys(baseKeys, isCouncil) {
   return isCouncil ? new Set([...baseKeys, ...COUNCIL_EXTRA_KEYS]) : baseKeys;
 }
 
-function validateCouncilExtras(name, input) {
+function validateCouncilExtras(name, input, modelKeys) {
   if ("models" in input) {
     if (!Array.isArray(input.models) || input.models.length < 2) {
-      throw new GlmError("INVALID_INPUT", `${name}.models must be an array with at least two entries`);
+      throw new MultipolyError("INVALID_INPUT", `${name}.models must be an array with at least two entries`);
     }
     if (!input.models.every((m) => typeof m === "string" && m.length > 0)) {
-      throw new GlmError("INVALID_INPUT", `${name}.models entries must be non-empty strings`);
+      throw new MultipolyError("INVALID_INPUT", `${name}.models entries must be non-empty strings`);
     }
   }
-  if ("synthesizer" in input && (typeof input.synthesizer !== "string" || input.synthesizer.length === 0)) {
-    throw new GlmError("INVALID_INPUT", `${name}.synthesizer must be a non-empty string`);
+  if ("synthesizer" in input) {
+    if (typeof input.synthesizer !== "string" || normalizeSynthesizerChoice(input.synthesizer, modelKeys) === null) {
+      throw new MultipolyError(
+        "INVALID_INPUT",
+        `${name}.synthesizer must be one of ${[...modelKeys, "harness", "none", "caller"].join(", ")}`,
+      );
+    }
   }
   if ("include_individual_results" in input && typeof input.include_individual_results !== "boolean") {
-    throw new GlmError("INVALID_INPUT", `${name}.include_individual_results must be a boolean`);
+    throw new MultipolyError("INVALID_INPUT", `${name}.include_individual_results must be a boolean`);
   }
 }
 
-function validateReviewInput(name, input, isCouncil) {
+function validateReviewInput(name, input, isCouncil, modelKeys) {
   rejectUnknownKeys(name, input, allowedKeys(REVIEW_KEYS, isCouncil));
-  if (isCouncil) validateCouncilExtras(name, input);
+  if (isCouncil) validateCouncilExtras(name, input, modelKeys);
 
   const hasBase = "diff_base" in input;
   const hasPaths = "paths" in input;
   if (hasBase === hasPaths) {
-    throw new GlmError(
+    throw new MultipolyError(
       "INVALID_INPUT",
       `${name}: exactly one of 'diff_base' or 'paths' is required`,
     );
   }
   if (hasBase) {
     if (typeof input.diff_base !== "string" || input.diff_base.trim().length === 0) {
-      throw new GlmError("INVALID_INPUT", `${name}.diff_base must be a non-empty string`);
+      throw new MultipolyError("INVALID_INPUT", `${name}.diff_base must be a non-empty string`);
     }
   }
   if (hasPaths) {
     if (!Array.isArray(input.paths) || input.paths.length === 0) {
-      throw new GlmError("INVALID_INPUT", `${name}.paths must be a non-empty array`);
+      throw new MultipolyError("INVALID_INPUT", `${name}.paths must be a non-empty array`);
     }
     if (!input.paths.every((p) => typeof p === "string" && p.length > 0)) {
-      throw new GlmError("INVALID_INPUT", `${name}.paths entries must be non-empty strings`);
+      throw new MultipolyError("INVALID_INPUT", `${name}.paths entries must be non-empty strings`);
     }
   }
   if ("focus" in input && typeof input.focus !== "string") {
-    throw new GlmError("INVALID_INPUT", `${name}.focus must be a string`);
+    throw new MultipolyError("INVALID_INPUT", `${name}.focus must be a string`);
   }
 }
 
-function validateConsultInput(name, input, isCouncil) {
+function validateConsultInput(name, input, isCouncil, modelKeys) {
   rejectUnknownKeys(name, input, allowedKeys(CONSULT_KEYS, isCouncil));
-  if (isCouncil) validateCouncilExtras(name, input);
+  if (isCouncil) validateCouncilExtras(name, input, modelKeys);
 
   if (typeof input.prompt !== "string" || input.prompt.trim().length === 0) {
-    throw new GlmError("INVALID_INPUT", `${name}.prompt must be a non-empty string`);
+    throw new MultipolyError("INVALID_INPUT", `${name}.prompt must be a non-empty string`);
   }
   if ("paths" in input) {
     if (!Array.isArray(input.paths)) {
-      throw new GlmError("INVALID_INPUT", `${name}.paths must be an array`);
+      throw new MultipolyError("INVALID_INPUT", `${name}.paths must be an array`);
     }
     if (!input.paths.every((p) => typeof p === "string" && p.length > 0)) {
-      throw new GlmError("INVALID_INPUT", `${name}.paths entries must be non-empty strings`);
+      throw new MultipolyError("INVALID_INPUT", `${name}.paths entries must be non-empty strings`);
     }
   }
 }
@@ -317,7 +367,7 @@ function buildSuccessResponse(name, result, reasoning, config) {
     try {
       ({ clean } = scan(reasoning, "reasoning"));
     } catch (e) {
-      logError(new GlmError("INTERNAL", `reasoning secret-scan failed: ${e?.message ?? e}`, { cause: e }));
+      logError(new MultipolyError("INTERNAL", `reasoning secret-scan failed: ${e?.message ?? e}`, { cause: e }));
       clean = false;
     }
     if (clean || config.allowSecrets) {
@@ -336,8 +386,8 @@ function buildSuccessResponse(name, result, reasoning, config) {
 }
 
 function buildErrorResponse(err) {
-  if (!(err instanceof GlmError)) {
-    err = new GlmError("INTERNAL", err?.message ?? String(err), { cause: err });
+  if (!(err instanceof MultipolyError)) {
+    err = new MultipolyError("INTERNAL", err?.message ?? String(err), { cause: err });
   }
   logError(err);
   return {

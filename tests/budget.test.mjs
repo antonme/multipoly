@@ -75,3 +75,21 @@ test("budget: whitespace-only content is treated as empty and throws BUDGET", ()
     }
   }
 });
+
+test("budget: non-thinking model hint names model cap and avoids thinking advice", () => {
+  assert.throws(
+    () =>
+      assertContentBudget(
+        { content: "", finishReason: "length" },
+        undefined,
+        "review",
+        { modelKey: "qwen", supportsThinking: false },
+      ),
+    (e) =>
+      e.code === "BUDGET" &&
+      /MULTIPOLY_QWEN_MAX_TOKENS_REVIEW/.test(e.message) &&
+      /MULTIPOLY_MAX_TOKENS_REVIEW/.test(e.message) &&
+      !/MULTIPOLY_THINKING/.test(e.message) &&
+      !/reasoning/.test(e.message),
+  );
+});

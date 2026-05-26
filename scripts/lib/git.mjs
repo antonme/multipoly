@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { GlmError } from "./errors.mjs";
+import { MultipolyError } from "./errors.mjs";
 
 const execFileP = promisify(execFile);
 const GIT_MAX_BUFFER = 16 * 1024 * 1024; // 16 MiB
@@ -14,7 +14,7 @@ async function git(args, cwd) {
     });
     return stdout;
   } catch (e) {
-    throw new GlmError("GIT", `git ${args.join(" ")} failed: ${e.stderr?.toString?.().trim() || e.message}`, { cause: e });
+    throw new MultipolyError("GIT", `git ${args.join(" ")} failed: ${e.stderr?.toString?.().trim() || e.message}`, { cause: e });
   }
 }
 
@@ -34,17 +34,17 @@ export async function getToplevel(cwd) {
 
 export async function validateRef(ref, cwd) {
   if (typeof ref !== "string" || ref.length === 0) {
-    throw new GlmError("INVALID_INPUT", "diff_base must be a non-empty string");
+    throw new MultipolyError("INVALID_INPUT", "diff_base must be a non-empty string");
   }
   // Disallow options/flags disguised as refs
   if (ref.startsWith("-")) {
-    throw new GlmError("INVALID_INPUT", `diff_base looks like an option flag: ${JSON.stringify(ref)}`);
+    throw new MultipolyError("INVALID_INPUT", `diff_base looks like an option flag: ${JSON.stringify(ref)}`);
   }
   try {
     const out = await execFileP("git", ["rev-parse", "--verify", `${ref}^{commit}`], { cwd });
     return out.stdout.trim();
   } catch (e) {
-    throw new GlmError("GIT", `unknown ref: ${ref}`, { cause: e });
+    throw new MultipolyError("GIT", `unknown ref: ${ref}`, { cause: e });
   }
 }
 

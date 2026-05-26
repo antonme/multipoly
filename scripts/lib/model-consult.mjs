@@ -1,10 +1,11 @@
-import { GlmError } from "./errors.mjs";
+import { MultipolyError } from "./errors.mjs";
 import { gatherConsult } from "./gather.mjs";
 import { scanMany, formatHitsForError } from "./secrets.mjs";
 import { streamChatCompletion } from "./client.mjs";
 import { CONSULT_SYSTEM_PROMPT, renderConsultUserMessage } from "./prompts.mjs";
 import { assertContentBudget } from "./budget.mjs";
-import { resolveCallTimeoutMs } from "./config.mjs";
+import { resolveCallTimeoutMs, resolveMaxTokensForModel } from "./config.mjs";
+import { modelSupportsThinking } from "./models.mjs";
 
 export async function prepareConsult(input, { config, cwd = process.cwd() } = {}) {
   const gathered = await gatherConsult({
@@ -18,7 +19,7 @@ export async function prepareConsult(input, { config, cwd = process.cwd() } = {}
   for (const f of gathered.files) pieces.push({ text: f.content, label: f.path });
   const secretScan = scanMany(pieces);
   if (!secretScan.clean && !config.allowSecrets) {
-    throw new GlmError(
+    throw new MultipolyError(
       "SECRET",
       `Potential secrets detected in outbound payload:\n${formatHitsForError(secretScan.hits)}\nSet MULTIPOLY_ALLOW_SECRETS=1 to override.`,
     );
@@ -44,9 +45,13 @@ export async function runPreparedConsult(modelKey, prepared, { config, fetchImpl
     timeoutMs: prepared.timeoutMs,
     fetchImpl,
   });
-  const { truncated } = assertContentBudget(attempt, config.maxTokens.consult, "consult");
+  const maxTokens = resolveMaxTokensForModel(config, modelKey, "consult");
+  const { truncated } = assertContentBudget(attempt, maxTokens, "consult", {
+    modelKey,
+    supportsThinking: modelSupportsThinking(config, modelKey),
+  });
   const result = truncated
-    ? `${attempt.content}\n\n> Output truncated at MULTIPOLY_MAX_TOKENS_CONSULT (${config.maxTokens.consult}). Raise the cap for a complete answer.`
+    ? `${attempt.content}\n\n> Output truncated at ${maxTokens ?? "provider/default max_tokens"}. Raise MULTIPOLY_MAX_TOKENS_CONSULT or a model-specific cap for a complete answer.`
     : attempt.content;
   return { result, reasoning: attempt.reasoning };
 }

@@ -1,7 +1,7 @@
 import { realpath, stat, open } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import path from "node:path";
-import { GlmError } from "./errors.mjs";
+import { MultipolyError } from "./errors.mjs";
 
 // O_NOFOLLOW rejects symlinks at open time on Linux/macOS/BSD. Windows
 // doesn't define it in the same way; we fall back to default read flags
@@ -19,7 +19,7 @@ const READ_FLAGS = fsConstants.O_NOFOLLOW !== undefined
  */
 export async function containPath(rootRealpath, candidate, { cwd = process.cwd() } = {}) {
   if (typeof candidate !== "string" || candidate.length === 0) {
-    throw new GlmError("INVALID_INPUT", "path must be a non-empty string");
+    throw new MultipolyError("INVALID_INPUT", "path must be a non-empty string");
   }
   const absolute = path.isAbsolute(candidate) ? candidate : path.resolve(cwd, candidate);
   let resolved;
@@ -30,19 +30,19 @@ export async function containPath(rootRealpath, candidate, { cwd = process.cwd()
     // re-parsing the message string. `kind` is not rendered into the LLM-facing
     // prompt — callers translate it into a fixed taxonomy.
     if (e.code === "ENOENT") {
-      throw new GlmError("FS", `path does not exist: ${candidate}`, {
+      throw new MultipolyError("FS", `path does not exist: ${candidate}`, {
         cause: e,
         details: { kind: "missing" },
       });
     }
-    throw new GlmError("FS", `cannot resolve path: ${candidate}: ${e.message}`, {
+    throw new MultipolyError("FS", `cannot resolve path: ${candidate}: ${e.message}`, {
       cause: e,
       details: { kind: "resolve_failed" },
     });
   }
   const root = rootRealpath.endsWith(path.sep) ? rootRealpath : rootRealpath + path.sep;
   if (resolved !== rootRealpath && !resolved.startsWith(root)) {
-    throw new GlmError("FS", `path escapes root: ${candidate}`, {
+    throw new MultipolyError("FS", `path escapes root: ${candidate}`, {
       details: { kind: "escapes_root" },
     });
   }
@@ -63,7 +63,7 @@ export async function isBinaryFile(absPath, sniffBytes = 4096) {
     }
     return false;
   } catch (e) {
-    throw new GlmError("FS", `cannot read: ${absPath}: ${e.message}`, { cause: e });
+    throw new MultipolyError("FS", `cannot read: ${absPath}: ${e.message}`, { cause: e });
   } finally {
     if (fh) await fh.close().catch(() => {});
   }
@@ -73,12 +73,12 @@ export async function getSize(absPath) {
   try {
     const st = await stat(absPath);
     if (!st.isFile()) {
-      throw new GlmError("FS", `not a regular file: ${absPath}`);
+      throw new MultipolyError("FS", `not a regular file: ${absPath}`);
     }
     return st.size;
   } catch (e) {
-    if (e instanceof GlmError) throw e;
-    throw new GlmError("FS", `cannot stat: ${absPath}: ${e.message}`, { cause: e });
+    if (e instanceof MultipolyError) throw e;
+    throw new MultipolyError("FS", `cannot stat: ${absPath}: ${e.message}`, { cause: e });
   }
 }
 
@@ -108,7 +108,7 @@ export async function readFileCapped(absPath, cap, { allowTruncate = false } = {
       overCap: false,
     };
   } catch (e) {
-    throw new GlmError("FS", `cannot read: ${absPath}: ${e.message}`, { cause: e });
+    throw new MultipolyError("FS", `cannot read: ${absPath}: ${e.message}`, { cause: e });
   } finally {
     if (fh) await fh.close().catch(() => {});
   }

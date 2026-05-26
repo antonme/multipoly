@@ -1,5 +1,7 @@
-import { GlmError, newCorrelationId } from "./errors.mjs";
+import { MultipolyError, newCorrelationId } from "./errors.mjs";
 import { parseSseStream } from "./sse.mjs";
+import { resolveMaxTokensForModel } from "./config.mjs";
+import { modelSupportsThinking } from "./models.mjs";
 
 /**
  * GLM streaming chat completion client.
@@ -30,22 +32,11 @@ export async function streamChatCompletion({
   // budget — not the MCP client's tool-call timeout, which sits above us.
   const effectiveTimeoutMs = timeoutMs ?? config.timeoutMs;
   const effectiveModelKey = modelKey ?? "glm";
-  const legacyModelConfig = {
-    configured: true,
-    key: "glm",
-    displayName: "GLM 5.1",
-    baseUrl: config.baseUrl,
-    apiKey: config.apiKey,
-    model: config.model,
-    missing: [],
-  };
-  const modelConfig = config.models
-    ? config.models[effectiveModelKey]
-    : legacyModelConfig;
+  const modelConfig = config.models?.[effectiveModelKey];
 
   if (!modelConfig?.configured) {
     const missing = modelConfig?.missing ?? [`unknown model ${effectiveModelKey}`];
-    throw new GlmError(
+    throw new MultipolyError(
       "CONFIG",
       `${effectiveModelKey} is not configured: missing ${missing.join(", ")}`,
       { details: { model: effectiveModelKey, missing } },
@@ -71,13 +62,12 @@ export async function streamChatCompletion({
     model: modelConfig.model,
     messages,
     stream: true,
-    max_tokens: config.maxTokens[mode],
   };
-  if (wantThinking === true) body.thinking = { type: "enabled" };
-  else if (wantThinking === false) body.thinking = { type: "disabled" };
-
-  let effectiveResponseFormat = responseFormat;
-  let fellBack = false;
+  const maxTokens = resolveMaxTokensForModel(config, effectiveModelKey, mode);
+  if (maxTokens !== undefined) body.max_tokens = maxTokens;
+  const supportsThinking = modelConfig.supportsThinking ?? modelSupportsThinking(config, effectiveModelKey);
+  if (supportsThinking && wantThinking === true) body.thinking = { type: "enabled" };
+  else if (supportsThinking && wantThinking === false) body.thinking = { type: "disabled" };
 
   const doRequest = async (rf) => {
     const reqBody = { ...body };
@@ -92,84 +82,87 @@ export async function streamChatCompletion({
     });
   };
 
-  let res;
+  // One full request + stream-consume cycle for a given response_format.
+  //
+  // The per-call timer is an INACTIVITY timer: refreshed via res.__refreshTimer
+  // on every SSE event (and every raw chunk, so a single large reasoning burst
+  // doesn't trip it), cancelled via res.__cancelTimer when the stream ends. A
+  // server that sends headers then stalls trips it after timeoutMs of silence;
+  // one that keeps streaming never does.
+  //
+  // Both the pre-stream HTTP path (callWithRetry) and the in-stream path
+  // (parseSseStream emitting a top-level {error}) can surface a
+  // "response_format unsupported" signal, so the json_schema → json_object
+  // fallback wraps this whole unit rather than just the header exchange.
+  const attempt = async (rf) => {
+    const res = await doRequest(rf);
+    let content = "";
+    let reasoning = "";
+    let finishReason = null;
+    let usage = null;
+
+    const progress = new ProgressReporter(
+      config.progress,
+      `${effectiveModelKey}:${mode}`,
+      correlationId,
+    );
+    progress.start();
+
+    try {
+      const source = bodyToAsyncIterable(res.body, () => res.__refreshTimer?.());
+      for await (const ev of parseSseStream(source)) {
+        res.__refreshTimer?.();
+        if (ev.type === "done") break;
+        const v = ev.value;
+        const choice = v?.choices?.[0];
+        if (choice) {
+          const delta = choice.delta || {};
+          if (typeof delta.content === "string") content += delta.content;
+          if (typeof delta.reasoning_content === "string") {
+            reasoning += delta.reasoning_content;
+            progress.onReasoning(delta.reasoning_content);
+          }
+          if (typeof delta.content === "string" && delta.content.length > 0) {
+            progress.onContent(delta.content.length);
+          }
+          if (choice.finish_reason) finishReason = choice.finish_reason;
+        }
+        if (v?.usage) usage = v.usage;
+      }
+    } catch (e) {
+      const aborted = e?.name === "AbortError" || e?.code === "ABORT_ERR";
+      progress.end({ reasoningChars: reasoning.length, contentChars: content.length, aborted });
+      if (aborted) {
+        throw new MultipolyError(
+          "TIMEOUT",
+          `stream went silent for more than ${effectiveTimeoutMs}ms`,
+          { correlationId, cause: e },
+        );
+      }
+      throw e;
+    } finally {
+      res.__cancelTimer?.();
+    }
+
+    progress.end({ reasoningChars: reasoning.length, contentChars: content.length, finishReason });
+    return { content, reasoning, finishReason, usage };
+  };
+
+  let fellBack = false;
+  let result;
   try {
-    res = await doRequest(effectiveResponseFormat);
+    result = await attempt(responseFormat);
   } catch (e) {
-    if (
-      effectiveResponseFormat?.type === "json_schema" &&
-      isJsonSchemaUnsupported(e)
-    ) {
-      // Narrow fallback: only on explicit "unsupported" signal.
-      effectiveResponseFormat = { type: "json_object" };
+    if (responseFormat?.type === "json_schema" && isJsonSchemaUnsupported(e)) {
+      // Narrow fallback: only on an explicit "unsupported" signal.
       fellBack = true;
-      res = await doRequest(effectiveResponseFormat);
+      result = await attempt({ type: "json_object" });
     } else {
       throw e;
     }
   }
 
-  // Stream-read the body via parseSseStream. The per-call timer is an
-  // INACTIVITY timer: we refresh it via res.__refreshTimer on every SSE event,
-  // and cancel it via res.__cancelTimer when the stream ends. A server that
-  // sends headers and then stalls still trips the timer after timeoutMs of
-  // silence — but a server that keeps streaming (including reasoning tokens)
-  // will never trip it.
-  let content = "";
-  let reasoning = "";
-  let finishReason = null;
-  let usage = null;
-
-  const progress = new ProgressReporter(
-    config.progress,
-    `${effectiveModelKey}:${mode}`,
-    correlationId,
-  );
-  progress.start();
-
-  try {
-    // Refresh the inactivity timer on every raw chunk, not just completed SSE
-    // events. A slow connection streaming a single large event (e.g. a huge
-    // reasoning burst) would otherwise trip the timer even though bytes are
-    // actively arriving.
-    const source = bodyToAsyncIterable(res.body, () => res.__refreshTimer?.());
-    for await (const ev of parseSseStream(source)) {
-      res.__refreshTimer?.();
-      if (ev.type === "done") break;
-      const v = ev.value;
-      const choice = v?.choices?.[0];
-      if (choice) {
-        const delta = choice.delta || {};
-        if (typeof delta.content === "string") content += delta.content;
-        if (typeof delta.reasoning_content === "string") {
-          reasoning += delta.reasoning_content;
-          progress.onReasoning(delta.reasoning_content);
-        }
-        if (typeof delta.content === "string" && delta.content.length > 0) {
-          progress.onContent(delta.content.length);
-        }
-        if (choice.finish_reason) finishReason = choice.finish_reason;
-      }
-      if (v?.usage) usage = v.usage;
-    }
-  } catch (e) {
-    const aborted = e?.name === "AbortError" || e?.code === "ABORT_ERR";
-    progress.end({ reasoningChars: reasoning.length, contentChars: content.length, aborted });
-    if (aborted) {
-      throw new GlmError(
-        "TIMEOUT",
-        `stream went silent for more than ${effectiveTimeoutMs}ms`,
-        { correlationId, cause: e },
-      );
-    }
-    throw e;
-  } finally {
-    res.__cancelTimer?.();
-  }
-
-  progress.end({ reasoningChars: reasoning.length, contentChars: content.length, finishReason });
-
-  return { content, reasoning, finishReason, usage, fellBackFromJsonSchema: fellBack };
+  return { ...result, fellBackFromJsonSchema: fellBack };
 }
 
 /**
@@ -223,8 +216,10 @@ class ProgressReporter {
     this.contentChars += len;
     if (this.mode === "reasoning" && this.heartbeatPhase !== "content") {
       // Close out the reasoning dump with a newline so the next line is clean.
-      if (this.reasoningEmittedAny) process.stderr.write("\n");
-      process.stderr.write(`[multipoly ${this.callMode}] generating…\n`);
+      if (this.reasoningEmittedAny) {
+        process.stderr.write("\n");
+        process.stderr.write(`[multipoly ${this.callMode}] generating…\n`);
+      }
     }
     this.heartbeatPhase = "content";
     if (this.mode === "heartbeat") this.maybeHeartbeat("generating");
@@ -253,11 +248,21 @@ class ProgressReporter {
 }
 
 function isJsonSchemaUnsupported(err) {
-  if (!(err instanceof GlmError)) return false;
-  if (err.code !== "HTTP") return false;
-  const status = err.details?.status;
-  if (status !== 400 && status !== 422) return false;
-  const msg = `${err.message} ${JSON.stringify(err.details?.body ?? "")}`.toLowerCase();
+  if (!(err instanceof MultipolyError)) return false;
+  let msg;
+  if (err.code === "HTTP") {
+    const status = err.details?.status;
+    if (status !== 400 && status !== 422) return false;
+    msg = `${err.message} ${JSON.stringify(err.details?.body ?? "")}`.toLowerCase();
+  } else if (err.code === "STREAM") {
+    // A server can accept the request (200) and then emit {error:{...}} inside
+    // the SSE body for an unsupported response_format. That arrives as a STREAM
+    // error during body consumption, so it must be eligible for the same
+    // fallback as the pre-stream 4xx path.
+    msg = `${err.message} ${JSON.stringify(err.details ?? "")}`.toLowerCase();
+  } else {
+    return false;
+  }
   // The server can name the feature either way. Require one of those
   // tokens so generic 4xx errors don't trigger fallback.
   const mentionsFeature =
@@ -303,6 +308,7 @@ async function callWithRetry({ url, apiKey, body, timeoutMs, correlationId, fetc
         signal: ac.signal,
       });
 
+      headersOk = true;
       if (res.ok) {
         // The timer is used as an INACTIVITY timer during body consumption:
         // it fires if no chunk arrives for `timeoutMs`. The caller refreshes
@@ -311,7 +317,6 @@ async function callWithRetry({ url, apiKey, body, timeoutMs, correlationId, fetc
         // AbortController in __cancelTimer — by the time we call it the body
         // is already drained, and aborting after success can trip keep-alive
         // cleanup or confuse fetch adapters.
-        headersOk = true;
         res.__cancelTimer = () => clearTimeout(timer);
         res.__refreshTimer = () => {
           // Node 18+: setTimeout returns a Timeout with refresh(); prefer it.
@@ -345,14 +350,14 @@ async function callWithRetry({ url, apiKey, body, timeoutMs, correlationId, fetc
       const details = { status: res.status, body: safeSnippet(text) };
 
       if (res.status === 401 || res.status === 403) {
-        throw new GlmError("AUTH", `upstream auth failed (${res.status})`, {
+        throw new MultipolyError("AUTH", `upstream auth failed (${res.status})`, {
           correlationId,
           details,
         });
       }
 
       if (res.status === 429 || (res.status >= 500 && res.status < 600)) {
-        lastErr = new GlmError(
+        lastErr = new MultipolyError(
           "HTTP",
           `upstream error ${res.status}`,
           { correlationId, details },
@@ -380,21 +385,21 @@ async function callWithRetry({ url, apiKey, body, timeoutMs, correlationId, fetc
       }
 
       // 4xx non-auth → fail fast
-      throw new GlmError("HTTP", `upstream error ${res.status}`, {
+      throw new MultipolyError("HTTP", `upstream error ${res.status}`, {
         correlationId,
         details,
       });
     } catch (e) {
       if (!headersOk) clearTimeout(timer);
-      if (e instanceof GlmError) throw e;
+      if (e instanceof MultipolyError) throw e;
       if (e?.name === "AbortError" || e?.code === "ABORT_ERR") {
-        throw new GlmError("TIMEOUT", `request timed out after ${timeoutMs}ms`, {
+        throw new MultipolyError("TIMEOUT", `request timed out after ${timeoutMs}ms`, {
           correlationId,
           cause: e,
         });
       }
       // Network errors: retry
-      lastErr = new GlmError("HTTP", `network error: ${e.message}`, {
+      lastErr = new MultipolyError("HTTP", `network error: ${e.message}`, {
         correlationId,
         cause: e,
       });
@@ -406,7 +411,7 @@ async function callWithRetry({ url, apiKey, body, timeoutMs, correlationId, fetc
       throw lastErr;
     }
   }
-  throw lastErr ?? new GlmError("HTTP", "exhausted retries", { correlationId });
+  throw lastErr ?? new MultipolyError("HTTP", "exhausted retries", { correlationId });
 }
 
 function backoffMs(attempt) {

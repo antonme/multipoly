@@ -1,4 +1,4 @@
-import { GlmError } from "./errors.mjs";
+import { MultipolyError } from "./errors.mjs";
 
 /**
  * Parse an OpenAI-compatible SSE stream.
@@ -7,7 +7,7 @@ import { GlmError } from "./errors.mjs";
  * Output: async generator of events, each either:
  *   - { type: "data", value: <parsed JSON object> }
  *   - { type: "done" } — emitted on `[DONE]` sentinel
- *   - throws GlmError("STREAM", ...) on protocol error or top-level {error}
+ *   - throws MultipolyError("STREAM", ...) on protocol error or top-level {error}
  *
  * Handles:
  *   - \r\n / \r / \n line endings
@@ -121,12 +121,12 @@ export async function* parseSseStream(source) {
       }
       const parsed = safeParse(data);
       if (parsed.error) {
-        throw new GlmError("STREAM", `invalid JSON in SSE data: ${parsed.error}`);
+        throw new MultipolyError("STREAM", `invalid JSON in SSE data: ${parsed.error}`);
       }
       // OpenAI-compatible top-level error shape
       if (parsed.value && typeof parsed.value === "object" && parsed.value.error) {
         const e = parsed.value.error;
-        throw new GlmError(
+        throw new MultipolyError(
           "STREAM",
           typeof e?.message === "string" ? e.message : "upstream error",
           { details: e },
@@ -144,7 +144,7 @@ export async function* parseSseStream(source) {
     // Cap measures "undelimited tail" bytes — with no `\n\n` ahead — which
     // is the real DoS signal. Units are UTF-8 bytes, not UTF-16 code units.
     if (bufferBytes > MAX_SSE_BUFFER_BYTES) {
-      throw new GlmError(
+      throw new MultipolyError(
         "STREAM",
         `SSE buffer exceeded ${MAX_SSE_BUFFER_BYTES} bytes without an event delimiter`,
       );
@@ -170,11 +170,11 @@ export async function* parseSseStream(source) {
       }
       const parsed = safeParse(data);
       if (parsed.error) {
-        throw new GlmError("STREAM", `invalid JSON in SSE data: ${parsed.error}`);
+        throw new MultipolyError("STREAM", `invalid JSON in SSE data: ${parsed.error}`);
       }
       if (parsed.value && typeof parsed.value === "object" && parsed.value.error) {
         const e = parsed.value.error;
-        throw new GlmError(
+        throw new MultipolyError(
           "STREAM",
           typeof e?.message === "string" ? e.message : "upstream error",
           { details: e },
