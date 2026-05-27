@@ -1,5 +1,6 @@
 import { MultipolyError } from "./errors.mjs";
 import { MODEL_KEYS, modelSupportsThinking } from "./models.mjs";
+import { resolveModelAlias, didYouMean } from "./aliases.mjs";
 import { normalizeEffort } from "./reasoning.mjs";
 import { prepareReview, runPreparedReview } from "./model-review.mjs";
 import { prepareConsult, runPreparedConsult } from "./model-consult.mjs";
@@ -39,20 +40,24 @@ const HARNESS_CONSULT_INSTRUCTIONS =
   "surface disagreements only when they affect the decision; do not average weak opinions into a " +
   "vague compromise.";
 
-function resolveCouncilModels(input, config) {
+export function resolveCouncilModels(input, config) {
   const known = config.modelKeys ?? MODEL_KEYS;
-  const requested = input.models?.length
-    ? input.models.map((m) => {
-        if (!known.includes(m)) {
-          throw new MultipolyError(
-            "INVALID_INPUT",
-            `unknown model ${JSON.stringify(m)}; expected one of ${known.join(", ")}`,
-          );
-        }
-        return m;
-      })
-    : known.filter((key) => config.models[key]?.configured);
-  const unique = [...new Set(requested)];
+  let requested;
+  if (input.models?.length) {
+    requested = input.models.map((raw) => {
+      const resolved = resolveModelAlias(raw, known);
+      if (!resolved) {
+        throw new MultipolyError(
+          "INVALID_INPUT",
+          `unknown model ${JSON.stringify(raw)}; expected one of ${known.join(", ")}${didYouMean(raw, known)}`,
+        );
+      }
+      return resolved;
+    });
+  } else {
+    requested = known.filter((key) => config.models[key]?.configured);
+  }
+  const unique = [...new Set(requested)]; // dedups alias collapse silently
   if (unique.length < 2) {
     throw new MultipolyError("INVALID_INPUT", "council requires at least two distinct models");
   }

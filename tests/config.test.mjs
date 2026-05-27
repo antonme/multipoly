@@ -5,6 +5,7 @@ import {
   ENDPOINT_PROFILES,
   resolveCallTimeoutMs,
   TIMEOUT_BOUNDS,
+  normalizeSynthesizerChoice,
 } from "../scripts/lib/config.mjs";
 import { MODEL_INFO, MODEL_KEYS, loadModelRegistry } from "../scripts/lib/models.mjs";
 
@@ -554,4 +555,36 @@ test("no warning when no legacy vars are present", () => {
     process.stderr.write = orig;
   }
   assert.ok(!lines.join("").includes("MULTIPOLY_OPUS_"));
+});
+
+// ── Task 7: Lenient synthesizer name resolution ──
+
+test("normalizeSynthesizerChoice: alias 'gpt' resolves to 'codex' when codex is configured", () => {
+  const keys = ["glm", "qwen", "deepseek", "composer", "codex"];
+  assert.equal(normalizeSynthesizerChoice("gpt", keys), "codex");
+});
+
+test("normalizeSynthesizerChoice: alias 'opus' resolves to 'claude' when claude is configured", () => {
+  const keys = ["glm", "claude"];
+  assert.equal(normalizeSynthesizerChoice("opus", keys), "claude");
+});
+
+test("normalizeSynthesizerChoice: harness sentinels are never alias-resolved (checked first)", () => {
+  // Even if "harness"/"none"/"caller" somehow appeared in an alias table they
+  // must resolve to HARNESS_SENTINEL, never to a model key.
+  const keys = ["glm", "codex", "claude"];
+  assert.equal(normalizeSynthesizerChoice("harness", keys), "harness");
+  assert.equal(normalizeSynthesizerChoice("none", keys), "harness");
+  assert.equal(normalizeSynthesizerChoice("caller", keys), "harness");
+});
+
+test("normalizeSynthesizerChoice: exact key resolves normally", () => {
+  const keys = ["glm", "qwen"];
+  assert.equal(normalizeSynthesizerChoice("glm", keys), "glm");
+  assert.equal(normalizeSynthesizerChoice("qwen", keys), "qwen");
+});
+
+test("normalizeSynthesizerChoice: unknown name returns null (caller raises the error)", () => {
+  const keys = ["glm", "qwen"];
+  assert.equal(normalizeSynthesizerChoice("gpt9999", keys), null);
 });

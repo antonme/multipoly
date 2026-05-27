@@ -10,6 +10,7 @@ import {
   modelCapability,
 } from "./models.mjs";
 import { resolveReasoningEffort, thinkingToEffort, CAPABILITY } from "./reasoning.mjs";
+import { resolveModelAlias } from "./aliases.mjs";
 
 const ENDPOINT_PROFILES = Object.freeze({
   "zai-coding-plan": "https://api.z.ai/api/coding/paas/v4",
@@ -428,15 +429,14 @@ export const SYNTHESIZER_FALLBACK_ORDER = Object.freeze(["qwen", "deepseek", "gl
 
 /**
  * Normalize a synthesizer choice string.
- *   - harness|none|caller → "harness" (defer to the calling harness)
- *   - a known model key   → that key
+ *   - harness|none|caller → "harness" (defer to the calling harness); checked FIRST
+ *   - a known model key or alias thereof → that key (via resolveModelAlias)
  *   - anything else       → null (caller decides which error code to raise)
  */
 export function normalizeSynthesizerChoice(raw, modelKeys = MODEL_KEYS) {
   const v = String(raw).toLowerCase();
-  if (HARNESS_ALIASES.has(v)) return HARNESS_SENTINEL;
-  if (modelKeys.includes(v)) return v;
-  return null;
+  if (HARNESS_ALIASES.has(v)) return HARNESS_SENTINEL; // sentinels first — never alias-resolved
+  return resolveModelAlias(raw, modelKeys);
 }
 
 /**
