@@ -4,6 +4,56 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Model-naming convention, baked builtins, and alias routing (2026-05-27)
+
+A stable `<model> (<transport>)` display-name convention, baked metadata for
+`claude`/`codex`/`gemini`/`kimi`, and lenient model-name resolution across
+council and synthesizer arguments.
+
+- **Display-name convention.** Every model now surfaces a human-readable name in
+  the form `<base> (<transport>)`: CLI models use `<base> (<kind> cli)` (e.g.
+  `opus (claude cli)`); http/anthropic models use `<base> (api)` (e.g.
+  `opus (api)`, `gemini-3.5-flash (api)`). Override per-model with
+  `MULTIPOLY_<K>_DISPLAY_NAME`.
+
+- **Baked builtins: `claude`, `codex`, `gemini`, `kimi`.** These four models now
+  carry pre-configured metadata in `MODEL_INFO` (transport, reasoning capability,
+  default effort, default model id, base URL, API-key env). They are
+  **opt-in** — not auto-registered; add them to `MULTIPOLY_MODELS` to enable
+  their tools. When listed, you no longer need `MULTIPOLY_<K>_DISPLAY_NAME`,
+  `_REASONING`, or `_REASONING_VOCAB` — those are baked; env still overrides.
+
+- **`MULTIPOLY_OPUS_*` migration warning.** The standalone `opus` model is
+  removed; use `MULTIPOLY_MODELS=claude` and rename `MULTIPOLY_OPUS_*` env vars
+  to `MULTIPOLY_CLAUDE_*`. At startup the server now emits a structured stderr
+  warning listing any `MULTIPOLY_OPUS_*` or `MULTIPOLY_GPT55_*` env vars it
+  finds — their values are no longer used to configure a model and are ignored
+  as credentials (use `MULTIPOLY_CLAUDE_*` / `MULTIPOLY_CODEX_*` instead). The
+  mere presence of `MULTIPOLY_OPUS_API_KEY` is still honored as a legacy
+  Anthropic-key signal for the claude transport-flip default.
+
+- **Claude transport-flip guard.** The `claude` builtin defaults to `cli`
+  transport. If `MULTIPOLY_CLAUDE_TRANSPORT` is unset and an Anthropic API key
+  is present (`ANTHROPIC_API_KEY` or `MULTIPOLY_CLAUDE_API_KEY`), the server
+  automatically defaults to the `anthropic` transport and logs the decision to
+  stderr. Set `MULTIPOLY_CLAUDE_TRANSPORT=cli` to force CLI mode when an
+  Anthropic key is also in env.
+
+- **Lenient council/synthesizer name resolution.** Model names in `models[]`
+  and `synthesizer` are now resolved via an alias table before being validated:
+  `opus`/`claude-opus` → `claude`; `gpt`/`gpt5`/`gpt5.5`/`openai` → `codex`;
+  `flash`/`gemini-flash` → `gemini`; `zhipu`/`glm5.1` → `glm`; `k2`/`moonshot`
+  → `kimi`; `cursor` → `composer`; and a few more. Routing is exact-key first,
+  then alias table — aliases resolve only when the canonical key is configured.
+  An unknown name returns `INVALID_INPUT` with a `(did you mean \`x\`?)` hint
+  from edit-distance; the server never silently reroutes. Duplicate entries that
+  collapse to the same key via aliases are silently deduplicated.
+
+- **Alias tools (`opus_*`, `gpt55_*`).** `opus_review` / `opus_consult` and
+  `gpt55_review` / `gpt55_consult` are registered as curated alias tools that
+  route to the `claude` and `codex` handlers respectively, with the same schema
+  and `allowedKeys`. They appear only when the canonical key is in the registry.
+
 ### Reasoning-effort control (2026-05-27)
 
 Graded reasoning effort (`off|low|medium|high|xhigh`) is now a first-class
