@@ -418,13 +418,13 @@ Then: `node --test --test-reporter=spec tests/*.test.mjs`
 Expected: the new tests PASS. **Removing `OPUS_INFO` breaks exactly these existing tests — fix them in THIS task (do not re-add `OPUS_INFO`):**
 
 1. `tests/reasoning.test.mjs:8` — `import { MODEL_INFO, OPUS_INFO } from "../scripts/lib/models.mjs";`. Removing the export makes the WHOLE FILE fail to load (a module-load error, not a single assertion). Fix: drop `OPUS_INFO` from the import. Then delete the regression test at `tests/reasoning.test.mjs:133-143` (`regression: OPUS_INFO has a valid CAPABILITY value…`) — its intent is now covered by the new "claude/codex/gemini/kimi are baked MODEL_INFO entries with capability" test in Task 3 Step 1, and the capability-completeness block at line ~117 already iterates `MODEL_INFO` (which now includes claude/codex/gemini/kimi). Confirm that completeness loop still passes for the new entries (each must have a valid `reasoning` CAPABILITY and concrete `defaultEffort`).
-2. `tests/transport-config.test.mjs` — three opus-auto-registration tests must be converted to the new `claude`-via-`MULTIPOLY_MODELS` path:
-   - `:38-51` (`opus anthropic builtin appears + configured only when ANTHROPIC_API_KEY set`) → rewrite as: with only `ANTHROPIC_API_KEY` set and NO `MULTIPOLY_MODELS=claude`, `claude` is NOT in the registry (baked builtins are opt-in); with `MULTIPOLY_MODELS=claude` + `ANTHROPIC_API_KEY`, `claude` is configured, `transport==="anthropic"` (transport-flip guard, Task 5), `model==="claude-opus-4-7"`, `baseUrl==="https://api.anthropic.com"`, `displayName==="opus (api)"`.
-   - `:53-60` (`opus base URL overridable`) → same, keyed on `claude` with `MULTIPOLY_MODELS=claude` + `MULTIPOLY_CLAUDE_BASE_URL` (and `MULTIPOLY_CLAUDE_TRANSPORT=anthropic` so a base URL is meaningful).
-   - `:254-257` (`registry includes opus only via loadModelRegistry env gate`) → rewrite as `loadModelRegistry({ MULTIPOLY_MODELS: "claude" })` includes `claude` with `transport` per the guard.
-   - The fixture at `:242` uses a fake key value resembling a real Anthropic key (`sk-ant-…`); when rewriting, keep using a short fake value (e.g. `"x"`) to avoid the secret scanner and because the assertions only check presence/length.
+2. `tests/transport-config.test.mjs` — three opus-auto-registration tests assert behavior that no longer exists. **In THIS task, DELETE them** (do not convert to the `claude` path yet — the `claude`/`MULTIPOLY_MODELS` merge + transport-flip behavior isn't built until Tasks 4 and 5, so a converted test would fail here). The equivalent `claude`-path coverage is ADDED in Task 4 (registry merge) and Task 5 (transport-flip guard). Delete:
+   - `:38-51` (`opus anthropic builtin appears + configured only when ANTHROPIC_API_KEY set`)
+   - `:53-60` (`opus base URL overridable`)
+   - `:254-257` (`registry includes opus only via loadModelRegistry env gate`)
+   - Also scan the file for any other `models.opus`/`"opus"` references (e.g. the fixture around `:242` that uses an `sk-ant-…`-shaped fake key) and remove or neutralize any assertion that depends on opus being registered. Use `git grep -n "opus" tests/` to find them all.
 
-Note these fixes in the commit body. If any OTHER test fails, it is genuinely asserting old behavior — fix it the same way (convert to the `claude`/`MULTIPOLY_MODELS` model) rather than restoring `OPUS_INFO`.
+Note these deletions in the commit body. If any OTHER test fails after removing `OPUS_INFO`, it is asserting removed behavior — delete that assertion here (Tasks 4/5 re-add forward-looking coverage); do NOT restore `OPUS_INFO`. The goal for Task 3 is: full suite green with `OPUS_INFO` gone and the four new `MODEL_INFO` entries present but not auto-registered.
 
 - [ ] **Step 5: Commit**
 
