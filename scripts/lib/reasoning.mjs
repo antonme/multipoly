@@ -11,3 +11,14 @@ export function normalizeEffort(raw) {
   if (EFFORT_LEVELS.includes(v)) return v;
   throw new MultipolyError("CONFIG", `reasoning effort must be one of ${EFFORT_LEVELS.join("|")}|inherit, got ${JSON.stringify(raw)}`);
 }
+
+const THINK_ON = new Set(["on", "1", "true", "yes"]);
+const THINK_OFF = new Set(["off", "0", "false", "no"]);
+export function thinkingToEffort(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === "") return "inherit";
+  const v = String(raw).trim().toLowerCase();
+  if (v === "auto") return "inherit";
+  if (THINK_ON.has(v)) return "medium";
+  if (THINK_OFF.has(v)) return "off";
+  throw new MultipolyError("CONFIG", `thinking must be on|off|auto (or 1/0/true/false/yes/no), got ${JSON.stringify(raw)}`);
+}
