@@ -4,6 +4,41 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Reasoning-effort control (2026-05-27)
+
+Graded reasoning effort (`off|low|medium|high|xhigh`) is now a first-class
+per-call argument on every model tool that supports it, with a full
+precedence stack from per-call → per-model env → server-wide env → baked default.
+
+- **Per-call `reasoning_effort` tool argument.** Each `<model>_review` /
+  `<model>_consult` tool exposes an optional `reasoning_effort` enum argument
+  for models with a non-NONE capability. Omitting it uses the resolved baseline.
+- **Per-model capability mapping.** Every builtin model now carries a static
+  `reasoning` capability (`GLM_TOGGLE`, `QWEN_BUDGET`, `OPENAI_EFFORT`,
+  `ANTHROPIC_EFFORT`, `NONE`) and a `defaultEffort`. Custom/registry-file models
+  can declare these fields explicitly, or have them inferred by transport.
+- **Opus 4.7 fix: `budget_tokens` → `output_config.effort`.** The Anthropic
+  transport for `ANTHROPIC_EFFORT` models (Opus 4.7) now uses
+  `output_config: {effort}` + `thinking: {type: "adaptive"}` instead of the
+  legacy `thinking: {budget_tokens}` form, which caused a 400 on Opus 4.7.
+  Legacy `ANTHROPIC_BUDGET` models (custom anthropic configs with an older
+  endpoint) still use `budget_tokens`.
+- **Temperature/top_p/top_k stripping.** When thinking is active on an
+  Anthropic transport, `temperature`, `top_p`, and `top_k` are stripped from
+  the request (the API rejects them; Opus 4.7 locks temperature).
+- **Precedence stack.** Per-call > `MULTIPOLY_<K>_REASONING_EFFORT` >
+  `MULTIPOLY_<K>_THINKING` > `MULTIPOLY_REASONING_EFFORT` >
+  `MULTIPOLY_THINKING` > baked model default.
+- **Retired mode-default asymmetry.** The old review-on / consult-off
+  `MULTIPOLY_THINKING` default was replaced by uniform per-model `defaultEffort`
+  baselines.
+- **GLM/MiMo max_tokens floor.** GLM defaults to at least 8192 review tokens
+  (and 4096 consult tokens) so the thinking budget always has room; explicit
+  model-specific `MAX_TOKENS` overrides still take precedence.
+- **Registry-file `defaultEffort` validation.** An invalid `defaultEffort` value
+  in a JSON registry file now throws a `CONFIG` error at load time instead of
+  surfacing as a confusing `INTERNAL` error during a call.
+
 ### Public-repo hygiene (2026-05-27)
 
 Prep for publishing: removed personal/identifying details and internal-doc
