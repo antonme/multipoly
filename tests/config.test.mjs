@@ -621,3 +621,19 @@ test("glm (max_tokens-style) does NOT set usesMaxCompletionTokens", () => {
   const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "glm" });
   assert.ok(!config.models.glm.usesMaxCompletionTokens);
 });
+
+// ── Plan C Task 4: MiMo inherits the GLM token floor (BUDGET-regression guard) ──
+
+test("mimo gets the http_thinking_toggle max_tokens floor by default (no empty-BUDGET regression)", () => {
+  const config = loadConfig({ MULTIPOLY_MODELS: "mimo", MULTIPOLY_MIMO_API_KEY: "mimo" });
+  assert.equal(config.models.mimo.maxTokens.review, 8192);
+  assert.equal(config.models.mimo.maxTokens.consult, 4096);
+});
+
+test("an explicit MULTIPOLY_MIMO_MAX_TOKENS_REVIEW overrides the floor", () => {
+  const config = loadConfig({
+    MULTIPOLY_MODELS: "mimo", MULTIPOLY_MIMO_API_KEY: "mimo",
+    MULTIPOLY_MIMO_MAX_TOKENS_REVIEW: "20000",
+  });
+  assert.equal(config.models.mimo.maxTokens.review, 20000);
+});
