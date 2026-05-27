@@ -382,7 +382,27 @@ export function loadModelRegistry(env = process.env) {
   }
 
   loadModelsFileInto(env, { keys, info, seen });
+  warnLegacyMigration(env);
   return { keys: Object.freeze(keys), info: Object.freeze(info) };
+}
+
+const LEGACY_PREFIXES = [
+  { prefix: "MULTIPOLY_OPUS_", canonical: "MULTIPOLY_CLAUDE_*" },
+  { prefix: "MULTIPOLY_GPT55_", canonical: "MULTIPOLY_CODEX_*" },
+];
+
+function warnLegacyMigration(env) {
+  for (const { prefix, canonical } of LEGACY_PREFIXES) {
+    const hits = Object.keys(env).filter((k) => k.startsWith(prefix));
+    if (hits.length === 0) continue;
+    process.stderr.write(
+      JSON.stringify({
+        event: "legacy_env_ignored",
+        vars: hits,
+        message: `${prefix}* is no longer used; the model folded into its canonical key. Use ${canonical} instead. These vars are currently IGNORED.`,
+      }) + "\n",
+    );
+  }
 }
 
 /**

@@ -527,3 +527,31 @@ test("claude with no key and unset transport keeps baked cli", () => {
   const { info } = loadModelRegistry({ MULTIPOLY_MODELS: "claude" });
   assert.equal(info.claude.transport, "cli");
 });
+
+// ── Task 6: MULTIPOLY_OPUS_* / MULTIPOLY_GPT55_* migration warning ──
+
+test("a MULTIPOLY_OPUS_* var present emits a migration warning to stderr", () => {
+  const lines = [];
+  const orig = process.stderr.write;
+  process.stderr.write = (s) => { lines.push(String(s)); return true; };
+  try {
+    loadModelRegistry({ MULTIPOLY_OPUS_API_KEY: "x", MULTIPOLY_GLM_API_KEY: "y" });
+  } finally {
+    process.stderr.write = orig;
+  }
+  const blob = lines.join("");
+  assert.match(blob, /MULTIPOLY_OPUS_/);
+  assert.match(blob, /MULTIPOLY_CLAUDE_/);
+});
+
+test("no warning when no legacy vars are present", () => {
+  const lines = [];
+  const orig = process.stderr.write;
+  process.stderr.write = (s) => { lines.push(String(s)); return true; };
+  try {
+    loadModelRegistry({ MULTIPOLY_GLM_API_KEY: "y" });
+  } finally {
+    process.stderr.write = orig;
+  }
+  assert.ok(!lines.join("").includes("MULTIPOLY_OPUS_"));
+});
