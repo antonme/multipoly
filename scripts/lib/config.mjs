@@ -7,7 +7,9 @@ import {
   CLI_KINDS,
   ANTHROPIC_VERSION,
   validateEnvVarName,
+  modelCapability,
 } from "./models.mjs";
+import { resolveReasoningEffort, thinkingToEffort, CAPABILITY } from "./reasoning.mjs";
 
 const ENDPOINT_PROFILES = Object.freeze({
   "zai-coding-plan": "https://api.z.ai/api/coding/paas/v4",
@@ -133,7 +135,18 @@ function resolveLegacyGlmBaseUrl(env) {
 // Compute the per-model review/consult max_tokens caps. GLM inherits the
 // output ceiling by default; other models default to undefined unless the
 // server-wide cap was set explicitly. Shared across all transports.
-function resolveModelMaxTokens(env, key, prefix, serverMaxTokens) {
+// For GLM_TOGGLE capability models (glm, and in future mimo), apply a minimum
+// floor of 8192 (review) / 4096 (consult) when neither the per-model env nor
+// the server-wide env was set explicitly. An explicit value (either source)
+// always wins over the floor so the operator's intent is respected.
+function resolveModelMaxTokens(env, key, prefix, serverMaxTokens, info) {
+  const isGlmToggle = info?.reasoning === CAPABILITY.GLM_TOGGLE;
+  // "explicit" = the operator set this value via env; floor must not override it.
+  const reviewPerModelExplicit = env[`${prefix}_MAX_TOKENS_REVIEW`] !== undefined && env[`${prefix}_MAX_TOKENS_REVIEW`] !== "";
+  const consultPerModelExplicit = env[`${prefix}_MAX_TOKENS_CONSULT`] !== undefined && env[`${prefix}_MAX_TOKENS_CONSULT`] !== "";
+  const reviewAnyExplicit = reviewPerModelExplicit || serverMaxTokens.explicit.review;
+  const consultAnyExplicit = consultPerModelExplicit || serverMaxTokens.explicit.consult;
+
   const review = parseInteger(
     env[`${prefix}_MAX_TOKENS_REVIEW`],
     key === "glm" || serverMaxTokens.explicit.review ? serverMaxTokens.values.review : undefined,
@@ -142,7 +155,39 @@ function resolveModelMaxTokens(env, key, prefix, serverMaxTokens) {
     env[`${prefix}_MAX_TOKENS_CONSULT`],
     key === "glm" || serverMaxTokens.explicit.consult ? serverMaxTokens.values.consult : undefined,
   );
+
+  if (isGlmToggle) {
+    // Apply floor only when no explicit value was supplied (neither per-model nor server-wide).
+    return Object.freeze({
+      review: reviewAnyExplicit ? review : Math.max(review ?? 0, 8192),
+      consult: consultAnyExplicit ? consult : Math.max(consult ?? 0, 4096),
+    });
+  }
+
   return Object.freeze({ review, consult });
+}
+
+/**
+ * Resolve the baseline reasoning effort for one model at config load time.
+ * Precedence (highest → lowest):
+ *   MULTIPOLY_<K>_REASONING_EFFORT (per-model effort env)
+ *   MULTIPOLY_<K>_THINKING (per-model thinking env, mapped via thinkingToEffort)
+ *   GLM_THINKING (legacy, consumed ONLY for glm — never leaks to other models)
+ *   MULTIPOLY_REASONING_EFFORT (server-wide effort env)
+ *   MULTIPOLY_THINKING (server-wide thinking env, mapped via thinkingToEffort)
+ *   info.defaultEffort (baked default from MODEL_INFO or registry)
+ * Returns a concrete effort level (one of EFFORT_LEVELS).
+ */
+function resolveModelReasoningEffort(env, key, prefix, info) {
+  const glmLegacyThinking = key === "glm" ? env.GLM_THINKING : undefined;
+  return resolveReasoningEffort({
+    perCall: undefined,
+    modelEffort: env[`${prefix}_REASONING_EFFORT`],
+    modelThinking: thinkingToEffort(env[`${prefix}_THINKING`] ?? glmLegacyThinking),
+    serverEffort: env.MULTIPOLY_REASONING_EFFORT,
+    serverThinking: thinkingToEffort(env.MULTIPOLY_THINKING),
+    bakedDefault: info?.defaultEffort ?? "off",
+  });
 }
 
 function parseCwdMode(raw, label) {
@@ -195,12 +240,19 @@ function loadHttpModelConfig(env, key, info, serverMaxTokens) {
     env[`${prefix}_MODEL`] ||
     (key === "glm" ? env.GLM_MODEL : null) ||
     info.defaultModel;
-  const maxTokens = resolveModelMaxTokens(env, key, prefix, serverMaxTokens);
+  const maxTokens = resolveModelMaxTokens(env, key, prefix, serverMaxTokens, info);
+  const reasoningEffort = resolveModelReasoningEffort(env, key, prefix, info);
   const missing = [];
 
   if (!baseUrlRaw) missing.push(`${prefix}_BASE_URL`);
   if (!model) missing.push(`${prefix}_MODEL`);
   if (!keyHit) missing.push(info.apiKeyEnv.join(" or "));
+
+  const reasoningFields = {
+    reasoning: info.reasoning,
+    ...(info.reasoningVocab !== undefined ? { reasoningVocab: info.reasoningVocab } : {}),
+    reasoningEffort,
+  };
 
   if (missing.length > 0) {
     return Object.freeze({
@@ -214,6 +266,7 @@ function loadHttpModelConfig(env, key, info, serverMaxTokens) {
       apiKey: null,
       supportsThinking: Boolean(info.supportsThinking),
       maxTokens,
+      ...reasoningFields,
     });
   }
 
@@ -229,6 +282,7 @@ function loadHttpModelConfig(env, key, info, serverMaxTokens) {
     apiKeyEnv: keyHit.name,
     supportsThinking: Boolean(info.supportsThinking),
     maxTokens,
+    ...reasoningFields,
   });
 }
 
@@ -244,12 +298,19 @@ function loadAnthropicModelConfig(env, key, info, serverMaxTokens) {
       : `${prefix}_BASE_URL`;
   const model = env[`${prefix}_MODEL`] || info.defaultModel;
   const keyHit = firstNonEmpty(env, info.apiKeyEnv);
-  const maxTokens = resolveModelMaxTokens(env, key, prefix, serverMaxTokens);
+  const maxTokens = resolveModelMaxTokens(env, key, prefix, serverMaxTokens, info);
+  const reasoningEffort = resolveModelReasoningEffort(env, key, prefix, info);
 
   const missing = [];
   if (!baseUrlRaw) missing.push(`${prefix}_BASE_URL`);
   if (!model) missing.push(`${prefix}_MODEL`);
   if (!keyHit) missing.push(info.apiKeyEnv.join(" or "));
+
+  const reasoningFields = {
+    reasoning: info.reasoning,
+    ...(info.reasoningVocab !== undefined ? { reasoningVocab: info.reasoningVocab } : {}),
+    reasoningEffort,
+  };
 
   const common = {
     key,
@@ -259,6 +320,7 @@ function loadAnthropicModelConfig(env, key, info, serverMaxTokens) {
     anthropicVersion: ANTHROPIC_VERSION,
     supportsThinking: Boolean(info.supportsThinking),
     maxTokens,
+    ...reasoningFields,
   };
   if (missing.length > 0) {
     return Object.freeze({
@@ -309,14 +371,13 @@ function loadCliModelConfig(env, key, info, serverMaxTokens) {
     env[`${prefix}_UNSAFE`] !== undefined && env[`${prefix}_UNSAFE`] !== ""
       ? parseBool(env[`${prefix}_UNSAFE`], false)
       : Boolean(info.unsafe);
-  const reasoningEffort =
-    (env[`${prefix}_REASONING_EFFORT`] || "").trim() || info.reasoningEffort || null;
+  const reasoningEffort = resolveModelReasoningEffort(env, key, prefix, info);
   const enabled =
     env[`${prefix}_ENABLED`] !== undefined && env[`${prefix}_ENABLED`] !== ""
       ? parseBool(env[`${prefix}_ENABLED`], false)
       : Boolean(info.enabled);
   const timeoutMs = parseInteger(env[`${prefix}_TIMEOUT_MS`], undefined, TIMEOUT_BOUNDS);
-  const maxTokens = resolveModelMaxTokens(env, key, prefix, serverMaxTokens);
+  const maxTokens = resolveModelMaxTokens(env, key, prefix, serverMaxTokens, info);
 
   // A cli model is opt-in (it shells out to a local agent), so it stays
   // unconfigured until ENABLED. A weak-sandbox kind (agy) additionally
@@ -326,6 +387,12 @@ function loadCliModelConfig(env, key, info, serverMaxTokens) {
   if (kindDef.weakSandbox && !unsafe) missing.push(`${prefix}_UNSAFE=1 (weak sandbox)`);
   // Kinds that emit a --model/-m flag need a model id; agy has no model flag.
   if (!kindDef.noModelFlag && !model) missing.push(`${prefix}_MODEL`);
+
+  const reasoningFields = {
+    reasoning: info.reasoning,
+    ...(info.reasoningVocab !== undefined ? { reasoningVocab: info.reasoningVocab } : {}),
+    reasoningEffort,
+  };
 
   return Object.freeze({
     key,
@@ -337,12 +404,12 @@ function loadCliModelConfig(env, key, info, serverMaxTokens) {
     authTokenEnv,
     cwdMode,
     unsafe,
-    reasoningEffort,
     timeoutMs,
     configured: missing.length === 0,
     missing: Object.freeze(missing),
     supportsThinking: Boolean(info.supportsThinking),
     maxTokens,
+    ...reasoningFields,
   });
 }
 
@@ -390,7 +457,7 @@ function parseSynthesizer(raw, modelKeys) {
 }
 
 function parseThinking(raw) {
-  if (raw === undefined || raw === "") return "mode-default";
+  if (raw === undefined || raw === "") return "auto";
   const v = String(raw).toLowerCase();
   if (["on", "1", "true", "yes"].includes(v)) return "on";
   if (["off", "0", "false", "no"].includes(v)) return "off";

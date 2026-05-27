@@ -204,6 +204,47 @@ export function loadModelRegistry(env = process.env) {
     if (transport === "cli") {
       base.cliKind = parseCliKind(env[`${prefix}_CLI_KIND`], `${prefix}_CLI_KIND`);
     }
+    // Reasoning capability: MULTIPOLY_<K>_REASONING overrides; otherwise infer by transport.
+    // http: from MULTIPOLY_<K>_REASONING_VOCAB (deepseek|gemini → OPENAI_EFFORT, glm → GLM_TOGGLE, qwen → QWEN_BUDGET);
+    //        else from MULTIPOLY_<K>_REASONING explicit; else NONE.
+    // anthropic: ANTHROPIC_EFFORT default (or KIMI_TOGGLE if explicitly declared).
+    // cli: NONE (cli reasoning handled by kind in Task 10).
+    const explicitReasoning = (env[`${prefix}_REASONING`] || "").trim();
+    if (explicitReasoning) {
+      const validCaps = Object.values(CAPABILITY);
+      if (!validCaps.includes(explicitReasoning)) {
+        throw new MultipolyError(
+          "CONFIG",
+          `${prefix}_REASONING must be one of ${validCaps.join(", ")}, got ${JSON.stringify(explicitReasoning)}`,
+        );
+      }
+      base.reasoning = explicitReasoning;
+    } else if (transport === "anthropic") {
+      base.reasoning = CAPABILITY.ANTHROPIC_EFFORT;
+    } else if (transport === "http") {
+      // Infer from REASONING_VOCAB when available.
+      const vocab = (env[`${prefix}_REASONING_VOCAB`] || "").trim().toLowerCase();
+      if (vocab === "deepseek" || vocab === "gemini") {
+        base.reasoning = CAPABILITY.OPENAI_EFFORT;
+      } else if (vocab === "glm") {
+        base.reasoning = CAPABILITY.GLM_TOGGLE;
+      } else if (vocab === "qwen") {
+        base.reasoning = CAPABILITY.QWEN_BUDGET;
+      } else {
+        base.reasoning = CAPABILITY.NONE;
+      }
+    } else {
+      // cli transport
+      base.reasoning = CAPABILITY.NONE;
+    }
+    // reasoningVocab: carry forward when OPENAI_EFFORT and REASONING_VOCAB is set.
+    const vocab = (env[`${prefix}_REASONING_VOCAB`] || "").trim();
+    if (vocab && base.reasoning === CAPABILITY.OPENAI_EFFORT) {
+      base.reasoningVocab = vocab;
+    }
+    // defaultEffort: env-defined custom models use "off" as baked default unless
+    // a reasoning effort or thinking env is set (Part A's resolution handles it).
+    base.defaultEffort = "off";
     info[key] = Object.freeze(base);
   }
 

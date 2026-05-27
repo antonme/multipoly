@@ -302,3 +302,97 @@ test("models: modelCapability falls back to NONE for custom models without a rea
   // custom cli model is created without reasoning field; modelCapability falls back to NONE
   assert.equal(modelCapability(c, "mykimi"), CAPABILITY.NONE);
 });
+
+// --- Task 6: per-model baseline reasoning effort + GLM floor; retire mode-default ---
+
+test("config: per-model effort beats server; legacy GLM_THINKING is per-model only", () => {
+  const c = loadConfig({ ...glm, MULTIPOLY_REASONING_EFFORT: "low", MULTIPOLY_GLM_REASONING_EFFORT: "xhigh" });
+  assert.equal(c.models.glm.reasoningEffort, "xhigh");
+});
+
+test("config: server THINKING=off → effort off when nothing more specific", () => {
+  const c = loadConfig({ ...glm, MULTIPOLY_THINKING: "off" });
+  assert.equal(c.models.glm.reasoningEffort, "off");
+});
+
+test("config: GLM_THINKING does NOT leak onto deepseek", () => {
+  const c = loadConfig({ ...glm, MULTIPOLY_DEEPSEEK_API_KEY: "d", GLM_THINKING: "off" });
+  assert.equal(c.models.deepseek.reasoningEffort, "high"); // unaffected
+  assert.equal(c.models.glm.reasoningEffort, "off");       // glm honors its legacy var
+});
+
+test("config: GLM max_tokens floor applies by default but not over explicit", () => {
+  assert.ok(loadConfig({ ...glm }).models.glm.maxTokens.review >= 8192);
+  assert.equal(loadConfig({ ...glm, MULTIPOLY_GLM_MAX_TOKENS_REVIEW: "2048" }).models.glm.maxTokens.review, 2048);
+});
+
+test("config: model config carries reasoning and reasoningVocab from model info", () => {
+  const c = loadConfig({ ...glm, MULTIPOLY_DEEPSEEK_API_KEY: "d" });
+  assert.equal(c.models.glm.reasoning, CAPABILITY.GLM_TOGGLE);
+  assert.equal(c.models.deepseek.reasoning, CAPABILITY.OPENAI_EFFORT);
+  assert.equal(c.models.deepseek.reasoningVocab, "deepseek");
+});
+
+test("config: retire mode-default — unset MULTIPOLY_THINKING gives auto", () => {
+  const c = loadConfig({ ...glm });
+  assert.equal(c.thinking, "auto");
+});
+
+test("config: all-inherit resolves to baked default effort (glm → high)", () => {
+  const c = loadConfig({ ...glm });
+  assert.equal(c.models.glm.reasoningEffort, "high");
+});
+
+test("config: composer baseline resolves to off (NONE capability)", () => {
+  const c = loadConfig({ ...glm });
+  assert.equal(c.models.composer.reasoningEffort, "off");
+});
+
+// --- Part B: env-defined custom models get capability ---
+
+test("models: env-defined anthropic custom model gets ANTHROPIC_EFFORT capability", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "claude",
+    MULTIPOLY_CLAUDE_TRANSPORT: "anthropic",
+    MULTIPOLY_CLAUDE_API_KEY: "sk-ant-xxx",
+    MULTIPOLY_CLAUDE_MODEL: "claude-sonnet-4-5",
+  });
+  assert.equal(modelCapability(c, "claude"), CAPABILITY.ANTHROPIC_EFFORT);
+});
+
+test("models: env-defined http model with REASONING_VOCAB=deepseek gets OPENAI_EFFORT", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "mydeep",
+    MULTIPOLY_MYDEEP_API_KEY: "k",
+    MULTIPOLY_MYDEEP_BASE_URL: "https://ds.example/v1",
+    MULTIPOLY_MYDEEP_MODEL: "deepseek-v3",
+    MULTIPOLY_MYDEEP_REASONING_VOCAB: "deepseek",
+  });
+  assert.equal(modelCapability(c, "mydeep"), CAPABILITY.OPENAI_EFFORT);
+  assert.equal(c.models.mydeep.reasoningVocab, "deepseek");
+});
+
+test("models: env-defined http model with REASONING=kimi_toggle gets KIMI_TOGGLE", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "kimi",
+    MULTIPOLY_KIMI_API_KEY: "k",
+    MULTIPOLY_KIMI_BASE_URL: "https://kimi.example/v1",
+    MULTIPOLY_KIMI_MODEL: "kimi-k2",
+    MULTIPOLY_KIMI_REASONING: "kimi_toggle",
+  });
+  assert.equal(modelCapability(c, "kimi"), CAPABILITY.KIMI_TOGGLE);
+});
+
+test("models: env-defined http model with no reasoning hint gets NONE", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "mymodel",
+    MULTIPOLY_MYMODEL_API_KEY: "k",
+    MULTIPOLY_MYMODEL_BASE_URL: "https://my.example/v1",
+    MULTIPOLY_MYMODEL_MODEL: "my-model-1",
+  });
+  assert.equal(modelCapability(c, "mymodel"), CAPABILITY.NONE);
+});
