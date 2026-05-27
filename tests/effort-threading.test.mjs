@@ -481,7 +481,11 @@ function anthropicTransportConfig(overrides = {}) {
   };
 }
 
-test("effort-threading(anthropic): per-call reasoningEffort='low' lands in request body", async () => {
+test("effort-threading(anthropic): camelCase reasoningEffort key is NEVER on the outbound body (Task-7 temp seam removed)", async () => {
+  // UPDATED (Task 9): the Task-7 temporary `baseBody.reasoningEffort = reasoningEffort`
+  // passthrough is removed. The camelCase key must NEVER appear on the wire body.
+  // For a NONE-capability model, the per-call effort is accepted but produces no body fields.
+  const { CAPABILITY } = await import("../scripts/lib/reasoning.mjs");
   const fetchImpl = makeAnthropicSpyFetch(anthropicBasicEvents);
   await runModel({
     config: anthropicTransportConfig(),
@@ -494,8 +498,8 @@ test("effort-threading(anthropic): per-call reasoningEffort='low' lands in reque
   assert.ok(fetchImpl.calls.length >= 1, "at least one fetch call expected");
   assert.equal(
     fetchImpl.calls[0].body.reasoningEffort,
-    "low",
-    "anthropic transport must forward per-call reasoningEffort to the request body",
+    undefined,
+    "camelCase reasoningEffort must never appear on outbound body (Task-7 temp seam removed in Task 9)",
   );
 });
 

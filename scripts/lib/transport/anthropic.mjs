@@ -1,41 +1,25 @@
 import { MultipolyError, newCorrelationId } from "../errors.mjs";
 import { parseSseStream } from "../sse.mjs";
 import { resolveMaxTokensForModel } from "../config.mjs";
-import { ANTHROPIC_VERSION, modelSupportsThinking, resolveThinkingPreference } from "../models.mjs";
+import { ANTHROPIC_VERSION, modelCapability } from "../models.mjs";
+import {
+  CAPABILITY,
+  resolveReasoningEffort,
+  effortToAnthropicEffort,
+  effortToAnthropicBudget,
+  effortToKimiThinking,
+} from "../reasoning.mjs";
 
 // Anthropic requires max_tokens, but multipoly leaves model caps undefined by
 // default (the http path omits the field). Use a generous default so a review
 // JSON isn't truncated; operators raise it via MULTIPOLY_<K>_MAX_TOKENS_*.
 const DEFAULT_MAX_TOKENS = 16384;
 
-// Anthropic extended-thinking budget tuning. budget_tokens must be >= 1024 and
-// strictly < max_tokens (the thinking budget is carved out of max_tokens), so
-// we also reserve a minimum for the visible answer. When the cap is too small
-// to fit both, thinking is skipped rather than starving the output.
-const MIN_THINKING_BUDGET_TOKENS = 1024; // Anthropic's documented floor
-const DEFAULT_THINKING_BUDGET_TOKENS = 8192;
-const MIN_OUTPUT_TOKENS = 1024;
-
-/**
- * Build the Anthropic `thinking` request field, or null to omit it.
- * Mirrors the http transport's gating (model must support thinking and the
- * resolved preference must be true) but maps onto Anthropic's budgeted shape.
- */
-function buildThinkingField({ supportsThinking, wantThinking, maxTokens, correlationId }) {
-  if (!supportsThinking || wantThinking !== true) return null;
-  const budget = Math.min(DEFAULT_THINKING_BUDGET_TOKENS, maxTokens - MIN_OUTPUT_TOKENS);
-  if (budget < MIN_THINKING_BUDGET_TOKENS) {
-    process.stderr.write(
-      JSON.stringify({
-        event: "anthropic_thinking_skipped",
-        correlationId,
-        reason: `max_tokens (${maxTokens}) too small to fit a thinking budget (need >= ${MIN_THINKING_BUDGET_TOKENS + MIN_OUTPUT_TOKENS}); proceeding without extended thinking`,
-      }) + "\n",
-    );
-    return null;
-  }
-  return { type: "enabled", budget_tokens: budget };
-}
+// Sampling parameters that Anthropic/Kimi lock when thinking is active.
+// Opus 4.7 returns 400 on non-default temperature/top_p/top_k when adaptive
+// thinking is on; Kimi K2.6 also locks temperature. Strip them defensively
+// for any anthropic-family capability whenever effort is not "off".
+const LOCKED_SAMPLING_PARAMS = Object.freeze(["temperature", "top_p", "top_k"]);
 
 /**
  * Native Anthropic Messages API transport. Mirrors the http client's return
@@ -86,9 +70,44 @@ export async function runAnthropicModel({
   const { system, turns } = splitSystem(messages);
   const maxTokens = resolveMaxTokensForModel(config, modelKey, mode) ?? DEFAULT_MAX_TOKENS;
 
-  const supportsThinking = m.supportsThinking ?? modelSupportsThinking(config, modelKey);
-  const wantThinking = resolveThinkingPreference({ thinking, configThinking: config?.thinking, mode });
-  const thinkingField = buildThinkingField({ supportsThinking, wantThinking, maxTokens, correlationId });
+  // Resolve capability and effective reasoning effort.
+  const cap = m.reasoning ?? modelCapability(config, modelKey);
+  const effort = resolveReasoningEffort({
+    perCall: reasoningEffort,
+    modelEffort: m.reasoningEffort,
+    bakedDefault: m.reasoningEffort ?? "off",
+  });
+
+  // Build the thinking/output_config fields for the base body by capability.
+  let thinkingFields = null;   // fields to spread onto baseBody
+  let effortValue = null;      // the effort string (for ANTHROPIC_EFFORT output_config)
+  let isThinkingActive = false; // controls sampling-param strip and outputConfig gating
+
+  if (cap === CAPABILITY.ANTHROPIC_EFFORT) {
+    thinkingFields = effortToAnthropicEffort(effort);
+    if (thinkingFields !== null) {
+      // thinkingFields = { thinking: {type:"adaptive"}, output_config: {effort} }
+      // We split output_config.effort out so review mode can add .format to it.
+      effortValue = thinkingFields.output_config.effort;
+      isThinkingActive = true;
+    }
+  } else if (cap === CAPABILITY.KIMI_TOGGLE) {
+    thinkingFields = effortToKimiThinking(effort);
+    isThinkingActive = effort !== "off";
+  } else if (cap === CAPABILITY.ANTHROPIC_BUDGET) {
+    thinkingFields = effortToAnthropicBudget(effort, { maxTokens });
+    if (thinkingFields === null && effort !== "off") {
+      process.stderr.write(
+        JSON.stringify({
+          event: "anthropic_thinking_skipped",
+          correlationId,
+          reason: `max_tokens (${maxTokens}) too small to fit a thinking budget; proceeding without extended thinking`,
+        }) + "\n",
+      );
+    }
+    isThinkingActive = thinkingFields !== null;
+  }
+  // CAPABILITY.NONE (and unknown): no thinking fields applied.
 
   const baseBody = {
     model: m.model,
@@ -97,35 +116,67 @@ export async function runAnthropicModel({
     messages: turns,
   };
   if (system) baseBody.system = system;
-  if (thinkingField) baseBody.thinking = thinkingField;
 
-  // Native structured output for review JSON. Extended thinking and native
-  // structured output are not safely combinable across all model/endpoint
-  // versions, so when thinking is enabled we omit output_config and rely on
-  // prompt-instructed JSON (the caller's validate/reprompt loop) instead.
-  const outputConfig =
-    !thinkingField &&
+  // Apply thinking fields. For ANTHROPIC_EFFORT we hoist the thinking key
+  // directly and manage output_config separately (to merge .format in review).
+  if (thinkingFields !== null) {
+    if (cap === CAPABILITY.ANTHROPIC_EFFORT) {
+      baseBody.thinking = thinkingFields.thinking;
+      // output_config.effort is added in the attempt() closure (may include .format)
+    } else {
+      // KIMI_TOGGLE / ANTHROPIC_BUDGET: spread everything at once (just `thinking`)
+      Object.assign(baseBody, thinkingFields);
+    }
+  }
+
+  // Strip sampling params that Anthropic/Kimi lock when thinking is active.
+  if (isThinkingActive) {
+    for (const p of LOCKED_SAMPLING_PARAMS) delete baseBody[p];
+  }
+
+  // Review JSON schema. Policy varies by capability:
+  //   ANTHROPIC_EFFORT: attempt output_config:{effort, format} together first;
+  //     on format rejection fall back to prompt-JSON but KEEP output_config:{effort}.
+  //   KIMI_TOGGLE / ANTHROPIC_BUDGET with thinking on: omit format (prompt-JSON path).
+  //   All others (no thinking): send output_config:{format} as before.
+  const reviewSchema =
     mode === "review" && responseFormat?.type === "json_schema" && responseFormat.json_schema?.schema
-      ? { format: { type: "json_schema", schema: responseFormat.json_schema.schema } }
+      ? responseFormat.json_schema.schema
       : null;
 
-  // TEMP test seam — Task 9 replaces with output_config.effort / thinking.
-  if (reasoningEffort !== undefined) baseBody.reasoningEffort = reasoningEffort;
+  // For non-ANTHROPIC_EFFORT paths with thinking, fall through to prompt-JSON (omit format).
+  const formatConfig =
+    !isThinkingActive && reviewSchema
+      ? { format: { type: "json_schema", schema: reviewSchema } }
+      : null;
 
-  const attempt = async (withSchema) => {
+  const attempt = async ({ includeFormat }) => {
     const body = { ...baseBody };
-    if (withSchema && outputConfig) body.output_config = outputConfig;
+    if (cap === CAPABILITY.ANTHROPIC_EFFORT && effortValue !== null) {
+      // Always include effort; optionally include format on first try.
+      body.output_config = includeFormat && reviewSchema
+        ? { effort: effortValue, format: { type: "json_schema", schema: reviewSchema } }
+        : { effort: effortValue };
+    } else if (includeFormat && formatConfig) {
+      body.output_config = formatConfig;
+    }
+    // Strip sampling params in case any caller-constructed baseBody contains them
+    // (defensive: baseBody.delete already ran above, but attempt() spreads baseBody).
+    if (isThinkingActive) {
+      for (const p of LOCKED_SAMPLING_PARAMS) delete body[p];
+    }
     return runOnce({ m, body, timeoutMs: timeoutMs ?? config.timeoutMs, correlationId, fetchImpl });
   };
 
   let fellBack = false;
   let result;
+  const hasOutputConfig = (cap === CAPABILITY.ANTHROPIC_EFFORT && effortValue !== null) || formatConfig;
   try {
-    result = await attempt(true);
+    result = await attempt({ includeFormat: true });
   } catch (e) {
-    if (outputConfig && isStructuredOutputUnsupported(e)) {
+    if (hasOutputConfig && isStructuredOutputUnsupported(e)) {
       fellBack = true;
-      result = await attempt(false);
+      result = await attempt({ includeFormat: false });
     } else {
       throw e;
     }
