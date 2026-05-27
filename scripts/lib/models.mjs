@@ -490,30 +490,6 @@ export function modelHasReasoningControl(config, key) {
   return modelCapability(config, key) !== CAPABILITY.NONE;
 }
 
-/**
- * Resolve the effective thinking preference for one call, shared by the http
- * and anthropic transports so they can't drift.
- *
- *   - explicit per-call `thinking` (boolean) wins,
- *   - else config.thinking: "auto" → null (omit the field entirely),
- *     "on" → true, "off" → false,
- *   - else falls through to false (the old review-on/consult-off "mode-default"
- *     asymmetry was retired in Task 6; the per-model `reasoningEffort` baseline
- *     now fully determines reasoning, and this function is only kept for legacy
- *     callers that have not yet migrated to the capability/effort path).
- *
- * Returns true | false | null. The caller maps that onto its transport's wire
- * shape (GLM `{type:"enabled"|"disabled"}`; Anthropic `{type:"enabled",
- * budget_tokens}` or omitted) and gates it on whether the model supports it.
- */
-export function resolveThinkingPreference({ thinking, configThinking, mode }) {
-  if (thinking !== undefined) return thinking;
-  if (configThinking === "auto") return null;
-  if (configThinking === "on") return true;
-  if (configThinking === "off") return false;
-  return mode === "review";
-}
-
 export function firstNonEmpty(env, names) {
   for (const name of names) {
     const v = (env[name] || "").trim();

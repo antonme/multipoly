@@ -165,6 +165,23 @@ MULTIPOLY_HAIKU_API_KEY=...      # or rely on ANTHROPIC_API_KEY via the file reg
 MULTIPOLY_HAIKU_MODEL=claude-haiku-4-5
 ```
 
+> **Non-Claude Anthropic-compatible models (e.g. Kimi):** The default reasoning
+> capability for an `anthropic`-transport custom model is `ANTHROPIC_EFFORT` —
+> the `output_config.effort` + `thinking: {type: "adaptive"}` shape used by
+> Claude Opus 4.7. Models that do **not** speak that protocol (Kimi uses a bare
+> `thinking: {type: "enabled"|"disabled"}` toggle instead) must declare their
+> capability explicitly:
+>
+> ```
+> MULTIPOLY_KIMI_REASONING=kimi_toggle
+> ```
+>
+> The general form is `MULTIPOLY_<KEY>_REASONING=<cap>` where `<cap>` is one of
+> the values listed in `CAPABILITY` (`kimi_toggle`, `glm_toggle`,
+> `anthropic_budget`, `openai_effort`, `qwen_budget`, `none`). Without this
+> override, sending the Opus-style payload to a non-Claude endpoint will result
+> in an API error.
+
 ### CLI agents (Claude Code, Codex, Cursor/Composer, Gemini, agy, Kimi)
 
 A `cli` model shells out to a local agent in its **read-only** mode. Each kind
