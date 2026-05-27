@@ -68,6 +68,7 @@ export async function runAnthropicModel({
   mode,
   responseFormat,
   thinking,
+  reasoningEffort,
   timeoutMs,
   fetchImpl = globalThis.fetch,
 }) {
@@ -107,6 +108,9 @@ export async function runAnthropicModel({
     mode === "review" && responseFormat?.type === "json_schema" && responseFormat.json_schema?.schema
       ? { format: { type: "json_schema", schema: responseFormat.json_schema.schema } }
       : null;
+
+  // TEMP test seam — Task 9 replaces with output_config.effort / thinking.
+  if (reasoningEffort !== undefined) baseBody.reasoningEffort = reasoningEffort;
 
   const attempt = async (withSchema) => {
     const body = { ...baseBody };

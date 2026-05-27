@@ -80,7 +80,7 @@ const MAX_BUFFER = 64 * 1024 * 1024;
  *   - cwd: repo working dir (default process.cwd()); used when cwdMode==="repo".
  */
 export async function runCliModel(args) {
-  const { config, modelKey, messages, mode, responseFormat, timeoutMs } = args;
+  const { config, modelKey, messages, mode, responseFormat, timeoutMs, reasoningEffort } = args;
   const env = args.env ?? process.env;
   const repoCwd = args.cwd ?? process.cwd();
   const execFile = args.execFileImpl ?? defaultExecFile;
@@ -127,7 +127,8 @@ export async function runCliModel(args) {
   let tempCwd;
   try {
     const childCwd = m.cwdMode === "temp" ? (tempCwd = mkdtempSync(join(tmpdir(), "multipoly-cwd-"))) : repoCwd;
-    const recipe = buildInvocation({ kind: m.cliKind, binary, model: m.model, cwd: childCwd, reasoningEffort: m.reasoningEffort, prompt, scratch });
+    const effectiveEffort = (reasoningEffort && reasoningEffort !== "inherit") ? reasoningEffort : m.reasoningEffort;
+    const recipe = buildInvocation({ kind: m.cliKind, binary, model: m.model, cwd: childCwd, reasoningEffort: effectiveEffort, prompt, scratch });
 
     // codex authenticates from $CODEX_HOME/auth.json. We isolate CODEX_HOME to
     // an empty temp dir (so the operator's config.toml / MCP servers / rules

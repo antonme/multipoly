@@ -14,6 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, realpath } from "node:fs/promises";
+import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
@@ -22,6 +23,7 @@ import { promisify } from "node:util";
 import { prepareReview, runPreparedReview } from "../scripts/lib/model-review.mjs";
 import { prepareConsult, runPreparedConsult } from "../scripts/lib/model-consult.mjs";
 import { handleCouncilReview, handleCouncilConsult } from "../scripts/lib/council.mjs";
+import { runModel } from "../scripts/lib/run-model.mjs";
 
 const execFileP = promisify(execFile);
 const enc = new TextEncoder();
@@ -404,4 +406,209 @@ test("effort-threading: council consult with reasoning_effort=low → each membe
   } finally {
     process.chdir(prev);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Anthropic transport boundary: per-call reasoningEffort lands in request body
+// ---------------------------------------------------------------------------
+
+// Anthropic SSE events for a minimal successful response.
+const anthropicBasicEvents = [
+  { type: "message_start", message: { usage: { input_tokens: 10 } } },
+  { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hello" } },
+  { type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 2 } },
+  { type: "message_stop" },
+];
+
+// Build a fetchImpl that records the parsed request body and returns a
+// minimal Anthropic-style SSE stream so the call completes.
+function makeAnthropicSpyFetch(events) {
+  const enc2 = new TextEncoder();
+  const calls = [];
+  const fn = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    const frames = events.map((e) => enc2.encode(`data: ${JSON.stringify(e)}\n\n`));
+    let i = 0;
+    const stream = new ReadableStream({
+      pull(c) {
+        if (i < frames.length) c.enqueue(frames[i++]);
+        else c.close();
+      },
+    });
+    return new Response(stream, { status: 200, headers: { "content-type": "text/event-stream" } });
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+// Build a minimal anthropic-transport config.
+function anthropicTransportConfig(overrides = {}) {
+  return {
+    models: {
+      ant: {
+        key: "ant",
+        displayName: "Claude",
+        transport: "anthropic",
+        configured: true,
+        model: "claude-opus-4-7",
+        baseUrl: "https://api.anthropic.test",
+        apiKey: "sk-ant-test",
+        anthropicVersion: "2023-06-01",
+        supportsThinking: false,
+        reasoningEffort: overrides.reasoningEffort ?? "medium",
+        maxTokens: { review: undefined, consult: undefined },
+      },
+    },
+    thinking: "off",
+    timeoutMs: 5000,
+    progress: "off",
+  };
+}
+
+test("effort-threading(anthropic): per-call reasoningEffort='low' lands in request body", async () => {
+  const fetchImpl = makeAnthropicSpyFetch(anthropicBasicEvents);
+  await runModel({
+    config: anthropicTransportConfig(),
+    modelKey: "ant",
+    messages: [{ role: "user", content: "hi" }],
+    mode: "consult",
+    reasoningEffort: "low",
+    fetchImpl,
+  });
+  assert.ok(fetchImpl.calls.length >= 1, "at least one fetch call expected");
+  assert.equal(
+    fetchImpl.calls[0].body.reasoningEffort,
+    "low",
+    "anthropic transport must forward per-call reasoningEffort to the request body",
+  );
+});
+
+test("effort-threading(anthropic): omitting per-call reasoningEffort does not add field to body", async () => {
+  const fetchImpl = makeAnthropicSpyFetch(anthropicBasicEvents);
+  await runModel({
+    config: anthropicTransportConfig(),
+    modelKey: "ant",
+    messages: [{ role: "user", content: "hi" }],
+    mode: "consult",
+    // reasoningEffort deliberately omitted
+    fetchImpl,
+  });
+  assert.ok(fetchImpl.calls.length >= 1);
+  assert.equal(
+    fetchImpl.calls[0].body.reasoningEffort,
+    undefined,
+    "anthropic transport must not add reasoningEffort when not provided",
+  );
+});
+
+// ---------------------------------------------------------------------------
+// CLI transport boundary: per-call reasoningEffort resolves and lands in argv
+// ---------------------------------------------------------------------------
+
+// Minimal codex cli config with an optional model baseline.
+function codexConfig(overrides = {}) {
+  return {
+    models: {
+      cx: {
+        key: "cx",
+        displayName: "Codex",
+        transport: "cli",
+        cliKind: "codex",
+        binary: null,
+        model: "codex-model",
+        authTokenEnv: null,
+        cwdMode: "repo",
+        unsafe: false,
+        reasoningEffort: overrides.reasoningEffort ?? "medium", // model baseline
+        timeoutMs: null,
+        configured: true,
+        supportsThinking: false,
+        maxTokens: { review: undefined, consult: undefined },
+      },
+    },
+    timeoutMs: 5000,
+  };
+}
+
+
+test("effort-threading(cli): per-call reasoningEffort='low' overrides model baseline in codex argv", async () => {
+  const cap = [];
+  const execFileImpl = (file, args, opts) => {
+    cap.push({ file, args, opts });
+    const i = args.indexOf("--output-last-message");
+    if (i >= 0 && args[i + 1]) writeFileSync(args[i + 1], "codex answer");
+    return "";
+  };
+  await runModel({
+    config: codexConfig({ reasoningEffort: "high" }), // model baseline is "high"
+    modelKey: "cx",
+    messages: [{ role: "user", content: "hi" }],
+    mode: "consult",
+    reasoningEffort: "low", // per-call override
+    execFileImpl,
+    env: {},
+  });
+  assert.ok(cap.length >= 1, "codex was spawned");
+  const { args } = cap[0];
+  // The resolved effort ("low") must appear in the -c flag, not the baseline ("high").
+  assert.ok(
+    args.some((a) => /model_reasoning_effort="low"/.test(a)),
+    `expected model_reasoning_effort="low" in argv, got: ${JSON.stringify(args)}`,
+  );
+  assert.equal(
+    args.some((a) => /model_reasoning_effort="high"/.test(a)),
+    false,
+    "model baseline 'high' must not appear when per-call override is 'low'",
+  );
+});
+
+test("effort-threading(cli): omitting per-call reasoningEffort falls back to model baseline in codex argv", async () => {
+  const cap = [];
+  const execFileImpl = (file, args, opts) => {
+    cap.push({ file, args, opts });
+    const i = args.indexOf("--output-last-message");
+    if (i >= 0 && args[i + 1]) writeFileSync(args[i + 1], "codex answer");
+    return "";
+  };
+  await runModel({
+    config: codexConfig({ reasoningEffort: "high" }), // model baseline is "high"
+    modelKey: "cx",
+    messages: [{ role: "user", content: "hi" }],
+    mode: "consult",
+    // reasoningEffort deliberately omitted → should fall back to model "high"
+    execFileImpl,
+    env: {},
+  });
+  assert.ok(cap.length >= 1, "codex was spawned");
+  const { args } = cap[0];
+  assert.ok(
+    args.some((a) => /model_reasoning_effort="high"/.test(a)),
+    `expected model_reasoning_effort="high" (baseline) in argv, got: ${JSON.stringify(args)}`,
+  );
+});
+
+test("effort-threading(cli): per-call reasoningEffort='inherit' falls back to model baseline in codex argv", async () => {
+  const cap = [];
+  const execFileImpl = (file, args, opts) => {
+    cap.push({ file, args, opts });
+    const i = args.indexOf("--output-last-message");
+    if (i >= 0 && args[i + 1]) writeFileSync(args[i + 1], "codex answer");
+    return "";
+  };
+  await runModel({
+    config: codexConfig({ reasoningEffort: "medium" }), // model baseline is "medium"
+    modelKey: "cx",
+    messages: [{ role: "user", content: "hi" }],
+    mode: "consult",
+    reasoningEffort: "inherit", // explicit inherit → use model baseline
+    execFileImpl,
+    env: {},
+  });
+  assert.ok(cap.length >= 1, "codex was spawned");
+  const { args } = cap[0];
+  assert.ok(
+    args.some((a) => /model_reasoning_effort="medium"/.test(a)),
+    `expected model_reasoning_effort="medium" (baseline for inherit) in argv, got: ${JSON.stringify(args)}`,
+  );
 });
