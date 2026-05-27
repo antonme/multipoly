@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync } from "node:fs";
 import { runModel } from "../scripts/lib/run-model.mjs";
+import { buildInvocation } from "../scripts/lib/transport/cli.mjs";
 
 // Build a config whose single model uses the cli transport for `kind`.
 function cliConfig(kind, overrides = {}) {
@@ -339,4 +340,91 @@ test("cli: concurrent calls get distinct scratch paths (council safety)", async 
     ),
   );
   assert.equal(new Set(seen).size, 3, "each call must use a unique last-message file");
+});
+
+// ── Task 10: reasoning-effort adapter wiring ──────────────────────────────
+
+// buildInvocation helper: creates a minimal scratch dir path stub for tests
+// that only need argv inspection (no real file I/O). We pass a real tmpdir
+// scratch because buildInvocation(codex) calls mkdirSync on CODEX_HOME inside.
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+function scratch() { return mkdtempSync(join(tmpdir(), "cli-test-")); }
+
+test("cli: codex + high effort → -c model_reasoning_effort in argv", () => {
+  const { args } = buildInvocation({ kind: "codex", binary: "codex", model: "m", cwd: "/tmp", reasoningEffort: "high", prompt: "p", scratch: scratch() });
+  assert.ok(args.includes("-c"), "expected -c flag");
+  assert.ok(args.some((a) => a === 'model_reasoning_effort="high"'), `expected model_reasoning_effort="high" in args: ${args.join(" ")}`);
+});
+
+test("cli: codex + xhigh effort → clamped to high in argv", () => {
+  const { args } = buildInvocation({ kind: "codex", binary: "codex", model: "m", cwd: "/tmp", reasoningEffort: "xhigh", prompt: "p", scratch: scratch() });
+  assert.ok(args.some((a) => a === 'model_reasoning_effort="high"'), `xhigh must be clamped to high: ${args.join(" ")}`);
+  assert.ok(!args.some((a) => a === 'model_reasoning_effort="xhigh"'), "xhigh must not appear in argv");
+});
+
+test("cli: codex + off effort → no -c reasoning flag in argv", () => {
+  const { args } = buildInvocation({ kind: "codex", binary: "codex", model: "m", cwd: "/tmp", reasoningEffort: "off", prompt: "p", scratch: scratch() });
+  assert.ok(!args.some((a) => /model_reasoning_effort/.test(a)), `off must produce no reasoning flag: ${args.join(" ")}`);
+});
+
+test("cli: agy + high effort → no reasoning flag in argv", () => {
+  const { args } = buildInvocation({ kind: "agy", binary: "agy", model: "m", cwd: "/tmp", reasoningEffort: "high", prompt: "p", scratch: scratch() });
+  assert.ok(!args.some((a) => /effort|reason|think/.test(a)), `agy should produce no reasoning flag: ${args.join(" ")}`);
+});
+
+test("cli: claude + high effort → --effort flag in argv", () => {
+  const { args } = buildInvocation({ kind: "claude", binary: "claude", model: "m", cwd: "/tmp", reasoningEffort: "high", prompt: "p", scratch: scratch() });
+  assert.ok(args.includes("--effort"), `expected --effort flag for claude: ${args.join(" ")}`);
+  assert.equal(args[args.indexOf("--effort") + 1], "high");
+});
+
+test("cli: claude + xhigh effort → --effort xhigh in argv (no clamping for claude)", () => {
+  const { args } = buildInvocation({ kind: "claude", binary: "claude", model: "m", cwd: "/tmp", reasoningEffort: "xhigh", prompt: "p", scratch: scratch() });
+  assert.ok(args.includes("--effort"), `expected --effort flag for claude: ${args.join(" ")}`);
+  assert.equal(args[args.indexOf("--effort") + 1], "xhigh");
+});
+
+test("cli: claude + off effort → no --effort flag in argv", () => {
+  const { args } = buildInvocation({ kind: "claude", binary: "claude", model: "m", cwd: "/tmp", reasoningEffort: "off", prompt: "p", scratch: scratch() });
+  assert.ok(!args.includes("--effort"), `off must produce no --effort flag: ${args.join(" ")}`);
+});
+
+test("cli: per-call effort overrides model baseline in resulting argv (codex)", async () => {
+  // model baseline = "low", per-call = "high" → argv must contain "high"
+  const cap = [];
+  await runModel({
+    config: cliConfig("codex", { reasoningEffort: "low" }),
+    modelKey: "m",
+    messages,
+    mode: "consult",
+    reasoningEffort: "high",
+    execFileImpl: fakeExec("", cap, { lastMessageContent: "answer" }),
+    env: {},
+  });
+  const { args } = cap[0];
+  assert.ok(args.some((a) => a === 'model_reasoning_effort="high"'), `per-call "high" must override baseline "low": ${args.join(" ")}`);
+  assert.ok(!args.some((a) => a === 'model_reasoning_effort="low"'), `baseline "low" must not appear when overridden: ${args.join(" ")}`);
+});
+
+test("cli: cli_reasoning_unsupported note appears on stderr for unsupported kind with non-off effort", async () => {
+  // Capture stderr via a writable mock; agy has no reasoning flag so the unsupported path fires.
+  const stderrLines = [];
+  const origWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (msg, ...rest) => { stderrLines.push(String(msg)); return origWrite(msg, ...rest); };
+  try {
+    await runModel({
+      config: cliConfig("agy", { reasoningEffort: "high" }),
+      modelKey: "m",
+      messages,
+      mode: "consult",
+      execFileImpl: fakeExec("agy result", []),
+      env: {},
+    });
+  } finally {
+    process.stderr.write = origWrite;
+  }
+  assert.ok(stderrLines.some((l) => /cli_reasoning_unsupported/.test(l)), `expected cli_reasoning_unsupported in stderr: ${stderrLines.join("")}`);
 });

@@ -73,11 +73,18 @@ export function effortToQwenFields(e, { maxTokens }) {
 }
 
 const CODEX_EFFORTS = new Set(["low", "medium", "high"]);
+// claude --help confirms: --effort <level> (low, medium, high, xhigh, max) — graded effort flag.
+// gemini --help: no reasoning/effort/think flag found.
+// cursor-agent --help: no reasoning/effort/think flag found.
+// agy: not installed / no matching flag.
+// kimi --help: --thinking / --no-thinking (binary toggle only, not a graded effort flag).
+const CLAUDE_EFFORTS = new Set(["low", "medium", "high", "xhigh"]);
 export function effortToCliReasoningArgs(kind, e) {
   assertConcreteEffort(e);
   if (e === "off") return [];
   if (kind === "codex") { const v = CODEX_EFFORTS.has(e) ? e : "high"; return ["-c", `model_reasoning_effort="${v}"`]; }
-  return []; // claude/gemini/cursor/agy: verify real flag before wiring (Task 10 note)
+  if (kind === "claude") { const v = CLAUDE_EFFORTS.has(e) ? e : "xhigh"; return ["--effort", v]; }
+  return []; // gemini/cursor/agy/kimi: no graded effort flag verified
 }
 
 export function resolveReasoningEffort({ perCall, modelEffort, modelThinking, serverEffort, serverThinking, bakedDefault }) {

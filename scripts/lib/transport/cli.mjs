@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { MultipolyError } from "../errors.mjs";
 import { CLI_KINDS } from "../models.mjs";
 import { scan } from "../secrets.mjs";
+import { effortToCliReasoningArgs, resolveReasoningEffort } from "../reasoning.mjs";
 
 // Track all spawned CLI process groups so they can be cleaned up on shutdown.
 // `defaultExecFile` adds the group PID before spawning; the cleanup hooks below
@@ -127,7 +128,23 @@ export async function runCliModel(args) {
   let tempCwd;
   try {
     const childCwd = m.cwdMode === "temp" ? (tempCwd = mkdtempSync(join(tmpdir(), "multipoly-cwd-"))) : repoCwd;
-    const effectiveEffort = (reasoningEffort && reasoningEffort !== "inherit") ? reasoningEffort : m.reasoningEffort;
+    // Resolve the effective effort: per-call overrides baseline; baseline is already
+    // fully resolved at config time so it doubles as both model layer and baked default.
+    // "inherit" must never reach the adapter — resolve it here to a concrete level.
+    const baseline = m.reasoningEffort ?? "off";
+    const effectiveEffort = resolveReasoningEffort({
+      perCall: reasoningEffort,
+      modelEffort: baseline,
+      bakedDefault: baseline,
+    });
+    // Warn once (stderr) when a non-off effort is requested for a kind whose binary
+    // exposes no graded reasoning flag (gemini, cursor, agy, kimi).
+    const reasoningArgs = effortToCliReasoningArgs(m.cliKind, effectiveEffort);
+    if (effectiveEffort !== "off" && reasoningArgs.length === 0) {
+      process.stderr.write(
+        `[multipoly] cli_reasoning_unsupported: ${m.cliKind} has no verified reasoning-effort flag; effort="${effectiveEffort}" ignored\n`,
+      );
+    }
     const recipe = buildInvocation({ kind: m.cliKind, binary, model: m.model, cwd: childCwd, reasoningEffort: effectiveEffort, prompt, scratch });
 
     // codex authenticates from $CODEX_HOME/auth.json. We isolate CODEX_HOME to
@@ -231,22 +248,25 @@ export function flattenMessages(messages, wantJson) {
  */
 export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, prompt, scratch }) {
   switch (kind) {
-    case "claude":
+    case "claude": {
+      const claudeArgs = [
+        "-p",
+        "--model",
+        model,
+        "--output-format",
+        "text",
+        "--tools",
+        "",
+        "--strict-mcp-config",
+      ];
+      claudeArgs.push(...effortToCliReasoningArgs("claude", reasoningEffort));
+      claudeArgs.push("Complete the task described on stdin. Emit only the requested output as your final message.");
       return {
-        args: [
-          "-p",
-          "--model",
-          model,
-          "--output-format",
-          "text",
-          "--tools",
-          "",
-          "--strict-mcp-config",
-          "Complete the task described on stdin. Emit only the requested output as your final message.",
-        ],
+        args: claudeArgs,
         stdin: prompt,
         env: {},
       };
+    }
     case "codex": {
       const lastMessageFile = join(scratch, "codex-last-message.txt");
       // codex refuses to start if CODEX_HOME doesn't exist — create the
@@ -254,7 +274,7 @@ export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, pro
       const codexHome = join(scratch, "codex-home");
       mkdirSync(codexHome, { recursive: true });
       const args = ["exec"];
-      if (reasoningEffort) args.push("-c", `model_reasoning_effort="${reasoningEffort}"`);
+      args.push(...effortToCliReasoningArgs("codex", reasoningEffort));
       args.push(
         "-m",
         model,
