@@ -6,6 +6,7 @@ import {
   resolveCallTimeoutMs,
   TIMEOUT_BOUNDS,
 } from "../scripts/lib/config.mjs";
+import { MODEL_INFO, MODEL_KEYS } from "../scripts/lib/models.mjs";
 
 const base = { GLM_API_KEY: "test-key" };
 
@@ -450,4 +451,24 @@ test("config: missing qwen config does not prevent GLM-only startup", () => {
   assert.equal(c.models.glm.configured, true);
   assert.equal(c.models.qwen.configured, false);
   assert.equal(c.models.qwen.missing.length > 0, true);
+});
+
+// ── Task 3: baked MODEL_INFO entries for claude/codex/gemini/kimi ──
+
+test("claude/codex/gemini/kimi are baked MODEL_INFO entries with capability + base name", () => {
+  for (const k of ["claude", "codex", "gemini", "kimi"]) {
+    assert.ok(MODEL_INFO[k], `${k} should be in MODEL_INFO`);
+    assert.ok(MODEL_INFO[k].reasoning, `${k} should declare a reasoning capability`);
+    assert.ok(MODEL_INFO[k].baseName, `${k} should declare a display base name`);
+  }
+});
+
+test("OPUS_INFO is no longer exported (folded into claude)", async () => {
+  const mod = await import("../scripts/lib/models.mjs");
+  assert.equal(mod.OPUS_INFO, undefined);
+});
+
+test("baked builtins are NOT auto-registered (MODEL_KEYS unchanged)", async () => {
+  const { MODEL_KEYS: keys } = await import("../scripts/lib/models.mjs");
+  assert.deepEqual([...keys], ["glm", "qwen", "deepseek", "composer"]);
 });

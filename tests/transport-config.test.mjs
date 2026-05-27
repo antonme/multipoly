@@ -35,29 +35,6 @@ test("transport: a setting an API key alone does NOT configure the cli composer 
   assert.equal(c.models.composer.configured, false);
 });
 
-test("transport: opus anthropic builtin appears + configured only when ANTHROPIC_API_KEY set", () => {
-  const without = loadConfig({ ...glm });
-  assert.equal(without.modelKeys.includes("opus"), false);
-  assert.equal("opus" in without.models, false);
-
-  const withKey = loadConfig({ ...glm, ANTHROPIC_API_KEY: "sk-ant-xxx" });
-  assert.equal(withKey.modelKeys.includes("opus"), true);
-  assert.equal(withKey.models.opus.transport, "anthropic");
-  assert.equal(withKey.models.opus.configured, true);
-  assert.equal(withKey.models.opus.apiKey, "sk-ant-xxx");
-  assert.equal(withKey.models.opus.model, "claude-opus-4-7");
-  assert.equal(withKey.models.opus.baseUrl, "https://api.anthropic.com");
-  assert.equal(withKey.models.opus.supportsThinking, true);
-});
-
-test("transport: opus base URL overridable and validated", () => {
-  const c = loadConfig({ ...glm, ANTHROPIC_API_KEY: "k", ANTHROPIC_BASE_URL: "https://proxy.test" });
-  assert.equal(c.models.opus.baseUrl, "https://proxy.test");
-  assert.throws(
-    () => loadConfig({ ...glm, ANTHROPIC_API_KEY: "k", ANTHROPIC_BASE_URL: "ftp://nope" }),
-    (e) => e.code === "CONFIG",
-  );
-});
 
 test("transport: custom model can declare anthropic transport", () => {
   const c = loadConfig({
@@ -237,11 +214,6 @@ test("transport: invalid cwd mode is a CONFIG error", () => {
   );
 });
 
-test("transport: redactedConfig still masks the api key for anthropic models", () => {
-  const c = loadConfig({ ...glm, ANTHROPIC_API_KEY: "sk-ant-secret-1234" });
-  assert.equal(c.models.opus.apiKey, "sk-ant-secret-1234");
-});
-
 test("transport: CLI_KINDS exposes the known agent kinds", () => {
   assert.deepEqual(
     Object.keys(CLI_KINDS).sort(),
@@ -251,11 +223,6 @@ test("transport: CLI_KINDS exposes the known agent kinds", () => {
   assert.equal(CLI_KINDS.cursor.binary, "cursor-agent");
 });
 
-test("transport: registry includes opus only via loadModelRegistry env gate", () => {
-  const r = loadModelRegistry({ ANTHROPIC_API_KEY: "k" });
-  assert.ok(r.keys.includes("opus"));
-  assert.equal(r.info.opus.transport, "anthropic");
-});
 
 // --- Task 5: static capability + defaults on MODEL_INFO; modelHasReasoningControl ---
 

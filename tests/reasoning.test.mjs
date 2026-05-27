@@ -5,7 +5,7 @@ import { thinkingToEffort } from "../scripts/lib/reasoning.mjs";
 import { resolveReasoningEffort } from "../scripts/lib/reasoning.mjs";
 import { CAPABILITY, effortToGlmThinking, effortToOpenAiFields, effortToAnthropicEffort,
   effortToAnthropicBudget, effortToKimiThinking, effortToQwenFields, effortToCliReasoningArgs } from "../scripts/lib/reasoning.mjs";
-import { MODEL_INFO, OPUS_INFO } from "../scripts/lib/models.mjs";
+import { MODEL_INFO } from "../scripts/lib/models.mjs";
 
 test("reasoning: levels + ordering", () => {
   assert.deepEqual(EFFORT_LEVELS, ["off", "low", "medium", "high", "xhigh"]);
@@ -114,7 +114,7 @@ test("regression: claude effortToCliReasoningArgs maps off → []", () => {
   assert.deepEqual(effortToCliReasoningArgs("claude", "off"), []);
 });
 
-// ── Part A-3: Capability completeness — every MODEL_INFO entry + OPUS_INFO ──
+// ── Part A-3: Capability completeness — every MODEL_INFO entry ──
 
 test("regression: every MODEL_INFO entry has a valid CAPABILITY value for 'reasoning'", () => {
   const validCaps = new Set(Object.values(CAPABILITY));
@@ -130,14 +130,3 @@ test("regression: every MODEL_INFO entry has a valid CAPABILITY value for 'reaso
   }
 });
 
-test("regression: OPUS_INFO has a valid CAPABILITY value for 'reasoning' and concrete defaultEffort", () => {
-  const validCaps = new Set(Object.values(CAPABILITY));
-  assert.ok(
-    validCaps.has(OPUS_INFO.reasoning),
-    `OPUS_INFO.reasoning ${JSON.stringify(OPUS_INFO.reasoning)} is not a valid CAPABILITY`,
-  );
-  assert.ok(
-    EFFORT_LEVELS.includes(OPUS_INFO.defaultEffort),
-    `OPUS_INFO.defaultEffort ${JSON.stringify(OPUS_INFO.defaultEffort)} is not a concrete EFFORT_LEVELS member`,
-  );
-});

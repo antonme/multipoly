@@ -65,6 +65,7 @@ export const ANTHROPIC_VERSION = "2023-06-01";
 export const MODEL_INFO = Object.freeze({
   glm: Object.freeze({
     key: "glm",
+    baseName: "glm-5.1",
     displayName: "GLM 5.1",
     transport: "http",
     defaultModel: "glm-5.1",
@@ -76,6 +77,7 @@ export const MODEL_INFO = Object.freeze({
   }),
   qwen: Object.freeze({
     key: "qwen",
+    baseName: "qwen3.7-max",
     displayName: "Qwen 3.7 Max",
     transport: "http",
     defaultModel: "qwen3.7max",
@@ -87,6 +89,7 @@ export const MODEL_INFO = Object.freeze({
   }),
   deepseek: Object.freeze({
     key: "deepseek",
+    baseName: "deepseek-v4-pro",
     displayName: "DeepSeek V4 Pro",
     transport: "http",
     defaultModel: "deepseek-v4-pro",
@@ -102,6 +105,7 @@ export const MODEL_INFO = Object.freeze({
   // operator opts in with MULTIPOLY_COMPOSER_ENABLED (see CHANGELOG migration).
   composer: Object.freeze({
     key: "composer",
+    baseName: "composer-2.5",
     displayName: "Composer 2.5",
     transport: "cli",
     cliKind: "cursor",
@@ -111,22 +115,59 @@ export const MODEL_INFO = Object.freeze({
     reasoning: CAPABILITY.NONE,
     defaultEffort: "off",
   }),
+  // ── Promotable builtins: baked metadata, NOT auto-registered ──────────────
+  // These entries carry capability/baseName/defaultEffort so operator deployments
+  // that list them in MULTIPOLY_MODELS don't need per-model display env.
+  // They are intentionally absent from MODEL_KEYS (opt-in via MULTIPOLY_MODELS).
+  claude: Object.freeze({
+    key: "claude",
+    baseName: "opus",                // display base; full name computed by transport
+    transport: "cli",
+    cliKind: "claude",
+    defaultModel: "claude-opus-4-7",
+    defaultBaseUrl: null,            // anthropic transport falls back to ANTHROPIC_DEFAULT_BASE_URL in config
+    apiKeyEnv: ["MULTIPOLY_CLAUDE_API_KEY", "ANTHROPIC_API_KEY"],
+    supportsThinking: true,
+    reasoning: CAPABILITY.ANTHROPIC_EFFORT, // when reached over anthropic; cli ignores at wire but --effort flag honors it
+    defaultEffort: "xhigh",
+  }),
+  codex: Object.freeze({
+    key: "codex",
+    baseName: "gpt5.5",
+    transport: "cli",
+    cliKind: "codex",
+    defaultModel: "gpt-5.5",
+    defaultBaseUrl: null,
+    apiKeyEnv: ["MULTIPOLY_CODEX_API_KEY", "OPENAI_API_KEY"],
+    supportsThinking: false,
+    reasoning: CAPABILITY.OPENAI_EFFORT, // http transport; cli uses -c model_reasoning_effort
+    defaultEffort: "xhigh",
+  }),
+  gemini: Object.freeze({
+    key: "gemini",
+    baseName: "gemini-3.5-flash",
+    transport: "http",
+    defaultModel: "gemini-3.5-flash",
+    defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    apiKeyEnv: ["MULTIPOLY_GEMINI_API_KEY", "GEMINI_API_KEY"],
+    supportsThinking: false,
+    reasoning: CAPABILITY.OPENAI_EFFORT,
+    reasoningVocab: "gemini",
+    defaultEffort: "high",
+  }),
+  kimi: Object.freeze({
+    key: "kimi",
+    baseName: "kimi-k2.6",
+    transport: "anthropic",
+    defaultModel: "kimi-k2.6",
+    defaultBaseUrl: "https://api.kimi.com/coding",
+    apiKeyEnv: ["MULTIPOLY_KIMI_API_KEY", "MOONSHOT_API_KEY"],
+    supportsThinking: true,
+    reasoning: CAPABILITY.KIMI_TOGGLE,
+    defaultEffort: "high",
+  }),
 });
 
-// Native-Anthropic builtin, registered only when an Anthropic key is present
-// (see loadModelRegistry). Kept out of MODEL_KEYS so default deployments keep
-// the four-builtin registry unchanged.
-export const OPUS_INFO = Object.freeze({
-  key: "opus",
-  displayName: "Claude Opus 4.7",
-  transport: "anthropic",
-  defaultModel: "claude-opus-4-7",
-  defaultBaseUrl: ANTHROPIC_DEFAULT_BASE_URL,
-  apiKeyEnv: ["MULTIPOLY_OPUS_API_KEY", "ANTHROPIC_API_KEY"],
-  supportsThinking: true,
-  reasoning: CAPABILITY.ANTHROPIC_EFFORT,
-  defaultEffort: "xhigh",
-});
 
 export function assertModelKey(raw) {
   if (MODEL_KEYS.includes(raw)) return raw;
@@ -157,14 +198,6 @@ export function envPrefixForModel(key) {
 export function loadModelRegistry(env = process.env) {
   const info = { ...MODEL_INFO };
   const keys = [...MODEL_KEYS];
-
-  // The native-Anthropic `opus` builtin is registered only when an Anthropic
-  // key is present, so deployments without one keep the four-builtin registry
-  // (and its advertised tools) exactly as before.
-  if (firstNonEmpty(env, OPUS_INFO.apiKeyEnv)) {
-    info.opus = OPUS_INFO;
-    keys.push("opus");
-  }
 
   const seen = new Set(keys);
   const raw = (env.MULTIPOLY_MODELS || "").trim();
