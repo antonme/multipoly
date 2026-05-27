@@ -84,3 +84,112 @@ test("surface: every advertised schema's keys equal its validator key set", () =
     assert.deepEqual(schemaKeys, allowed, tool.name);
   }
 });
+
+// ── Task 11: per-call reasoning_effort tool argument ──────────────────────────
+
+test("schema: glm_review has reasoning_effort with correct enum; composer_review does not", () => {
+  const { tools } = buildServerSurface();
+  const glmReview = tools.find((t) => t.name === "glm_review");
+  const composerReview = tools.find((t) => t.name === "composer_review");
+  assert.ok(glmReview, "glm_review not found");
+  assert.ok(composerReview, "composer_review not found");
+  // GLM has reasoning control — must expose reasoning_effort
+  assert.ok("reasoning_effort" in glmReview.inputSchema.properties, "glm_review missing reasoning_effort");
+  const re = glmReview.inputSchema.properties.reasoning_effort;
+  assert.equal(re.type, "string");
+  assert.deepEqual(re.enum, ["off", "low", "medium", "high", "xhigh"]);
+  // Composer has NONE capability — must NOT expose reasoning_effort
+  assert.ok(!("reasoning_effort" in composerReview.inputSchema.properties), "composer_review should not have reasoning_effort");
+});
+
+test("schema: glm_consult has reasoning_effort; composer_consult does not", () => {
+  const { tools } = buildServerSurface();
+  const glmConsult = tools.find((t) => t.name === "glm_consult");
+  const composerConsult = tools.find((t) => t.name === "composer_consult");
+  assert.ok("reasoning_effort" in glmConsult.inputSchema.properties, "glm_consult missing reasoning_effort");
+  assert.ok(!("reasoning_effort" in composerConsult.inputSchema.properties), "composer_consult should not have reasoning_effort");
+});
+
+test("schema: council_review and council_consult have reasoning_effort", () => {
+  const { tools } = buildServerSurface();
+  const councilReview = tools.find((t) => t.name === "council_review");
+  const councilConsult = tools.find((t) => t.name === "council_consult");
+  assert.ok("reasoning_effort" in councilReview.inputSchema.properties, "council_review missing reasoning_effort");
+  assert.ok("reasoning_effort" in councilConsult.inputSchema.properties, "council_consult missing reasoning_effort");
+});
+
+test("integration: glm_review accepts reasoning_effort:'low' (validates without error)", async () => {
+  const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "dummy" });
+  const conn = await connect(config);
+  try {
+    // diff_base AND paths together → INVALID_INPUT before reasoning_effort check,
+    // so use only the reasoning_effort-related rejection path by sending a bad value.
+    // For the "accepted" case we can't actually call the model, but the validator
+    // must NOT reject reasoning_effort:'low' as an unknown key.  We confirm by
+    // sending a known-bad combo that fails on the mutual-exclusion rule, not the
+    // key validator — meaning the key was accepted.
+    // Actually, test that unknown key "turbo" is rejected, and valid key is not.
+    // Send a minimally valid review input with reasoning_effort:'low' → should fail
+    // on model-call (no real API) but NOT on validation (INVALID_INPUT).
+    // We check the rejection is NOT about reasoning_effort being unknown/invalid.
+    const res = await conn.client.callTool({
+      name: "glm_review",
+      arguments: { diff_base: "main", reasoning_effort: "low" },
+    });
+    // May be an error (model not reachable) but must NOT be about reasoning_effort validation
+    const text = res.content.map((c) => c.text).join("");
+    assert.ok(!text.includes("unknown argument 'reasoning_effort'"), `should not reject reasoning_effort as unknown: ${text}`);
+    assert.ok(!text.includes("reasoning effort must be"), `should not reject 'low' as invalid: ${text}`);
+  } finally {
+    await conn.close();
+  }
+});
+
+test("integration: glm_review rejects invalid reasoning_effort value 'turbo'", async () => {
+  const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "dummy" });
+  const conn = await connect(config);
+  try {
+    const res = await conn.client.callTool({
+      name: "glm_review",
+      arguments: { diff_base: "main", reasoning_effort: "turbo" },
+    });
+    assert.equal(res.isError, true);
+    const text = res.content.map((c) => c.text).join("");
+    assert.match(text, /INVALID_INPUT/);
+    assert.match(text, /reasoning_effort/i);
+  } finally {
+    await conn.close();
+  }
+});
+
+test("integration: composer_review rejects reasoning_effort argument (unknown key for NONE model)", async () => {
+  const config = loadConfig({ MULTIPOLY_COMPOSER_ENABLED: "1" });
+  const conn = await connect(config);
+  try {
+    const res = await conn.client.callTool({
+      name: "composer_review",
+      arguments: { diff_base: "main", reasoning_effort: "low" },
+    });
+    assert.equal(res.isError, true);
+    const text = res.content.map((c) => c.text).join("");
+    assert.match(text, /INVALID_INPUT/);
+  } finally {
+    await conn.close();
+  }
+});
+
+test("integration: council_review accepts reasoning_effort:'low' (not an unknown-key error)", async () => {
+  const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "dummy" });
+  const conn = await connect(config);
+  try {
+    const res = await conn.client.callTool({
+      name: "council_review",
+      arguments: { diff_base: "main", models: ["glm", "glm"], reasoning_effort: "low" },
+    });
+    const text = res.content.map((c) => c.text).join("");
+    assert.ok(!text.includes("unknown argument 'reasoning_effort'"), `should not reject reasoning_effort: ${text}`);
+    assert.ok(!text.includes("reasoning effort must be"), `should not reject 'low' value: ${text}`);
+  } finally {
+    await conn.close();
+  }
+});
