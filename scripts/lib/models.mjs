@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { MultipolyError } from "./errors.mjs";
 import { scanMany, formatHitsForError } from "./secrets.mjs";
+import { CAPABILITY } from "./reasoning.mjs";
 
 // An environment variable NAME (not value): used to validate apiKeyEnv /
 // authTokenEnv, which name the env var whose value a transport reads — the
@@ -70,6 +71,8 @@ export const MODEL_INFO = Object.freeze({
     defaultBaseUrl: "https://api.z.ai/api/coding/paas/v4",
     apiKeyEnv: ["MULTIPOLY_GLM_API_KEY", "GLM_API_KEY", "ZHIPU_API_KEY"],
     supportsThinking: true,
+    reasoning: CAPABILITY.GLM_TOGGLE,
+    defaultEffort: "high",
   }),
   qwen: Object.freeze({
     key: "qwen",
@@ -79,6 +82,8 @@ export const MODEL_INFO = Object.freeze({
     defaultBaseUrl: null,
     apiKeyEnv: ["MULTIPOLY_QWEN_API_KEY", "QWEN_API_KEY"],
     supportsThinking: false,
+    reasoning: CAPABILITY.QWEN_BUDGET,
+    defaultEffort: "high",
   }),
   deepseek: Object.freeze({
     key: "deepseek",
@@ -88,6 +93,9 @@ export const MODEL_INFO = Object.freeze({
     defaultBaseUrl: null,
     apiKeyEnv: ["MULTIPOLY_DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY"],
     supportsThinking: false,
+    reasoning: CAPABILITY.OPENAI_EFFORT,
+    reasoningVocab: "deepseek",
+    defaultEffort: "high",
   }),
   // Composer 2.5 has no HTTP API — it is only reachable through cursor-agent.
   // It is shipped as a cli/cursor builtin but stays unconfigured until the
@@ -100,6 +108,8 @@ export const MODEL_INFO = Object.freeze({
     defaultModel: null,
     apiKeyEnv: [],
     supportsThinking: false,
+    reasoning: CAPABILITY.NONE,
+    defaultEffort: "off",
   }),
 });
 
@@ -114,6 +124,8 @@ export const OPUS_INFO = Object.freeze({
   defaultBaseUrl: ANTHROPIC_DEFAULT_BASE_URL,
   apiKeyEnv: ["MULTIPOLY_OPUS_API_KEY", "ANTHROPIC_API_KEY"],
   supportsThinking: true,
+  reasoning: CAPABILITY.ANTHROPIC_EFFORT,
+  defaultEffort: "xhigh",
 });
 
 export function assertModelKey(raw) {
@@ -245,6 +257,9 @@ const FILE_ENTRY_FIELDS = new Set([
   "cwd",
   "unsafe",
   "reasoningEffort",
+  "reasoning",
+  "reasoningVocab",
+  "defaultEffort",
   "enabled",
 ]);
 
@@ -334,6 +349,37 @@ function fileEntryToInfo(key, entry, where) {
       : Object.freeze([]),
     supportsThinking: Boolean(entry.supportsThinking),
   };
+
+  // Reasoning capability: explicit field wins; otherwise default by transport.
+  // Custom/file models default to NONE unless an explicit capability is declared.
+  if (typeof entry.reasoning === "string" && entry.reasoning.trim()) {
+    const cap = entry.reasoning.trim();
+    const validCaps = Object.values(CAPABILITY);
+    if (!validCaps.includes(cap)) {
+      throw new MultipolyError(
+        "CONFIG",
+        `${where} reasoning must be one of ${validCaps.join(", ")}, got ${JSON.stringify(cap)}`,
+      );
+    }
+    base.reasoning = cap;
+  } else {
+    // Default reasoning capability by transport when not explicitly set.
+    // http models could be any vocab; anthropic custom models get ANTHROPIC_EFFORT by default.
+    // All others default to NONE (safe: disables reasoning controls until explicitly set).
+    if (transport === "anthropic") {
+      base.reasoning = CAPABILITY.ANTHROPIC_EFFORT;
+    } else {
+      base.reasoning = CAPABILITY.NONE;
+    }
+  }
+
+  if (typeof entry.reasoningVocab === "string" && entry.reasoningVocab.trim()) {
+    base.reasoningVocab = entry.reasoningVocab.trim();
+  }
+  if (typeof entry.defaultEffort === "string" && entry.defaultEffort.trim()) {
+    base.defaultEffort = entry.defaultEffort.trim();
+  }
+
   if (transport === "cli") {
     base.cliKind = parseCliKind(entry.cliKind, `${where} cliKind`);
     if (typeof entry.binary === "string" && entry.binary.trim()) base.binary = entry.binary.trim();
@@ -365,11 +411,35 @@ function parseThinkingFlag(raw) {
  * MODEL_INFO declaration for callers/tests that pass bare config objects.
  * Centralizes what used to be a `?? key === "glm"` fallback duplicated across
  * the client, review, consult, and council modules.
+ *
+ * SEMANTICS: returns true only for models that take a bare top-level `thinking`
+ * toggle — i.e. GLM_TOGGLE, KIMI_TOGGLE, ANTHROPIC_BUDGET. Does NOT include
+ * OPENAI_EFFORT (deepseek/qwen), QWEN_BUDGET, or ANTHROPIC_EFFORT. This
+ * preserves the existing wire behavior until transports are rewritten (Task 8+).
  */
 export function modelSupportsThinking(config, key) {
   const fromConfig = config?.models?.[key]?.supportsThinking;
   if (fromConfig !== undefined) return fromConfig;
   return Boolean(MODEL_INFO[key]?.supportsThinking);
+}
+
+/**
+ * Resolve the reasoning capability for a model. Prefers the `reasoning` field
+ * on the loaded model config, falling back to MODEL_INFO, then NONE.
+ */
+export function modelCapability(config, key) {
+  const fromConfig = config?.models?.[key]?.reasoning;
+  if (fromConfig !== undefined) return fromConfig;
+  return MODEL_INFO[key]?.reasoning ?? CAPABILITY.NONE;
+}
+
+/**
+ * Whether a model has any reasoning control at all (capability !== NONE).
+ * Use this to gate the new reasoning-effort plumbing; use modelSupportsThinking
+ * only to decide whether to send a bare top-level `thinking` toggle field.
+ */
+export function modelHasReasoningControl(config, key) {
+  return modelCapability(config, key) !== CAPABILITY.NONE;
 }
 
 /**

@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadConfig } from "../scripts/lib/config.mjs";
-import { loadModelRegistry, CLI_KINDS } from "../scripts/lib/models.mjs";
+import { loadModelRegistry, CLI_KINDS, MODEL_INFO, modelCapability, modelHasReasoningControl, modelSupportsThinking } from "../scripts/lib/models.mjs";
+import { CAPABILITY } from "../scripts/lib/reasoning.mjs";
 
 const glm = { MULTIPOLY_GLM_API_KEY: "g" };
 
@@ -254,4 +255,50 @@ test("transport: registry includes opus only via loadModelRegistry env gate", ()
   const r = loadModelRegistry({ ANTHROPIC_API_KEY: "k" });
   assert.ok(r.keys.includes("opus"));
   assert.equal(r.info.opus.transport, "anthropic");
+});
+
+// --- Task 5: static capability + defaults on MODEL_INFO; modelHasReasoningControl ---
+
+test("models: capability + default effort on builtins", () => {
+  assert.equal(MODEL_INFO.glm.reasoning, CAPABILITY.GLM_TOGGLE);
+  assert.equal(MODEL_INFO.glm.defaultEffort, "high");
+  assert.equal(MODEL_INFO.qwen.reasoning, CAPABILITY.QWEN_BUDGET);
+  assert.equal(MODEL_INFO.qwen.defaultEffort, "high");
+  assert.equal(MODEL_INFO.deepseek.reasoning, CAPABILITY.OPENAI_EFFORT);
+  assert.equal(MODEL_INFO.deepseek.reasoningVocab, "deepseek");
+  assert.equal(MODEL_INFO.deepseek.defaultEffort, "high");
+  assert.equal(MODEL_INFO.composer.reasoning, CAPABILITY.NONE);
+  assert.equal(MODEL_INFO.composer.defaultEffort, "off");
+});
+
+test("models: modelSupportsThinking stays true only for GLM_TOGGLE/KIMI_TOGGLE/ANTHROPIC_BUDGET", () => {
+  const c = { models: { glm: MODEL_INFO.glm, deepseek: MODEL_INFO.deepseek } };
+  assert.equal(modelSupportsThinking(c, "glm"), true);
+  assert.equal(modelSupportsThinking(c, "deepseek"), false);
+});
+
+test("models: modelCapability reads from model info", () => {
+  const c = { models: { glm: MODEL_INFO.glm, deepseek: MODEL_INFO.deepseek, composer: MODEL_INFO.composer } };
+  assert.equal(modelCapability(c, "glm"), CAPABILITY.GLM_TOGGLE);
+  assert.equal(modelCapability(c, "deepseek"), CAPABILITY.OPENAI_EFFORT);
+  assert.equal(modelCapability(c, "composer"), CAPABILITY.NONE);
+});
+
+test("models: modelHasReasoningControl is true for non-NONE, false for NONE", () => {
+  const c = { models: { glm: MODEL_INFO.glm, deepseek: MODEL_INFO.deepseek, composer: MODEL_INFO.composer } };
+  assert.equal(modelHasReasoningControl(c, "deepseek"), true);
+  assert.equal(modelHasReasoningControl(c, "glm"), true);
+  assert.equal(modelHasReasoningControl(c, "composer"), false);
+});
+
+test("models: modelCapability falls back to NONE for custom models without a reasoning field", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "mykimi",
+    MULTIPOLY_MYKIMI_TRANSPORT: "cli",
+    MULTIPOLY_MYKIMI_CLI_KIND: "kimi",
+    MULTIPOLY_MYKIMI_ENABLED: "1",
+  });
+  // custom cli model is created without reasoning field; modelCapability falls back to NONE
+  assert.equal(modelCapability(c, "mykimi"), CAPABILITY.NONE);
 });
