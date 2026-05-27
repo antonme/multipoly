@@ -43,7 +43,7 @@ export const MODEL_KEYS = Object.freeze(["glm", "qwen", "deepseek", "composer"])
 // Promotable builtins: present in MODEL_INFO but NOT in MODEL_KEYS (opt-in via
 // MULTIPOLY_MODELS). When listed, the registry loader merges the baked MODEL_INFO
 // base under env overrides instead of building from scratch. Plan C adds "mimo".
-const PROMOTABLE_BUILTINS = new Set(["claude", "codex", "gemini", "kimi"]);
+const PROMOTABLE_BUILTINS = new Set(["claude", "codex", "gemini", "kimi", "mimo"]);
 
 // The three transports a model can be reached over. `http` is the default
 // OpenAI-compatible streaming client; `anthropic` is the native Messages API;
@@ -171,6 +171,20 @@ export const MODEL_INFO = Object.freeze({
     supportsThinking: true,
     reasoning: CAPABILITY.KIMI_TOGGLE,
     defaultEffort: "high",
+  }),
+  mimo: Object.freeze({
+    key: "mimo",
+    baseName: "mimo-v2.5-pro",
+    transport: "http",
+    defaultModel: "mimo-v2.5-pro",
+    defaultBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+    // Recognize the existing XIAOMIMIMO_* env names as aliases, mirroring glm's
+    // ZHIPU_API_KEY/GLM_API_KEY fallbacks.
+    apiKeyEnv: ["MULTIPOLY_MIMO_API_KEY", "XIAOMIMIMO_API_KEY"],
+    supportsThinking: true,           // top-level thinking toggle, same class as glm
+    reasoning: CAPABILITY.GLM_TOGGLE, // "http_thinking_toggle"
+    defaultEffort: "high",
+    usesMaxCompletionTokens: true,    // MiMo expects max_completion_tokens, not max_tokens
   }),
 });
 

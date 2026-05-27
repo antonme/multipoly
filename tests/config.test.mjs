@@ -588,3 +588,20 @@ test("normalizeSynthesizerChoice: unknown name returns null (caller raises the e
   const keys = ["glm", "qwen"];
   assert.equal(normalizeSynthesizerChoice("gpt9999", keys), null);
 });
+
+// ── Plan C Task 1: mimo baked builtin ──
+
+test("mimo is a baked MODEL_INFO builtin with http_thinking_toggle capability", () => {
+  assert.ok(MODEL_INFO.mimo);
+  assert.equal(MODEL_INFO.mimo.reasoning, "http_thinking_toggle");
+  assert.equal(MODEL_INFO.mimo.usesMaxCompletionTokens, true);
+  assert.equal(MODEL_INFO.mimo.baseName, "mimo-v2.5-pro");
+});
+
+test("MULTIPOLY_MODELS=mimo merges baked base and recognizes XIAOMIMIMO_API_KEY", () => {
+  const { keys, info } = loadModelRegistry({ MULTIPOLY_MODELS: "mimo" });
+  assert.ok(keys.includes("mimo"));
+  assert.equal(info.mimo.reasoning, "http_thinking_toggle");
+  assert.equal(info.mimo.displayName, "mimo-v2.5-pro (api)"); // convention from Plan B
+  assert.deepEqual([...info.mimo.apiKeyEnv], ["MULTIPOLY_MIMO_API_KEY", "XIAOMIMIMO_API_KEY"]);
+});
