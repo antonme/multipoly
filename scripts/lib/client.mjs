@@ -24,6 +24,7 @@ export async function streamChatCompletion({
   responseFormat,
   thinking,
   timeoutMs,
+  reasoningEffort,
   fetchImpl = globalThis.fetch,
 }) {
   const correlationId = newCorrelationId();
@@ -56,6 +57,10 @@ export async function streamChatCompletion({
   const supportsThinking = modelConfig.supportsThinking ?? modelSupportsThinking(config, effectiveModelKey);
   if (supportsThinking && wantThinking === true) body.thinking = { type: "enabled" };
   else if (supportsThinking && wantThinking === false) body.thinking = { type: "disabled" };
+
+  // Pass through per-call reasoningEffort so the transport boundary receives it.
+  // Tasks 8-10 will replace this passthrough with capability-dispatched request fields.
+  if (reasoningEffort !== undefined) body.reasoningEffort = reasoningEffort;
 
   const doRequest = async (rf) => {
     const reqBody = { ...body };

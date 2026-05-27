@@ -1,5 +1,6 @@
 import { MultipolyError } from "./errors.mjs";
 import { MODEL_KEYS, modelSupportsThinking } from "./models.mjs";
+import { normalizeEffort } from "./reasoning.mjs";
 import { prepareReview, runPreparedReview } from "./model-review.mjs";
 import { prepareConsult, runPreparedConsult } from "./model-consult.mjs";
 import { runModel } from "./run-model.mjs";
@@ -131,11 +132,21 @@ function serializeError(e) {
 /**
  * Run every council member in parallel and collect results. Throws COUNCIL if
  * fewer than two members succeed (a council needs a quorum to be meaningful).
+ *
+ * `reasoningEffort` is the per-call effort from the council tool input; it is
+ * forwarded into the prepared object for each member so each transport can
+ * resolve the effective effort against its own per-model baseline (Tasks 8-10).
  */
-async function runCouncilMembers({ models, prepared, runPrepared, config, fetchImpl, execFileImpl }) {
+async function runCouncilMembers({ models, prepared, runPrepared, config, fetchImpl, execFileImpl, reasoningEffort }) {
   const settled = await Promise.allSettled(
     models.map(async (modelKey) => {
-      const out = await runPrepared(modelKey, prepared, { config, fetchImpl, execFileImpl });
+      // Forward the per-call effort by patching it onto the prepared object
+      // for this member. The prepared object is shared across members so we
+      // create a shallow copy rather than mutating the original.
+      const memberPrepared = reasoningEffort !== undefined
+        ? { ...prepared, reasoningEffort }
+        : prepared;
+      const out = await runPrepared(modelKey, memberPrepared, { config, fetchImpl, execFileImpl });
       return [modelKey, out.result];
     }),
   );
@@ -401,6 +412,7 @@ export async function handleCouncilReview(input, { config, fetchImpl, execFileIm
   const models = resolveCouncilModels(input, config);
   const target = resolveSynthesisTarget(input, config);
   const prepared = await prepareReview(input, { config });
+  const reasoningEffort = normalizeEffort(input.reasoning_effort);
 
   const { memberResults } = await runCouncilMembers({
     models,
@@ -409,6 +421,7 @@ export async function handleCouncilReview(input, { config, fetchImpl, execFileIm
     config,
     fetchImpl,
     execFileImpl,
+    reasoningEffort,
   });
 
   if (target.mode === "harness") {
@@ -454,6 +467,7 @@ export async function handleCouncilConsult(input, { config, fetchImpl, execFileI
   const models = resolveCouncilModels(input, config);
   const target = resolveSynthesisTarget(input, config);
   const prepared = await prepareConsult(input, { config });
+  const reasoningEffort = normalizeEffort(input.reasoning_effort);
 
   const { memberResults, successful } = await runCouncilMembers({
     models,
@@ -462,6 +476,7 @@ export async function handleCouncilConsult(input, { config, fetchImpl, execFileI
     config,
     fetchImpl,
     execFileImpl,
+    reasoningEffort,
   });
 
   if (target.mode === "harness") {

@@ -12,6 +12,7 @@ import { REVIEW_SCHEMA, validateReview, normalizeFindings } from "./schema.mjs";
 import { assertContentBudget } from "./budget.mjs";
 import { resolveCallTimeoutMs, resolveMaxTokensForModel } from "./config.mjs";
 import { modelSupportsThinking } from "./models.mjs";
+import { normalizeEffort } from "./reasoning.mjs";
 
 export async function prepareReview(input, { config, cwd = process.cwd() } = {}) {
   const gathered = await gatherReview({
@@ -49,6 +50,7 @@ export async function prepareReview(input, { config, cwd = process.cwd() } = {})
     ],
     userMessage,
     timeoutMs: resolveCallTimeoutMs(input.timeout_ms),
+    reasoningEffort: normalizeEffort(input.reasoning_effort),
   };
 }
 
@@ -69,6 +71,7 @@ export async function runPreparedReview(modelKey, prepared, { config, fetchImpl,
     mode: "review",
     responseFormat,
     timeoutMs: prepared.timeoutMs,
+    reasoningEffort: prepared.reasoningEffort,
     fetchImpl,
     execFileImpl,
     cwd,
@@ -103,6 +106,7 @@ export async function runPreparedReview(modelKey, prepared, { config, fetchImpl,
       mode: "review",
       responseFormat: attempt1.fellBackFromJsonSchema ? { type: "json_object" } : responseFormat,
       timeoutMs: prepared.timeoutMs,
+      reasoningEffort: prepared.reasoningEffort,
       fetchImpl,
       execFileImpl,
       cwd,

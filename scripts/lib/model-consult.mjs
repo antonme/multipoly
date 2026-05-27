@@ -6,6 +6,7 @@ import { CONSULT_SYSTEM_PROMPT, renderConsultUserMessage } from "./prompts.mjs";
 import { assertContentBudget } from "./budget.mjs";
 import { resolveCallTimeoutMs, resolveMaxTokensForModel } from "./config.mjs";
 import { modelSupportsThinking } from "./models.mjs";
+import { normalizeEffort } from "./reasoning.mjs";
 
 export async function prepareConsult(input, { config, cwd = process.cwd() } = {}) {
   const gathered = await gatherConsult({
@@ -33,6 +34,7 @@ export async function prepareConsult(input, { config, cwd = process.cwd() } = {}
       { role: "user", content: renderConsultUserMessage(gathered.prompt, gathered.files) },
     ],
     timeoutMs: resolveCallTimeoutMs(input.timeout_ms),
+    reasoningEffort: normalizeEffort(input.reasoning_effort),
   };
 }
 
@@ -43,6 +45,7 @@ export async function runPreparedConsult(modelKey, prepared, { config, fetchImpl
     messages: prepared.messages,
     mode: "consult",
     timeoutMs: prepared.timeoutMs,
+    reasoningEffort: prepared.reasoningEffort,
     fetchImpl,
     execFileImpl,
     cwd,
