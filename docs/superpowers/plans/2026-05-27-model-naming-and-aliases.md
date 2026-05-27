@@ -415,7 +415,16 @@ In `scripts/lib/models.mjs`:
 
 Run: `node --test --test-reporter=spec tests/config.test.mjs`
 Then: `node --test --test-reporter=spec tests/*.test.mjs`
-Expected: the new tests PASS. **Some existing tests that reference `OPUS_INFO` or the opus auto-registration WILL fail** — that's expected; they're updated in Task 4 (registry merge) and Task 7 (alias tools). If a failing test is purely asserting the old opus auto-registration behavior, update it to the new `claude`-via-`MULTIPOLY_MODELS` behavior as part of this task and note it in the commit.
+Expected: the new tests PASS. **Removing `OPUS_INFO` breaks exactly these existing tests — fix them in THIS task (do not re-add `OPUS_INFO`):**
+
+1. `tests/reasoning.test.mjs:8` — `import { MODEL_INFO, OPUS_INFO } from "../scripts/lib/models.mjs";`. Removing the export makes the WHOLE FILE fail to load (a module-load error, not a single assertion). Fix: drop `OPUS_INFO` from the import. Then delete the regression test at `tests/reasoning.test.mjs:133-143` (`regression: OPUS_INFO has a valid CAPABILITY value…`) — its intent is now covered by the new "claude/codex/gemini/kimi are baked MODEL_INFO entries with capability" test in Task 3 Step 1, and the capability-completeness block at line ~117 already iterates `MODEL_INFO` (which now includes claude/codex/gemini/kimi). Confirm that completeness loop still passes for the new entries (each must have a valid `reasoning` CAPABILITY and concrete `defaultEffort`).
+2. `tests/transport-config.test.mjs` — three opus-auto-registration tests must be converted to the new `claude`-via-`MULTIPOLY_MODELS` path:
+   - `:38-51` (`opus anthropic builtin appears + configured only when ANTHROPIC_API_KEY set`) → rewrite as: with only `ANTHROPIC_API_KEY` set and NO `MULTIPOLY_MODELS=claude`, `claude` is NOT in the registry (baked builtins are opt-in); with `MULTIPOLY_MODELS=claude` + `ANTHROPIC_API_KEY`, `claude` is configured, `transport==="anthropic"` (transport-flip guard, Task 5), `model==="claude-opus-4-7"`, `baseUrl==="https://api.anthropic.com"`, `displayName==="opus (api)"`.
+   - `:53-60` (`opus base URL overridable`) → same, keyed on `claude` with `MULTIPOLY_MODELS=claude` + `MULTIPOLY_CLAUDE_BASE_URL` (and `MULTIPOLY_CLAUDE_TRANSPORT=anthropic` so a base URL is meaningful).
+   - `:254-257` (`registry includes opus only via loadModelRegistry env gate`) → rewrite as `loadModelRegistry({ MULTIPOLY_MODELS: "claude" })` includes `claude` with `transport` per the guard.
+   - The fixture at `:242` uses a fake key value resembling a real Anthropic key (`sk-ant-…`); when rewriting, keep using a short fake value (e.g. `"x"`) to avoid the secret scanner and because the assertions only check presence/length.
+
+Note these fixes in the commit body. If any OTHER test fails, it is genuinely asserting old behavior — fix it the same way (convert to the `claude`/`MULTIPOLY_MODELS` model) rather than restoring `OPUS_INFO`.
 
 - [ ] **Step 5: Commit**
 
@@ -524,6 +533,9 @@ const base = {
     env[`${prefix}_THINKING`] !== undefined && env[`${prefix}_THINKING`] !== ""
       ? parseThinkingFlag(env[`${prefix}_THINKING`])
       : Boolean(baked?.supportsThinking),
+  // Carry the OpenAI-compat token-cap field switch from the baked entry so the
+  // http loader/client can read it for promotable builtins (e.g. mimo in Plan C).
+  ...(baked?.usesMaxCompletionTokens ? { usesMaxCompletionTokens: true } : {}),
 };
 ```
 

@@ -88,7 +88,7 @@ test("MULTIPOLY_MODELS=mimo merges baked base and recognizes XIAOMIMIMO_API_KEY"
 });
 ```
 
-> If Plan B's merge logic copies only a subset of baked fields onto the registry `info` entry, ensure `usesMaxCompletionTokens` and `apiKeyEnv` are among the merged fields (extend the merge in Plan B's loader if needed — see Task 2 note).
+> **Plan B precondition (already satisfied):** Plan B's `loadModelRegistry` merge copies `apiKeyEnv` and (after the review fix) `usesMaxCompletionTokens` onto the registry `info` entry for promotable builtins, and sets `reasoning` from the baked entry. So `info.mimo.{apiKeyEnv,reasoning,usesMaxCompletionTokens}` resolve correctly. If you are building Plan C against a Plan B that predates that fix, add `...(baked?.usesMaxCompletionTokens ? { usesMaxCompletionTokens: true } : {})` to the merge `base` in `loadModelRegistry`.
 
 - [ ] **Step 2: Run to verify failure**
 
@@ -116,7 +116,7 @@ git commit -m "feat: add Xiaomi MiMo as a baked http_thinking_toggle builtin"
 
 `loadHttpModelConfig` builds the frozen per-model config from `info`. Add `usesMaxCompletionTokens: Boolean(info.usesMaxCompletionTokens)` to BOTH the configured and unconfigured return objects (so the client can read it regardless). Keep it out of the anthropic/cli loaders — it's an OpenAI-compat-only concern.
 
-> **Plan B merge dependency:** the registry `info` entry for a promotable builtin must carry `usesMaxCompletionTokens` for `loadHttpModelConfig` to see it. Plan B's `loadModelRegistry` merge builds a fresh `base` object; verify it copies `usesMaxCompletionTokens` from the baked entry (`base.usesMaxCompletionTokens = baked?.usesMaxCompletionTokens`). If Plan B didn't, add that one line here as part of this task and note it in the commit.
+> **Plan B merge dependency (satisfied):** the registry `info` entry for a promotable builtin carries `usesMaxCompletionTokens` because Plan B's merge copies it. `loadHttpModelConfig` receives the MERGED entry (`registry.info[key]`, not `MODEL_INFO.mimo`), so reading `info.usesMaxCompletionTokens` here works. (If building against a pre-fix Plan B, add the copy line to Plan B's loader first — see Task 1's precondition note.)
 
 - [ ] **Step 1: Write the failing test**
 
@@ -161,29 +161,57 @@ git commit -m "feat: thread usesMaxCompletionTokens onto loaded http model confi
 
 Replace the unconditional `body.max_tokens = maxTokens` with a switch on the model config flag.
 
-- [ ] **Step 1: Write the failing test** (follow `tests/client.test.mjs`'s existing fake-fetch capture pattern — it already intercepts the request body to assert wire shape; reuse that harness)
+- [ ] **Step 1: Write the failing test** — use `tests/client.test.mjs`'s EXISTING harness. That file defines `makeFetch({...})` which returns a fetch fn with a `.calls` array; the sent body is read via `JSON.parse(fetchImpl.calls[0].opts.body)`. Configs are hand-built inline objects (NOT `loadConfig`). Mirror the qwen `max_tokens` tests in that file (≈lines 80-163) as your template.
 
 ```javascript
+// tests/client.test.mjs (extend) — reuses the file's makeFetch + inline-config style.
 test("mimo emits max_completion_tokens, not max_tokens", async () => {
-  let sentBody = null;
-  const fakeFetch = makeFakeStreamingFetch((reqBody) => { sentBody = reqBody; }); // use the file's existing helper
-  const config = makeConfig({ // file's existing config builder, or loadConfig:
-    models: { mimo: { key: "mimo", configured: true, transport: "http", model: "mimo-v2.5-pro",
-      baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1", apiKey: "mimo",
-      reasoning: "http_thinking_toggle", reasoningEffort: "high",
-      usesMaxCompletionTokens: true, maxTokens: { review: 8192, consult: 4096 } } },
+  const fetchImpl = makeFetch({});
+  await streamChatCompletion({
+    config: {
+      ...baseConfig,
+      models: {
+        mimo: {
+          configured: true,
+          key: "mimo",
+          displayName: "mimo-v2.5-pro (api)",
+          baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+          apiKey: "mimo",
+          model: "mimo-v2.5-pro",
+          supportsThinking: true,
+          reasoning: CAPABILITY.GLM_TOGGLE,
+          reasoningEffort: "high",
+          usesMaxCompletionTokens: true,
+          maxTokens: { review: 8192, consult: 4096 },
+        },
+      },
+    },
+    modelKey: "mimo",
+    messages: [{ role: "user", content: "hi" }],
+    mode: "review",
+    fetchImpl,
   });
-  await streamChatCompletion({ config, modelKey: "mimo", messages: [{ role: "user", content: "hi" }], mode: "review", fetchImpl: fakeFetch });
-  assert.equal(sentBody.max_completion_tokens, 8192);
-  assert.ok(!("max_tokens" in sentBody));
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.equal(sent.max_completion_tokens, 8192);
+  assert.equal(sent.max_tokens, undefined);
 });
 
-test("glm still emits max_tokens", async () => {
-  // same harness with a glm config (no usesMaxCompletionTokens) → body.max_tokens set, no max_completion_tokens
+test("glm still emits max_tokens, not max_completion_tokens", async () => {
+  const fetchImpl = makeFetch({});
+  await streamChatCompletion({
+    config: baseConfig, // baseConfig's glm has no usesMaxCompletionTokens
+    modelKey: "glm",
+    messages: [{ role: "user", content: "hi" }],
+    mode: "review",
+    fetchImpl,
+  });
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.equal(sent.max_tokens, 8192);
+  assert.equal(sent.max_completion_tokens, undefined);
 });
 ```
 
-> Match the exact fixture/fake-fetch style already used in `tests/client.test.mjs` (it has a streaming-SSE fake and a config builder). Don't invent a new harness — adapt the existing one. If the file lacks a body-capture hook, add a minimal one to the fake fetch.
+> `baseConfig` and `CAPABILITY` are already imported/defined at the top of `tests/client.test.mjs`. Don't invent a new harness — extend this file.
 
 - [ ] **Step 2: Run to verify failure** — body has `max_tokens`, not `max_completion_tokens`.
 
