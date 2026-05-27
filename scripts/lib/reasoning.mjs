@@ -22,3 +22,12 @@ export function thinkingToEffort(raw) {
   if (THINK_OFF.has(v)) return "off";
   throw new MultipolyError("CONFIG", `thinking must be on|off|auto (or 1/0/true/false/yes/no), got ${JSON.stringify(raw)}`);
 }
+
+export function resolveReasoningEffort({ perCall, modelEffort, modelThinking, serverEffort, serverThinking, bakedDefault }) {
+  const chain = [perCall, modelEffort, modelThinking, serverEffort, serverThinking].map(normalizeEffort);
+  for (const lvl of chain) if (lvl !== "inherit") return lvl;
+  if (!EFFORT_LEVELS.includes(bakedDefault)) {
+    throw new MultipolyError("INTERNAL", `baked default effort must be a concrete level, got ${JSON.stringify(bakedDefault)}`);
+  }
+  return bakedDefault;
+}
