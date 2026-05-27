@@ -236,12 +236,11 @@ export function loadModelRegistry(env = process.env) {
     seen.add(key);
     keys.push(key);
     const prefix = envPrefixForModel(key);
-    // For promotable builtins, default the transport to the baked value instead of "http".
-    const transport = parseTransport(
-      env[`${prefix}_TRANSPORT`],
-      `${prefix}_TRANSPORT`,
-      baked?.transport,
-    );
+    // For promotable builtins, use the transport-flip guard; for custom keys,
+    // fall back to "http" as before.
+    const transport = baked
+      ? resolveBuiltinTransport(key, env, prefix, baked)
+      : parseTransport(env[`${prefix}_TRANSPORT`], `${prefix}_TRANSPORT`);
 
     if (baked) {
       // ── Promotable builtin path: merge baked MODEL_INFO base under env overrides ──
@@ -286,8 +285,12 @@ export function loadModelRegistry(env = process.env) {
           );
         }
         base.reasoning = explicitReasoning;
+      // Baked capability wins over transport inference and is carried as-is even across a
+      // transport flip — an operator flipping kimi anthropic→http should also set
+      // MULTIPOLY_KIMI_REASONING. (All current baked entries declare reasoning explicitly,
+      // so the transport-inference arms below are unreached for them but kept defensively.)
       } else if (baked.reasoning) {
-        base.reasoning = baked.reasoning; // baked capability wins over transport inference
+        base.reasoning = baked.reasoning;
       } else if (transport === "anthropic") {
         base.reasoning = CAPABILITY.ANTHROPIC_EFFORT;
       } else if (transport === "http") {
@@ -380,6 +383,68 @@ export function loadModelRegistry(env = process.env) {
 
   loadModelsFileInto(env, { keys, info, seen });
   return { keys: Object.freeze(keys), info: Object.freeze(info) };
+}
+
+/**
+ * Resolve the effective transport for a promotable builtin (claude/codex/etc.)
+ * applying the transport-flip guard for claude:
+ *   - explicit MULTIPOLY_<K>_TRANSPORT always wins
+ *   - claude: if transport unset AND an Anthropic key is present, default to
+ *     "anthropic" (overrides the baked "cli" default). Strictly safer: avoids
+ *     silently routing API keys through the local CLI. Operator who wants CLI
+ *     with an Anthropic key in env sets MULTIPOLY_CLAUDE_TRANSPORT=cli explicitly.
+ *     NOTE: we do not detect CLI auth; unset transport + anthropic key ⇒ anthropic.
+ *   - codex: keeps baked cli (no prior API deployment to protect), just logs
+ *   - all other builtins: fall back to baked transport default
+ * Always emits a structured stderr transport_default log for claude/codex.
+ *
+ * @param {string} key - model key (e.g. "claude", "codex")
+ * @param {object} env - process.env or test env
+ * @param {string} prefix - e.g. "MULTIPOLY_CLAUDE"
+ * @param {object} baked - MODEL_INFO entry for this key
+ * @returns {string} resolved transport
+ */
+function resolveBuiltinTransport(key, env, prefix, baked) {
+  const explicit = (env[`${prefix}_TRANSPORT`] || "").trim();
+  if (explicit) return parseTransport(explicit, `${prefix}_TRANSPORT`);
+
+  if (key === "claude") {
+    const anthropicKeyPresent = firstNonEmpty(env, [
+      "ANTHROPIC_API_KEY",
+      "MULTIPOLY_CLAUDE_API_KEY",
+      "MULTIPOLY_OPUS_API_KEY",
+    ]);
+    const chosen = anthropicKeyPresent ? "anthropic" : (baked?.transport ?? "cli");
+    process.stderr.write(
+      JSON.stringify({
+        event: "transport_default",
+        model: "claude",
+        chosen,
+        reason: anthropicKeyPresent
+          ? "anthropic key present, transport unset"
+          : "no anthropic key; baked default",
+      }) + "\n",
+    );
+    return chosen;
+  }
+
+  if (key === "codex") {
+    const chosen = baked?.transport ?? "cli";
+    const codexKey = firstNonEmpty(env, ["OPENAI_API_KEY", "MULTIPOLY_CODEX_API_KEY"]);
+    if (codexKey) {
+      process.stderr.write(
+        JSON.stringify({
+          event: "transport_default",
+          model: "codex",
+          chosen,
+          reason: "baked default",
+        }) + "\n",
+      );
+    }
+    return chosen;
+  }
+
+  return parseTransport(undefined, `${prefix}_TRANSPORT`, baked?.transport);
 }
 
 function parseTransport(raw, label, fallback = "http") {

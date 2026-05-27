@@ -502,3 +502,28 @@ test("listing an always-on builtin (glm) in MULTIPOLY_MODELS still errors", () =
     /duplicates a builtin/,
   );
 });
+
+// ── Task 5: Transport-flip guard + startup transport log for claude/codex ──
+
+test("claude defaults to anthropic transport when an Anthropic key is present and transport is unset", () => {
+  const { info } = loadModelRegistry({
+    MULTIPOLY_MODELS: "claude",
+    ANTHROPIC_API_KEY: "x",
+  });
+  assert.equal(info.claude.transport, "anthropic");
+  assert.equal(info.claude.displayName, "opus (api)");
+});
+
+test("explicit MULTIPOLY_CLAUDE_TRANSPORT=cli wins over the Anthropic-key guard", () => {
+  const { info } = loadModelRegistry({
+    MULTIPOLY_MODELS: "claude",
+    ANTHROPIC_API_KEY: "x",
+    MULTIPOLY_CLAUDE_TRANSPORT: "cli",
+  });
+  assert.equal(info.claude.transport, "cli");
+});
+
+test("claude with no key and unset transport keeps baked cli", () => {
+  const { info } = loadModelRegistry({ MULTIPOLY_MODELS: "claude" });
+  assert.equal(info.claude.transport, "cli");
+});
