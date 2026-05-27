@@ -155,3 +155,38 @@ test("registry-file: malformed JSON / missing file is a CONFIG error", () => {
     (e) => e.code === "CONFIG",
   );
 });
+
+// ── Part B-6: defaultEffort validation in fileEntryToInfo ─────────────────────
+
+test("registry-file: invalid defaultEffort is a CONFIG error", () => {
+  const path = fileWith({
+    models: {
+      haiku: {
+        transport: "anthropic",
+        model: "claude-haiku-4-5",
+        apiKeyEnv: "MY_HAIKU_KEY",
+        defaultEffort: "turbo", // invalid — not in EFFORT_LEVELS
+      },
+    },
+  });
+  assert.throws(
+    () => loadConfig({ ...glm, MULTIPOLY_MODELS_FILE: path }),
+    (e) => e.code === "CONFIG" && /defaultEffort/i.test(e.message),
+  );
+});
+
+test("registry-file: valid defaultEffort ('high') is accepted and resolves as baked default", () => {
+  const path = fileWith({
+    models: {
+      haiku: {
+        transport: "anthropic",
+        model: "claude-haiku-4-5",
+        apiKeyEnv: "MY_HAIKU_KEY",
+        defaultEffort: "high",
+      },
+    },
+  });
+  // Should not throw; with no env effort overrides, reasoningEffort resolves to the baked default.
+  const c = loadConfig({ ...glm, MULTIPOLY_MODELS_FILE: path, MY_HAIKU_KEY: "sk-x" });
+  assert.equal(c.models.haiku.reasoningEffort, "high");
+});

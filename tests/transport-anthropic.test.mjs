@@ -547,3 +547,76 @@ test("anthropic Task9: ANTHROPIC_EFFORT review mode falls back and KEEPS output_
   assert.equal(callCount, 2, "should have retried once");
   assert.equal(out.fellBackFromJsonSchema, true, "fellBackFromJsonSchema must be true");
 });
+
+// ── Part A-2: Opus latent-400 regression guard ────────────────────────────────
+// ANTHROPIC_EFFORT models (Opus 4.7) must NEVER include budget_tokens in the
+// request body at any effort level. budget_tokens causes a 400 from the API.
+// This guard covers: xhigh, high, medium, low (off → no thinking at all).
+
+for (const effort of ["low", "medium", "high", "xhigh"]) {
+  test(`regression: ANTHROPIC_EFFORT effort=${effort} never sends budget_tokens (latent-400 guard)`, async () => {
+    const cap = {};
+    const { CAPABILITY: CAP } = await import("../scripts/lib/reasoning.mjs");
+    await runModel({
+      config: anthropicConfig({
+        reasoning: CAP.ANTHROPIC_EFFORT,
+        reasoningEffort: effort,
+        consultMax: 16384,
+      }),
+      modelKey: "m",
+      messages,
+      mode: "consult",
+      fetchImpl: anthropicFetch(basicEvents, cap),
+    });
+    const body = cap.body;
+    assert.equal(
+      "budget_tokens" in (body.thinking ?? {}),
+      false,
+      `ANTHROPIC_EFFORT effort=${effort} must never send budget_tokens in thinking, got: ${JSON.stringify(body.thinking)}`,
+    );
+  });
+}
+
+// Also verify the output_config fallback path (review mode) does not add budget_tokens.
+test("regression: ANTHROPIC_EFFORT review mode (output_config fallback path) never sends budget_tokens", async () => {
+  const bodies = [];
+  const { CAPABILITY: CAP } = await import("../scripts/lib/reasoning.mjs");
+  const responseFormat = {
+    type: "json_schema",
+    json_schema: { name: "m_review", strict: true, schema: { type: "object", properties: {}, additionalProperties: false } },
+  };
+  let call = 0;
+  const fetchImpl = async (url, init) => {
+    call++;
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    if (call === 1) {
+      // Simulate output_config.format rejection to exercise the fallback path.
+      return new Response(
+        JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "output_config.format is not supported for this model" } }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      );
+    }
+    const frames = basicEvents.map((e) => enc.encode(`data: ${JSON.stringify(e)}\n\n`));
+    let i = 0;
+    return new Response(
+      new ReadableStream({ pull(c) { if (i < frames.length) c.enqueue(frames[i++]); else c.close(); } }),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+  };
+  await runModel({
+    config: anthropicConfig({ reasoning: CAP.ANTHROPIC_EFFORT, reasoningEffort: "high", reviewMax: 16384 }),
+    modelKey: "m",
+    messages,
+    mode: "review",
+    responseFormat,
+    fetchImpl,
+  });
+  for (const body of bodies) {
+    assert.equal(
+      "budget_tokens" in (body.thinking ?? {}),
+      false,
+      `ANTHROPIC_EFFORT output_config fallback path must never send budget_tokens, got: ${JSON.stringify(body.thinking)}`,
+    );
+  }
+});

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { MultipolyError } from "./errors.mjs";
 import { scanMany, formatHitsForError } from "./secrets.mjs";
-import { CAPABILITY } from "./reasoning.mjs";
+import { CAPABILITY, EFFORT_LEVELS } from "./reasoning.mjs";
 
 // An environment variable NAME (not value): used to validate apiKeyEnv /
 // authTokenEnv, which name the env var whose value a transport reads — the
@@ -418,7 +418,14 @@ function fileEntryToInfo(key, entry, where) {
     base.reasoningVocab = entry.reasoningVocab.trim();
   }
   if (typeof entry.defaultEffort === "string" && entry.defaultEffort.trim()) {
-    base.defaultEffort = entry.defaultEffort.trim();
+    const de = entry.defaultEffort.trim();
+    if (!EFFORT_LEVELS.includes(de)) {
+      throw new MultipolyError(
+        "CONFIG",
+        `${where} defaultEffort must be one of ${EFFORT_LEVELS.join("|")}, got ${JSON.stringify(de)}`,
+      );
+    }
+    base.defaultEffort = de;
   }
 
   if (transport === "cli") {
@@ -490,7 +497,10 @@ export function modelHasReasoningControl(config, key) {
  *   - explicit per-call `thinking` (boolean) wins,
  *   - else config.thinking: "auto" → null (omit the field entirely),
  *     "on" → true, "off" → false,
- *   - else "mode-default": on for review, off for consult.
+ *   - else falls through to false (the old review-on/consult-off "mode-default"
+ *     asymmetry was retired in Task 6; the per-model `reasoningEffort` baseline
+ *     now fully determines reasoning, and this function is only kept for legacy
+ *     callers that have not yet migrated to the capability/effort path).
  *
  * Returns true | false | null. The caller maps that onto its transport's wire
  * shape (GLM `{type:"enabled"|"disabled"}`; Anthropic `{type:"enabled",
