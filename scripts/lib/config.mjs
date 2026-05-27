@@ -266,6 +266,7 @@ function loadHttpModelConfig(env, key, info, serverMaxTokens) {
       baseUrl: baseUrlRaw || null,
       apiKey: null,
       supportsThinking: Boolean(info.supportsThinking),
+      usesMaxCompletionTokens: Boolean(info.usesMaxCompletionTokens),
       maxTokens,
       ...reasoningFields,
     });
@@ -282,6 +283,7 @@ function loadHttpModelConfig(env, key, info, serverMaxTokens) {
     apiKey: keyHit.value,
     apiKeyEnv: keyHit.name,
     supportsThinking: Boolean(info.supportsThinking),
+    usesMaxCompletionTokens: Boolean(info.usesMaxCompletionTokens),
     maxTokens,
     ...reasoningFields,
   });

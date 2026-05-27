@@ -605,3 +605,19 @@ test("MULTIPOLY_MODELS=mimo merges baked base and recognizes XIAOMIMIMO_API_KEY"
   assert.equal(info.mimo.displayName, "mimo-v2.5-pro (api)"); // convention from Plan B
   assert.deepEqual([...info.mimo.apiKeyEnv], ["MULTIPOLY_MIMO_API_KEY", "XIAOMIMIMO_API_KEY"]);
 });
+
+// ── Plan C Task 2: usesMaxCompletionTokens threaded onto loaded http config ──
+
+test("a configured mimo carries usesMaxCompletionTokens on its model config", () => {
+  const config = loadConfig({
+    MULTIPOLY_MODELS: "mimo",
+    MULTIPOLY_MIMO_API_KEY: "mimo", // fake
+  });
+  assert.equal(config.models.mimo.configured, true);
+  assert.equal(config.models.mimo.usesMaxCompletionTokens, true);
+});
+
+test("glm (max_tokens-style) does NOT set usesMaxCompletionTokens", () => {
+  const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "glm" });
+  assert.ok(!config.models.glm.usesMaxCompletionTokens);
+});

@@ -42,7 +42,7 @@ export const MODEL_KEYS = Object.freeze(["glm", "qwen", "deepseek", "composer"])
 
 // Promotable builtins: present in MODEL_INFO but NOT in MODEL_KEYS (opt-in via
 // MULTIPOLY_MODELS). When listed, the registry loader merges the baked MODEL_INFO
-// base under env overrides instead of building from scratch. Plan C adds "mimo".
+// base under env overrides instead of building from scratch.
 const PROMOTABLE_BUILTINS = new Set(["claude", "codex", "gemini", "kimi", "mimo"]);
 
 // The three transports a model can be reached over. `http` is the default
@@ -232,7 +232,7 @@ export function loadModelRegistry(env = process.env) {
     if (RESERVED_MODEL_KEYS.has(key)) {
       throw new MultipolyError("CONFIG", `MULTIPOLY_MODELS entry ${JSON.stringify(key)} is a reserved word.`);
     }
-    // Promotable builtins (claude/codex/gemini/kimi) live in MODEL_INFO but NOT in
+    // Promotable builtins (claude/codex/gemini/kimi/mimo) live in MODEL_INFO but NOT in
     // MODEL_KEYS, so they are not in `seen` yet. Allow them once; error on double-list.
     const baked = PROMOTABLE_BUILTINS.has(key) ? MODEL_INFO[key] : undefined;
     if (seen.has(key) && baked) {
