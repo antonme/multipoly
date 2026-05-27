@@ -484,7 +484,9 @@ test("listing an always-on builtin (glm) in MULTIPOLY_MODELS still errors", () =
 - [ ] **Step 2: Run to verify failure**
 
 Run: `node --test --test-reporter=spec tests/config.test.mjs`
-Expected: FAIL — current loader throws "duplicates a builtin" for `claude` (it's now in `MODEL_INFO`, and the loader's `seen` set or the new merge logic isn't there yet).
+Expected: FAIL — but NOT via a "duplicates a builtin" throw. After Task 3, `claude` is in `MODEL_INFO` but NOT in `MODEL_KEYS`, so the `seen` set (seeded from `MODEL_KEYS`) does NOT contain `claude`. `MULTIPOLY_MODELS=claude` therefore falls into the existing from-scratch custom-model builder, which OVERWRITES `info.claude` with `{ transport:"http", reasoning:"none", displayName:"claude", defaultEffort:"off", … }` — losing every baked value. So the new tests fail on the assertions `info.claude.reasoning === "anthropic_effort"`, `info.claude.transport === "anthropic"`, and `info.claude.displayName === "opus (api)"` (the from-scratch builder produced the wrong values), not on a thrown error. The merge in Step 3 fixes this by intercepting promotable builtins before the from-scratch builder runs.
+
+Additionally, while you are in `MODEL_INFO`, fix two misleading inline comments the Task 3 review flagged (cosmetic): on the `claude` entry change the `reasoning` comment to note it is baked as `anthropic_effort` so the Task 5 transport-flip (cli→anthropic) inherits the right capability; on the `codex` entry the comment says "http transport" but the entry's transport is `cli` — reword to "api flavor maps to openai_effort; cli flavor uses -c model_reasoning_effort". Remove any stray double-blank-line after the `MODEL_INFO` closing brace.
 
 - [ ] **Step 3: Implement the merge in `loadModelRegistry`**
 
