@@ -48,6 +48,18 @@ function buildThinkingField({ supportsThinking, wantThinking, maxTokens, correla
  * schema }). If the model/endpoint rejects it, we transparently retry without
  * it and set fellBackFromJsonSchema=true, leaving the caller's prompt-JSON
  * validate/reprompt loop as the safety net.
+ *
+ * WIRE-FORMAT NOTE (unverified against a live endpoint). The exact request
+ * shapes used here — `output_config.format = { type:"json_schema", schema }`
+ * and `thinking = { type:"enabled", budget_tokens }` — target a future Anthropic
+ * model (claude-opus-4-7) and have NOT been exercised against the live API in
+ * this codebase. They are best-effort and should be re-verified when a real
+ * endpoint is available. The two fields degrade differently on rejection:
+ *   - output_config: a rejection is detected (isStructuredOutputUnsupported) and
+ *     transparently retried without it (prompt-JSON), so a wrong shape self-heals.
+ *   - thinking: there is NO auto-fallback — if the endpoint rejects the thinking
+ *     field, the call surfaces an HTTP error. Disable with MULTIPOLY_THINKING=off
+ *     (or a per-model cap) if a deployment's endpoint doesn't accept it.
  */
 export async function runAnthropicModel({
   config,

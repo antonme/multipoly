@@ -44,6 +44,26 @@ multi-transport work:
   Registration is dependency-injected so it can be unit-tested without real
   signals.
 
+### Maintainability (2026-05-27)
+
+- **Unified tool surface.** `buildTools`, the handler map, and the argument-key
+  validator spec were three functions each independently re-deriving the tool
+  list from the model keys, so adding a tool to one and not the others was a
+  latent runtime mismatch. They now derive from a single `buildServerSurface`
+  (one tool-def list → `{ tools, handlers, toolKeySpec }`), and
+  `createServer(config)` is extracted from `main()` so the server can be driven
+  over a transport.
+- **MCP integration test.** A new in-memory-transport test boots the real
+  server and a real client and exercises `tools/list` plus network-free
+  `tools/call` paths (invalid-argument error envelope, unknown-tool protocol
+  error), with an anti-drift assertion that the advertised tools, handlers, and
+  validator key sets cover exactly the same names.
+- **Anthropic wire-format documented.** The transport now documents that its
+  `output_config.format` and `thinking.budget_tokens` request shapes target a
+  future model and are unverified against a live endpoint, and that — unlike
+  `output_config` — a rejected `thinking` field is not auto-fallback'd (disable
+  with `MULTIPOLY_THINKING=off`).
+
 ### Audit fixes (2026-05-27)
 
 **High priority:**

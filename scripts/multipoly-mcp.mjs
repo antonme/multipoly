@@ -88,10 +88,13 @@ function councilExtraProperties(modelKeys) {
 const BUILTIN_REGISTRY = { keys: MODEL_KEYS, info: MODEL_INFO };
 
 /**
- * Build the advertised tool list for a model registry ({ keys, info }).
- * Defaults to the builtin registry so callers/tests can invoke it with no args.
+ * Single source of truth for the server's tool surface. Each tool's advertised
+ * schema, its runtime allowed-argument-key set, and its handler are defined
+ * together, so the three can't drift out of sync — previously they were built
+ * by three separate functions each re-deriving the tool list from the model
+ * keys, where adding a tool to one and not the others was a latent runtime bug.
  */
-export function buildTools(registry = BUILTIN_REGISTRY) {
+function buildToolDefs(registry) {
   const extra = councilExtraProperties(registry.keys);
   const councilReviewSchema = {
     ...REVIEW_TOOL_SCHEMA,
@@ -102,35 +105,65 @@ export function buildTools(registry = BUILTIN_REGISTRY) {
     properties: { ...CONSULT_TOOL_SCHEMA.properties, ...extra },
   };
 
-  const tools = [];
+  const defs = [];
   for (const key of registry.keys) {
     const displayName = registry.info[key]?.displayName ?? key;
-    tools.push({
+    defs.push({
       name: `${key}_review`,
       description: `Delegate a structured code review to ${displayName}. Supply exactly one of diff_base or paths.`,
       inputSchema: REVIEW_TOOL_SCHEMA,
+      allowedKeys: REVIEW_KEYS,
+      handler: (input, ctx) => handleModelReview(key, input, ctx),
     });
-    tools.push({
+    defs.push({
       name: `${key}_consult`,
       description: `Ask ${displayName} for a design or implementation consultation.`,
       inputSchema: CONSULT_TOOL_SCHEMA,
+      allowedKeys: CONSULT_KEYS,
+      handler: (input, ctx) => handleModelConsult(key, input, ctx),
     });
   }
-  tools.push({
+  defs.push({
     name: "council_review",
     description:
       "Run multiple model reviews in parallel. By default returns each model's findings for you (the calling harness) to merge; " +
       "set `synthesizer` (or MULTIPOLY_SYNTHESIZER) to a model to merge server-side instead. Supply exactly one of diff_base or paths.",
     inputSchema: councilReviewSchema,
+    allowedKeys: new Set([...REVIEW_KEYS, ...COUNCIL_EXTRA_KEYS]),
+    handler: handleCouncilReview,
   });
-  tools.push({
+  defs.push({
     name: "council_consult",
     description:
       "Run multiple model consultations in parallel. By default returns each model's answer for you (the calling harness) to synthesize; " +
       "set `synthesizer` (or MULTIPOLY_SYNTHESIZER) to a model to synthesize server-side instead.",
     inputSchema: councilConsultSchema,
+    allowedKeys: new Set([...CONSULT_KEYS, ...COUNCIL_EXTRA_KEYS]),
+    handler: handleCouncilConsult,
   });
-  return tools;
+  return defs;
+}
+
+/**
+ * Derive the three parallel structures the server needs — the advertised
+ * `tools`, the `handlers` map, and the `toolKeySpec` (allowed argument keys per
+ * tool) — from the single tool-def list, so they always agree.
+ */
+export function buildServerSurface(registry = BUILTIN_REGISTRY) {
+  const defs = buildToolDefs(registry);
+  return {
+    tools: defs.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })),
+    handlers: Object.fromEntries(defs.map((d) => [d.name, d.handler])),
+    toolKeySpec: Object.fromEntries(defs.map((d) => [d.name, d.allowedKeys])),
+  };
+}
+
+/**
+ * Advertised tool list for a model registry ({ keys, info }). Thin wrapper over
+ * buildServerSurface for callers/tests that only want the descriptors.
+ */
+export function buildTools(registry = BUILTIN_REGISTRY) {
+  return buildServerSurface(registry).tools;
 }
 
 /** Derive a tool-building registry ({ keys, info }) from a loaded config. */
@@ -141,6 +174,56 @@ function registryFromConfig(config) {
       config.modelKeys.map((k) => [k, { key: k, displayName: config.models[k]?.displayName ?? k }]),
     ),
   };
+}
+
+/**
+ * Build the MCP Server for a loaded config: advertises the registry's tools and
+ * routes tools/call through the shared handler map + validator (all from one
+ * buildServerSurface call, so they can't drift). Extracted from main() so it
+ * can be driven over an in-memory transport in tests. Does NOT connect a
+ * transport — the caller does that.
+ */
+export function createServer(config) {
+  const surface = buildServerSurface(registryFromConfig(config));
+  const modelKeys = config.modelKeys;
+
+  const server = new Server(
+    { name: "multipoly", version: "0.1.0" },
+    { capabilities: { tools: {} } },
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: surface.tools }));
+
+  server.setRequestHandler(CallToolRequestSchema, async (req) => {
+    const { name, arguments: input } = req.params;
+    const handler = surface.handlers[name];
+    if (!handler) {
+      // Unknown tool is a protocol error, not an application result.
+      throw new McpError(ErrorCode.MethodNotFound, `unknown tool: ${name}`);
+    }
+    try {
+      validateToolInput(name, input, modelKeys, surface.toolKeySpec);
+      // Log the effective timeout so operators can spot MCP-client-tool-timeout mismatches.
+      const effectiveTimeoutMs = input?.timeout_ms ?? config.timeoutMs;
+      process.stderr.write(
+        JSON.stringify({
+          event: "tool_call",
+          tool: name,
+          correlationId: null, // filled on error by the handler chain
+          timeout_ms: effectiveTimeoutMs,
+          client_warning:
+            "MCP client may enforce its own lower tool-call timeout (e.g. Codex ~60s, Claude Code ~60s). " +
+            "If the client kills this call before the upstream timeout, raise the client's tool_timeout_sec / MCP_TOOL_TIMEOUT.",
+        }) + "\n",
+      );
+      const { result, reasoning } = await handler(input || {}, { config });
+      return buildSuccessResponse(name, result, reasoning, config);
+    } catch (e) {
+      return buildErrorResponse(e);
+    }
+  });
+
+  return server;
 }
 
 function main() {
@@ -166,49 +249,7 @@ function main() {
     process.exit(1);
   }
 
-  const server = new Server(
-    { name: "multipoly", version: "0.1.0" },
-    { capabilities: { tools: {} } },
-  );
-
-  // Tools, handlers, and key-validation spec all reflect the loaded registry
-  // (builtins + any custom models from MULTIPOLY_MODELS), so env-defined models
-  // are fully exposed — including unknown-argument rejection for every tool.
-  const modelKeys = config.modelKeys;
-  const tools = buildTools(registryFromConfig(config));
-  const handlers = buildHandlers(modelKeys);
-  const toolKeySpec = buildToolKeySpec(modelKeys);
-
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
-
-  server.setRequestHandler(CallToolRequestSchema, async (req) => {
-    const { name, arguments: input } = req.params;
-    const handler = handlers[name];
-    if (!handler) {
-      // Unknown tool is a protocol error, not an application result.
-      throw new McpError(ErrorCode.MethodNotFound, `unknown tool: ${name}`);
-    }
-    try {
-      validateToolInput(name, input, modelKeys, toolKeySpec);
-      // Log the effective timeout so operators can spot MCP-client-tool-timeout mismatches.
-      const effectiveTimeoutMs = input?.timeout_ms ?? config.timeoutMs;
-      process.stderr.write(
-        JSON.stringify({
-          event: "tool_call",
-          tool: name,
-          correlationId: null, // filled on error by the handler chain
-          timeout_ms: effectiveTimeoutMs,
-          client_warning:
-            "MCP client may enforce its own lower tool-call timeout (e.g. Codex ~60s, Claude Code ~60s). " +
-            "If the client kills this call before the upstream timeout, raise the client's tool_timeout_sec / MCP_TOOL_TIMEOUT.",
-        }) + "\n",
-      );
-      const { result, reasoning } = await handler(input || {}, { config });
-      return buildSuccessResponse(name, result, reasoning, config);
-    } catch (e) {
-      return buildErrorResponse(e);
-    }
-  });
+  const server = createServer(config);
 
   const transport = new StdioServerTransport();
   server.connect(transport).catch((e) => {
@@ -233,17 +274,6 @@ function main() {
   }
 }
 
-function buildHandlers(modelKeys) {
-  return Object.fromEntries([
-    ...modelKeys.flatMap((key) => [
-      [`${key}_review`, (input, ctx) => handleModelReview(key, input, ctx)],
-      [`${key}_consult`, (input, ctx) => handleModelConsult(key, input, ctx)],
-    ]),
-    ["council_review", handleCouncilReview],
-    ["council_consult", handleCouncilConsult],
-  ]);
-}
-
 /**
  * Minimal runtime input validation for the tools. We do this ourselves
  * rather than rely on a heavy JSON-schema lib; the surface is tiny.
@@ -253,19 +283,13 @@ const CONSULT_KEYS = new Set(["prompt", "paths", "timeout_ms"]);
 const COUNCIL_EXTRA_KEYS = new Set(["models", "synthesizer", "include_individual_results"]);
 
 /**
- * Build the tool-key spec (allowed argument keys per tool name) from the
- * active model registry so custom and opus models are covered, not just the
- * four builtins. Called in main() once the config is loaded.
+ * Allowed argument keys per tool name, for the hand-rolled runtime validator.
+ * Derived from the same tool-def source as buildTools (via buildServerSurface)
+ * so the advertised schema and the validator key sets can't disagree. `info` is
+ * unused for key sets, so an empty info map suffices here.
  */
 export function buildToolKeySpec(modelKeys) {
-  return Object.fromEntries([
-    ...modelKeys.flatMap((key) => [
-      [`${key}_review`, REVIEW_KEYS],
-      [`${key}_consult`, CONSULT_KEYS],
-    ]),
-    ["council_review", new Set([...REVIEW_KEYS, ...COUNCIL_EXTRA_KEYS])],
-    ["council_consult", new Set([...CONSULT_KEYS, ...COUNCIL_EXTRA_KEYS])],
-  ]);
+  return buildServerSurface({ keys: modelKeys, info: {} }).toolKeySpec;
 }
 
 function validateToolInput(name, raw, modelKeys, toolKeySpec) {
