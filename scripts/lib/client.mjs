@@ -57,7 +57,13 @@ export async function streamChatCompletion({
     stream: true,
   };
   const maxTokens = resolveMaxTokensForModel(config, effectiveModelKey, mode);
-  if (maxTokens !== undefined) body.max_tokens = maxTokens;
+  if (maxTokens !== undefined) {
+    // Some OpenAI-compatible providers (e.g. Xiaomi MiMo) reject the legacy `max_tokens`
+    // field and require `max_completion_tokens`. The per-model flag is baked in MODEL_INFO
+    // and threaded onto the config by loadHttpModelConfig.
+    if (modelConfig.usesMaxCompletionTokens) body.max_completion_tokens = maxTokens;
+    else body.max_tokens = maxTokens;
+  }
 
   // Capability-dispatch: resolve the effective effort and merge the
   // provider-specific fields onto the body root (raw fetch — no extra_body).
