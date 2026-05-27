@@ -6,7 +6,7 @@ import {
   resolveCallTimeoutMs,
   TIMEOUT_BOUNDS,
 } from "../scripts/lib/config.mjs";
-import { MODEL_INFO, MODEL_KEYS } from "../scripts/lib/models.mjs";
+import { MODEL_INFO, MODEL_KEYS, loadModelRegistry } from "../scripts/lib/models.mjs";
 
 const base = { GLM_API_KEY: "test-key" };
 
@@ -377,13 +377,15 @@ test("config: MULTIPOLY_MODELS registers an env-defined custom model", () => {
 });
 
 test("config: a custom model missing its base URL is unconfigured, not fatal", () => {
+  // Use a genuinely-custom key (not a promotable builtin) — custom keys have no
+  // baked defaultBaseUrl, so a missing BASE_URL keeps the model unconfigured.
   const c = loadConfig({
     MULTIPOLY_GLM_API_KEY: "g",
-    MULTIPOLY_MODELS: "kimi",
-    MULTIPOLY_KIMI_API_KEY: "k",
-    MULTIPOLY_KIMI_MODEL: "kimi-k2",
+    MULTIPOLY_MODELS: "mymodel",
+    MULTIPOLY_MYMODEL_API_KEY: "k",
+    MULTIPOLY_MYMODEL_MODEL: "my-v1",
   });
-  assert.equal(c.models.kimi.configured, false);
+  assert.equal(c.models.mymodel.configured, false);
   assert.equal(c.models.glm.configured, true);
 });
 
@@ -471,4 +473,32 @@ test("OPUS_INFO is no longer exported (folded into claude)", async () => {
 test("baked builtins are NOT auto-registered (MODEL_KEYS unchanged)", async () => {
   const { MODEL_KEYS: keys } = await import("../scripts/lib/models.mjs");
   assert.deepEqual([...keys], ["glm", "qwen", "deepseek", "composer"]);
+});
+
+// ── Task 4: Registry merge for baked builtins ──
+
+test("MULTIPOLY_MODELS=claude merges baked MODEL_INFO base (capability, base name)", () => {
+  const { keys, info } = loadModelRegistry({
+    MULTIPOLY_MODELS: "claude",
+    MULTIPOLY_CLAUDE_TRANSPORT: "anthropic",
+    MULTIPOLY_CLAUDE_API_KEY: "x", // fake; just needs to be present for downstream config
+  });
+  assert.ok(keys.includes("claude"));
+  assert.equal(info.claude.reasoning, "anthropic_effort"); // baked
+  assert.equal(info.claude.transport, "anthropic"); // env override applied
+  // display name follows the convention for the chosen transport:
+  assert.equal(info.claude.displayName, "opus (api)");
+});
+
+test("MULTIPOLY_MODELS=claude with default (cli) transport names it 'opus (claude cli)'", () => {
+  const { info } = loadModelRegistry({ MULTIPOLY_MODELS: "claude" });
+  assert.equal(info.claude.transport, "cli");
+  assert.equal(info.claude.displayName, "opus (claude cli)");
+});
+
+test("listing an always-on builtin (glm) in MULTIPOLY_MODELS still errors", () => {
+  assert.throws(
+    () => loadModelRegistry({ MULTIPOLY_MODELS: "glm" }),
+    /duplicates a builtin/,
+  );
 });
