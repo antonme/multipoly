@@ -1,7 +1,14 @@
 import { MultipolyError, newCorrelationId } from "./errors.mjs";
 import { parseSseStream } from "./sse.mjs";
 import { resolveMaxTokensForModel } from "./config.mjs";
-import { modelSupportsThinking, resolveThinkingPreference } from "./models.mjs";
+import { modelCapability, MODEL_INFO } from "./models.mjs";
+import {
+  CAPABILITY,
+  resolveReasoningEffort,
+  effortToGlmThinking,
+  effortToOpenAiFields,
+  effortToQwenFields,
+} from "./reasoning.mjs";
 
 /**
  * GLM streaming chat completion client.
@@ -44,9 +51,6 @@ export async function streamChatCompletion({
     );
   }
 
-  // Resolve effective thinking (shared with the anthropic transport).
-  const wantThinking = resolveThinkingPreference({ thinking, configThinking: config.thinking, mode });
-
   const body = {
     model: modelConfig.model,
     messages,
@@ -54,13 +58,25 @@ export async function streamChatCompletion({
   };
   const maxTokens = resolveMaxTokensForModel(config, effectiveModelKey, mode);
   if (maxTokens !== undefined) body.max_tokens = maxTokens;
-  const supportsThinking = modelConfig.supportsThinking ?? modelSupportsThinking(config, effectiveModelKey);
-  if (supportsThinking && wantThinking === true) body.thinking = { type: "enabled" };
-  else if (supportsThinking && wantThinking === false) body.thinking = { type: "disabled" };
 
-  // Pass through per-call reasoningEffort so the transport boundary receives it.
-  // Tasks 8-10 will replace this passthrough with capability-dispatched request fields.
-  if (reasoningEffort !== undefined) body.reasoningEffort = reasoningEffort;
+  // Capability-dispatch: resolve the effective effort and merge the
+  // provider-specific fields onto the body root (raw fetch — no extra_body).
+  const cap = modelConfig.reasoning ?? modelCapability(config, effectiveModelKey);
+  // bakedDefault: use the model config's resolved baseline; fall back to the
+  // static MODEL_INFO defaultEffort for hand-built test configs without a
+  // resolved reasoningEffort. "off" is the safe fallback for custom models.
+  const bakedDefault = modelConfig.reasoningEffort ?? MODEL_INFO[effectiveModelKey]?.defaultEffort ?? "off";
+  const effort = resolveReasoningEffort({
+    perCall: reasoningEffort,
+    modelEffort: modelConfig.reasoningEffort,
+    bakedDefault,
+  });
+  let reasoningFields = null;
+  if (cap === CAPABILITY.GLM_TOGGLE) reasoningFields = effortToGlmThinking(effort);
+  else if (cap === CAPABILITY.OPENAI_EFFORT) reasoningFields = effortToOpenAiFields(effort, { vocab: modelConfig.reasoningVocab });
+  else if (cap === CAPABILITY.QWEN_BUDGET) reasoningFields = effortToQwenFields(effort, { maxTokens });
+  // NONE and other capabilities: add nothing
+  if (reasoningFields) Object.assign(body, reasoningFields);
 
   const doRequest = async (rf) => {
     const reqBody = { ...body };
@@ -150,6 +166,14 @@ export async function streamChatCompletion({
       // Narrow fallback: only on an explicit "unsupported" signal.
       fellBack = true;
       result = await attempt({ type: "json_object" });
+    } else if (looksLikeReasoningEffortError(e) && "reasoning_effort" in body) {
+      // Some providers reject the request when they don't understand
+      // reasoning_effort. Retry once without it and log a structured event.
+      delete body.reasoning_effort;
+      process.stderr.write(
+        JSON.stringify({ event: "reasoning_effort_unsupported", model: effectiveModelKey, correlationId }) + "\n",
+      );
+      result = await attempt(responseFormat);
     } else {
       throw e;
     }
@@ -272,6 +296,31 @@ function isJsonSchemaUnsupported(err) {
     "not available",
     "not implemented",
     "unavailable",
+  ];
+  return unsupportedPhrases.some((p) => msg.includes(p));
+}
+
+/**
+ * Detect a provider rejection caused by an unrecognized `reasoning_effort`
+ * field. Mirrors the isJsonSchemaUnsupported pattern: only fires on a 4xx
+ * whose body mentions "reasoning_effort" with an unsupported signal.
+ */
+function looksLikeReasoningEffortError(err) {
+  if (!(err instanceof MultipolyError)) return false;
+  if (err.code !== "HTTP") return false;
+  const status = err.details?.status;
+  if (status !== 400 && status !== 422) return false;
+  const msg = `${err.message} ${JSON.stringify(err.details?.body ?? "")}`.toLowerCase();
+  if (!msg.includes("reasoning_effort")) return false;
+  const unsupportedPhrases = [
+    "not supported",
+    "does not support",
+    "not available",
+    "not implemented",
+    "unavailable",
+    "unknown",
+    "unrecognized",
+    "invalid",
   ];
   return unsupportedPhrases.some((p) => msg.includes(p));
 }

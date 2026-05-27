@@ -275,11 +275,15 @@ test("effort-threading: runPreparedReview forwards reasoningEffort=low to transp
 
     await runPreparedReview("glm", prepared, { config: glmConfig, fetchImpl });
 
-    // Verify transport received reasoningEffort in the request body
+    // After Task 8: capability-dispatched fields replace the raw reasoningEffort key.
+    // GLM (GLM_TOGGLE capability) + effort="low" → thinking:{type:"enabled"}.
+    // The junk body.reasoningEffort passthrough from Task 7 must be gone.
     assert.ok(fetchImpl.calls.length >= 1, "at least one fetch call expected");
     const body = fetchImpl.calls[0].body;
-    assert.equal(body.reasoningEffort, "low",
-      "streamChatCompletion should forward reasoningEffort to the HTTP body");
+    assert.deepEqual(body.thinking, { type: "enabled" },
+      "GLM + low effort → thinking:enabled dispatched onto body");
+    assert.equal("reasoningEffort" in body, false,
+      "raw reasoningEffort key must not appear in the HTTP body after Task 8");
   } finally {
     process.chdir(prev);
   }
@@ -301,13 +305,13 @@ test("effort-threading: runPreparedReview without reasoning_effort → transport
 
     assert.ok(fetchImpl.calls.length >= 1);
     const body = fetchImpl.calls[0].body;
-    // "inherit" means fall back to model baseline (handled by transports in Tasks 8-10).
-    // The transport boundary receives "inherit" (or undefined) for this case.
-    const received = body.reasoningEffort;
-    assert.ok(
-      received === "inherit" || received === undefined,
-      `expected "inherit" or undefined, got ${JSON.stringify(received)}`,
-    );
+    // After Task 8: "inherit" falls through to the model baseline (GLM "high").
+    // GLM (GLM_TOGGLE) + high → thinking:{type:"enabled"}.
+    // The raw reasoningEffort key must NOT appear in the HTTP body.
+    assert.deepEqual(body.thinking, { type: "enabled" },
+      "GLM baseline high → thinking:enabled when per-call is inherit");
+    assert.equal("reasoningEffort" in body, false,
+      "raw reasoningEffort key must not appear in the HTTP body after Task 8");
   } finally {
     process.chdir(prev);
   }
@@ -327,9 +331,13 @@ test("effort-threading: runPreparedConsult forwards reasoningEffort=xhigh to tra
 
     await runPreparedConsult("glm", prepared, { config: glmConfig, fetchImpl });
 
+    // After Task 8: GLM (GLM_TOGGLE) + xhigh → thinking:{type:"enabled"}.
     assert.ok(fetchImpl.calls.length >= 1);
     const body = fetchImpl.calls[0].body;
-    assert.equal(body.reasoningEffort, "xhigh");
+    assert.deepEqual(body.thinking, { type: "enabled" },
+      "GLM + xhigh effort → thinking:enabled dispatched onto body");
+    assert.equal("reasoningEffort" in body, false,
+      "raw reasoningEffort key must not appear in the HTTP body after Task 8");
   } finally {
     process.chdir(prev);
   }
@@ -363,13 +371,16 @@ test("effort-threading: council review with reasoning_effort=low → each member
     assert.ok(bodiesByModel.glm.length >= 1, "glm was called");
     assert.ok(bodiesByModel.composer.length >= 1, "composer was called");
 
-    // GLM member should receive reasoningEffort: "low"
-    assert.equal(bodiesByModel.glm[0].reasoningEffort, "low",
-      "glm transport should receive reasoningEffort='low'");
-
-    // Composer member should also receive reasoningEffort: "low"
-    assert.equal(bodiesByModel.composer[0].reasoningEffort, "low",
-      "composer transport should receive reasoningEffort='low'");
+    // After Task 8: per-call effort="low" is capability-dispatched.
+    // GLM (GLM_TOGGLE) + low → thinking:{type:"enabled"} on body root.
+    assert.deepEqual(bodiesByModel.glm[0].thinking, { type: "enabled" },
+      "glm transport should receive thinking:enabled for low effort (GLM_TOGGLE)");
+    // Composer (NONE capability) receives no reasoning fields.
+    assert.equal(bodiesByModel.composer[0].thinking, undefined,
+      "composer (NONE) should receive no thinking field");
+    // Neither should have the raw reasoningEffort passthrough key.
+    assert.equal("reasoningEffort" in bodiesByModel.glm[0], false);
+    assert.equal("reasoningEffort" in bodiesByModel.composer[0], false);
   } finally {
     process.chdir(prev);
   }
@@ -399,10 +410,14 @@ test("effort-threading: council consult with reasoning_effort=low → each membe
     assert.ok(bodiesByModel.glm.length >= 1, "glm was called");
     assert.ok(bodiesByModel.composer.length >= 1, "composer was called");
 
-    assert.equal(bodiesByModel.glm[0].reasoningEffort, "low",
-      "glm transport should receive reasoningEffort='low'");
-    assert.equal(bodiesByModel.composer[0].reasoningEffort, "low",
-      "composer transport should receive reasoningEffort='low'");
+    // After Task 8: GLM (GLM_TOGGLE) + low → thinking:enabled.
+    assert.deepEqual(bodiesByModel.glm[0].thinking, { type: "enabled" },
+      "glm transport should receive thinking:enabled for low effort (GLM_TOGGLE)");
+    // Composer (NONE) receives no reasoning fields.
+    assert.equal(bodiesByModel.composer[0].thinking, undefined,
+      "composer (NONE) should receive no thinking field");
+    assert.equal("reasoningEffort" in bodiesByModel.glm[0], false);
+    assert.equal("reasoningEffort" in bodiesByModel.composer[0], false);
   } finally {
     process.chdir(prev);
   }
