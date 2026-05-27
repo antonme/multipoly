@@ -598,6 +598,51 @@ test("client[Task8]: NONE capability → no reasoning fields added to body", asy
   assert.equal("reasoningEffort" in sent, false);
 });
 
+test("client: mimo emits max_completion_tokens, not max_tokens", async () => {
+  const fetchImpl = makeFetch({});
+  await streamChatCompletion({
+    config: {
+      ...baseConfig,
+      models: {
+        mimo: {
+          configured: true,
+          key: "mimo",
+          displayName: "mimo-v2.5-pro (api)",
+          baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+          apiKey: "mimo",
+          model: "mimo-v2.5-pro",
+          supportsThinking: true,
+          reasoning: CAPABILITY.GLM_TOGGLE,
+          reasoningEffort: "high",
+          usesMaxCompletionTokens: true,
+          maxTokens: { review: 8192, consult: 4096 },
+        },
+      },
+    },
+    modelKey: "mimo",
+    messages: [{ role: "user", content: "hi" }],
+    mode: "review",
+    fetchImpl,
+  });
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.equal(sent.max_completion_tokens, 8192);
+  assert.equal(sent.max_tokens, undefined);
+});
+
+test("client: glm still emits max_tokens, not max_completion_tokens", async () => {
+  const fetchImpl = makeFetch({});
+  await streamChatCompletion({
+    config: baseConfig, // baseConfig's glm has no usesMaxCompletionTokens
+    modelKey: "glm",
+    messages: [{ role: "user", content: "hi" }],
+    mode: "review",
+    fetchImpl,
+  });
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.equal(sent.max_tokens, 8192);
+  assert.equal(sent.max_completion_tokens, undefined);
+});
+
 test("client[Task8]: reasoning_effort rejection retries once without it and succeeds", async () => {
   let calls = 0;
   const fetchImpl = async (url, opts) => {

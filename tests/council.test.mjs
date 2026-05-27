@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { handleCouncilConsult, handleCouncilReview } from "../scripts/lib/council.mjs";
+import { handleCouncilConsult, handleCouncilReview, resolveCouncilModels } from "../scripts/lib/council.mjs";
 
 const execFileP = promisify(execFile);
 const enc = new TextEncoder();
@@ -756,4 +756,43 @@ test("council consult: synthesis failure preserves member results in error detai
   } finally {
     process.chdir(prev);
   }
+});
+
+// ── Task 7: Lenient alias resolution for council models[] ──
+
+// Hand-built minimal config for direct resolveCouncilModels unit tests.
+// (resolveCouncilModels is exported for direct unit testing per the plan.)
+function makeAliasConfig(keys) {
+  const models = {};
+  for (const k of keys) {
+    models[k] = { configured: true, key: k };
+  }
+  return { modelKeys: keys, models };
+}
+
+test("council: resolveCouncilModels resolves aliased member names (openai→codex, zhipu→glm)", () => {
+  // "openai" is an alias for "codex"; "zhipu" is an alias for "glm"
+  const cfg = makeAliasConfig(["codex", "glm", "qwen"]);
+  const resolved = resolveCouncilModels({ models: ["openai", "zhipu"] }, cfg);
+  assert.deepEqual(resolved.sort(), ["codex", "glm"].sort());
+});
+
+test("council: resolveCouncilModels dedups after alias collapse (gpt+codex → [codex] → <2 → error)", () => {
+  // "gpt" aliases to "codex"; "codex" is already codex — both resolve to the same key.
+  // After dedup: only one distinct model → INVALID_INPUT (needs ≥2).
+  const cfg = makeAliasConfig(["codex", "glm"]);
+  assert.throws(
+    () => resolveCouncilModels({ models: ["gpt", "codex"] }, cfg),
+    (e) => e.code === "INVALID_INPUT" && /at least two distinct/.test(e.message),
+    "alias collapse to <2 distinct models should throw INVALID_INPUT",
+  );
+});
+
+test("council: resolveCouncilModels errors with did-you-mean hint on unknown member", () => {
+  const cfg = makeAliasConfig(["codex", "glm"]);
+  assert.throws(
+    () => resolveCouncilModels({ models: ["codexx", "glm"] }, cfg),
+    (e) => e.code === "INVALID_INPUT" && /did you mean.*codex/i.test(e.message),
+    "near-miss member name should produce a did-you-mean hint",
+  );
 });

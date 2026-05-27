@@ -10,6 +10,8 @@ import {
   modelCapability,
 } from "./models.mjs";
 import { resolveReasoningEffort, thinkingToEffort, CAPABILITY } from "./reasoning.mjs";
+import { resolveModelAlias } from "./aliases.mjs";
+import { computeDisplayName } from "./display-name.mjs";
 
 const ENDPOINT_PROFILES = Object.freeze({
   "zai-coding-plan": "https://api.z.ai/api/coding/paas/v4",
@@ -199,6 +201,20 @@ function parseCwdMode(raw, label) {
   return v;
 }
 
+/**
+ * Resolve the display name for a model info entry.
+ * When the entry has a `baseName` (all builtins), apply the convention
+ * "<baseName> (<transport-suffix>)" via computeDisplayName.
+ * Otherwise fall back to `info.displayName`, then `key`.
+ * This ensures ALL builtins — both always-on (glm/qwen/deepseek/composer) and
+ * promotable (claude/codex/gemini/kimi/mimo) — surface convention-form names
+ * from the config-loader path without touching MODEL_INFO literals.
+ */
+function resolveDisplayName(info, transport) {
+  if (info.baseName) return computeDisplayName(info.baseName, transport, info.cliKind);
+  return info.displayName ?? info.key;
+}
+
 // Dispatch per-model config loading by the registry-declared transport. Each
 // branch returns a frozen config with a `transport` discriminant the runModel
 // dispatcher reads. http = OpenAI-compatible; anthropic = native Messages;
@@ -254,10 +270,12 @@ function loadHttpModelConfig(env, key, info, serverMaxTokens) {
     reasoningEffort,
   };
 
+  const displayName = resolveDisplayName(info, "http");
+
   if (missing.length > 0) {
     return Object.freeze({
       key,
-      displayName: info.displayName,
+      displayName,
       transport: "http",
       configured: false,
       missing: Object.freeze(missing),
@@ -265,6 +283,7 @@ function loadHttpModelConfig(env, key, info, serverMaxTokens) {
       baseUrl: baseUrlRaw || null,
       apiKey: null,
       supportsThinking: Boolean(info.supportsThinking),
+      usesMaxCompletionTokens: Boolean(info.usesMaxCompletionTokens),
       maxTokens,
       ...reasoningFields,
     });
@@ -272,7 +291,7 @@ function loadHttpModelConfig(env, key, info, serverMaxTokens) {
 
   return Object.freeze({
     key,
-    displayName: info.displayName,
+    displayName,
     transport: "http",
     configured: true,
     missing: Object.freeze([]),
@@ -281,6 +300,7 @@ function loadHttpModelConfig(env, key, info, serverMaxTokens) {
     apiKey: keyHit.value,
     apiKeyEnv: keyHit.name,
     supportsThinking: Boolean(info.supportsThinking),
+    usesMaxCompletionTokens: Boolean(info.usesMaxCompletionTokens),
     maxTokens,
     ...reasoningFields,
   });
@@ -314,7 +334,7 @@ function loadAnthropicModelConfig(env, key, info, serverMaxTokens) {
 
   const common = {
     key,
-    displayName: info.displayName,
+    displayName: resolveDisplayName(info, "anthropic"),
     transport: "anthropic",
     model,
     anthropicVersion: ANTHROPIC_VERSION,
@@ -396,7 +416,7 @@ function loadCliModelConfig(env, key, info, serverMaxTokens) {
 
   return Object.freeze({
     key,
-    displayName: info.displayName,
+    displayName: resolveDisplayName(info, "cli"),
     transport: "cli",
     cliKind,
     binary,
@@ -428,15 +448,14 @@ export const SYNTHESIZER_FALLBACK_ORDER = Object.freeze(["qwen", "deepseek", "gl
 
 /**
  * Normalize a synthesizer choice string.
- *   - harness|none|caller → "harness" (defer to the calling harness)
- *   - a known model key   → that key
+ *   - harness|none|caller → "harness" (defer to the calling harness); checked FIRST
+ *   - a known model key or alias thereof → that key (via resolveModelAlias)
  *   - anything else       → null (caller decides which error code to raise)
  */
 export function normalizeSynthesizerChoice(raw, modelKeys = MODEL_KEYS) {
   const v = String(raw).toLowerCase();
-  if (HARNESS_ALIASES.has(v)) return HARNESS_SENTINEL;
-  if (modelKeys.includes(v)) return v;
-  return null;
+  if (HARNESS_ALIASES.has(v)) return HARNESS_SENTINEL; // sentinels first — never alias-resolved
+  return resolveModelAlias(raw, modelKeys);
 }
 
 /**

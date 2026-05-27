@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { MultipolyError } from "./errors.mjs";
 import { scanMany, formatHitsForError } from "./secrets.mjs";
 import { CAPABILITY, EFFORT_LEVELS } from "./reasoning.mjs";
+import { computeDisplayName } from "./display-name.mjs";
 
 // An environment variable NAME (not value): used to validate apiKeyEnv /
 // authTokenEnv, which name the env var whose value a transport reads — the
@@ -39,6 +40,11 @@ const RESERVED_MODEL_KEYS = new Set([
 
 export const MODEL_KEYS = Object.freeze(["glm", "qwen", "deepseek", "composer"]);
 
+// Promotable builtins: present in MODEL_INFO but NOT in MODEL_KEYS (opt-in via
+// MULTIPOLY_MODELS). When listed, the registry loader merges the baked MODEL_INFO
+// base under env overrides instead of building from scratch.
+const PROMOTABLE_BUILTINS = new Set(["claude", "codex", "gemini", "kimi", "mimo"]);
+
 // The three transports a model can be reached over. `http` is the default
 // OpenAI-compatible streaming client; `anthropic` is the native Messages API;
 // `cli` shells out to a local read-only agent harness.
@@ -65,6 +71,7 @@ export const ANTHROPIC_VERSION = "2023-06-01";
 export const MODEL_INFO = Object.freeze({
   glm: Object.freeze({
     key: "glm",
+    baseName: "glm-5.1",
     displayName: "GLM 5.1",
     transport: "http",
     defaultModel: "glm-5.1",
@@ -76,6 +83,7 @@ export const MODEL_INFO = Object.freeze({
   }),
   qwen: Object.freeze({
     key: "qwen",
+    baseName: "qwen3.7-max",
     displayName: "Qwen 3.7 Max",
     transport: "http",
     defaultModel: "qwen3.7max",
@@ -87,6 +95,7 @@ export const MODEL_INFO = Object.freeze({
   }),
   deepseek: Object.freeze({
     key: "deepseek",
+    baseName: "deepseek-v4-pro",
     displayName: "DeepSeek V4 Pro",
     transport: "http",
     defaultModel: "deepseek-v4-pro",
@@ -102,6 +111,7 @@ export const MODEL_INFO = Object.freeze({
   // operator opts in with MULTIPOLY_COMPOSER_ENABLED (see CHANGELOG migration).
   composer: Object.freeze({
     key: "composer",
+    baseName: "composer-2.5",
     displayName: "Composer 2.5",
     transport: "cli",
     cliKind: "cursor",
@@ -111,21 +121,71 @@ export const MODEL_INFO = Object.freeze({
     reasoning: CAPABILITY.NONE,
     defaultEffort: "off",
   }),
-});
-
-// Native-Anthropic builtin, registered only when an Anthropic key is present
-// (see loadModelRegistry). Kept out of MODEL_KEYS so default deployments keep
-// the four-builtin registry unchanged.
-export const OPUS_INFO = Object.freeze({
-  key: "opus",
-  displayName: "Claude Opus 4.7",
-  transport: "anthropic",
-  defaultModel: "claude-opus-4-7",
-  defaultBaseUrl: ANTHROPIC_DEFAULT_BASE_URL,
-  apiKeyEnv: ["MULTIPOLY_OPUS_API_KEY", "ANTHROPIC_API_KEY"],
-  supportsThinking: true,
-  reasoning: CAPABILITY.ANTHROPIC_EFFORT,
-  defaultEffort: "xhigh",
+  // ── Promotable builtins: baked metadata, NOT auto-registered ──────────────
+  // These entries carry capability/baseName/defaultEffort so operator deployments
+  // that list them in MULTIPOLY_MODELS don't need per-model display env.
+  // They are intentionally absent from MODEL_KEYS (opt-in via MULTIPOLY_MODELS).
+  claude: Object.freeze({
+    key: "claude",
+    baseName: "opus",                // display base; full name computed by transport
+    transport: "cli",
+    cliKind: "claude",
+    defaultModel: "claude-opus-4-7",
+    defaultBaseUrl: null,            // anthropic transport falls back to ANTHROPIC_DEFAULT_BASE_URL in config
+    apiKeyEnv: ["MULTIPOLY_CLAUDE_API_KEY", "ANTHROPIC_API_KEY"],
+    supportsThinking: true,
+    reasoning: CAPABILITY.ANTHROPIC_EFFORT, // baked as anthropic_effort; Task 5 transport-flip (cli→anthropic) inherits this capability
+    defaultEffort: "xhigh",
+  }),
+  codex: Object.freeze({
+    key: "codex",
+    baseName: "gpt5.5",
+    transport: "cli",
+    cliKind: "codex",
+    defaultModel: "gpt-5.5",
+    defaultBaseUrl: null,
+    apiKeyEnv: ["MULTIPOLY_CODEX_API_KEY", "OPENAI_API_KEY"],
+    supportsThinking: false,
+    reasoning: CAPABILITY.OPENAI_EFFORT, // api flavor maps to openai_effort; cli flavor uses -c model_reasoning_effort
+    defaultEffort: "xhigh",
+  }),
+  gemini: Object.freeze({
+    key: "gemini",
+    baseName: "gemini-3.5-flash",
+    transport: "http",
+    defaultModel: "gemini-3.5-flash",
+    defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    apiKeyEnv: ["MULTIPOLY_GEMINI_API_KEY", "GEMINI_API_KEY"],
+    supportsThinking: false,
+    reasoning: CAPABILITY.OPENAI_EFFORT,
+    reasoningVocab: "gemini",
+    defaultEffort: "high",
+  }),
+  kimi: Object.freeze({
+    key: "kimi",
+    baseName: "kimi-k2.6",
+    transport: "anthropic",
+    defaultModel: "kimi-k2.6",
+    defaultBaseUrl: "https://api.kimi.com/coding",
+    apiKeyEnv: ["MULTIPOLY_KIMI_API_KEY", "MOONSHOT_API_KEY"],
+    supportsThinking: true,
+    reasoning: CAPABILITY.KIMI_TOGGLE,
+    defaultEffort: "high",
+  }),
+  mimo: Object.freeze({
+    key: "mimo",
+    baseName: "mimo-v2.5-pro",
+    transport: "http",
+    defaultModel: "mimo-v2.5-pro",
+    defaultBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+    // Recognize the existing XIAOMIMIMO_* env names as aliases, mirroring glm's
+    // ZHIPU_API_KEY/GLM_API_KEY fallbacks.
+    apiKeyEnv: ["MULTIPOLY_MIMO_API_KEY", "XIAOMIMIMO_API_KEY"],
+    supportsThinking: true,           // top-level thinking toggle, same class as glm
+    reasoning: CAPABILITY.GLM_TOGGLE, // "http_thinking_toggle"
+    defaultEffort: "high",
+    usesMaxCompletionTokens: true,    // MiMo expects max_completion_tokens, not max_tokens
+  }),
 });
 
 export function assertModelKey(raw) {
@@ -158,14 +218,6 @@ export function loadModelRegistry(env = process.env) {
   const info = { ...MODEL_INFO };
   const keys = [...MODEL_KEYS];
 
-  // The native-Anthropic `opus` builtin is registered only when an Anthropic
-  // key is present, so deployments without one keep the four-builtin registry
-  // (and its advertised tools) exactly as before.
-  if (firstNonEmpty(env, OPUS_INFO.apiKeyEnv)) {
-    info.opus = OPUS_INFO;
-    keys.push("opus");
-  }
-
   const seen = new Set(keys);
   const raw = (env.MULTIPOLY_MODELS || "").trim();
   for (const entry of raw ? raw.split(",") : []) {
@@ -180,7 +232,16 @@ export function loadModelRegistry(env = process.env) {
     if (RESERVED_MODEL_KEYS.has(key)) {
       throw new MultipolyError("CONFIG", `MULTIPOLY_MODELS entry ${JSON.stringify(key)} is a reserved word.`);
     }
-    if (seen.has(key)) {
+    // Promotable builtins (claude/codex/gemini/kimi/mimo) live in MODEL_INFO but NOT in
+    // MODEL_KEYS, so they are not in `seen` yet. Allow them once; error on double-list.
+    const baked = PROMOTABLE_BUILTINS.has(key) ? MODEL_INFO[key] : undefined;
+    if (seen.has(key) && baked) {
+      throw new MultipolyError(
+        "CONFIG",
+        `MULTIPOLY_MODELS entry ${JSON.stringify(key)} is listed more than once.`,
+      );
+    }
+    if (seen.has(key) && !baked) {
       throw new MultipolyError(
         "CONFIG",
         `MULTIPOLY_MODELS entry ${JSON.stringify(key)} duplicates a builtin or earlier model.`,
@@ -189,72 +250,240 @@ export function loadModelRegistry(env = process.env) {
     seen.add(key);
     keys.push(key);
     const prefix = envPrefixForModel(key);
-    const transport = parseTransport(env[`${prefix}_TRANSPORT`], `${prefix}_TRANSPORT`);
-    const base = {
-      key,
-      transport,
-      displayName: (env[`${prefix}_DISPLAY_NAME`] || "").trim() || key,
-      // Custom models have no built-in defaults; loadOneModelConfig reads the
-      // model-specific MULTIPOLY_<K>_{MODEL,BASE_URL} envs directly.
-      defaultModel: null,
-      defaultBaseUrl: transport === "anthropic" ? ANTHROPIC_DEFAULT_BASE_URL : null,
-      apiKeyEnv: Object.freeze([`${prefix}_API_KEY`]),
-      supportsThinking: parseThinkingFlag(env[`${prefix}_THINKING`]),
-    };
-    if (transport === "cli") {
-      base.cliKind = parseCliKind(env[`${prefix}_CLI_KIND`], `${prefix}_CLI_KIND`);
-    }
-    // Reasoning capability: MULTIPOLY_<K>_REASONING overrides; otherwise infer by transport.
-    // http: from MULTIPOLY_<K>_REASONING_VOCAB (deepseek|gemini → OPENAI_EFFORT, glm → GLM_TOGGLE, qwen → QWEN_BUDGET);
-    //        else from MULTIPOLY_<K>_REASONING explicit; else NONE.
-    // anthropic: ANTHROPIC_EFFORT default (or KIMI_TOGGLE if explicitly declared).
-    // cli: NONE (cli reasoning handled by kind in Task 10).
-    const explicitReasoning = (env[`${prefix}_REASONING`] || "").trim();
-    if (explicitReasoning) {
-      const validCaps = Object.values(CAPABILITY);
-      if (!validCaps.includes(explicitReasoning)) {
-        throw new MultipolyError(
-          "CONFIG",
-          `${prefix}_REASONING must be one of ${validCaps.join(", ")}, got ${JSON.stringify(explicitReasoning)}`,
-        );
-      }
-      base.reasoning = explicitReasoning;
-    } else if (transport === "anthropic") {
-      base.reasoning = CAPABILITY.ANTHROPIC_EFFORT;
-    } else if (transport === "http") {
-      // Infer from REASONING_VOCAB when available.
-      const vocab = (env[`${prefix}_REASONING_VOCAB`] || "").trim().toLowerCase();
-      if (vocab === "deepseek" || vocab === "gemini") {
-        base.reasoning = CAPABILITY.OPENAI_EFFORT;
-      } else if (vocab === "glm") {
-        base.reasoning = CAPABILITY.GLM_TOGGLE;
-      } else if (vocab === "qwen") {
-        base.reasoning = CAPABILITY.QWEN_BUDGET;
+    // For promotable builtins, use the transport-flip guard; for custom keys,
+    // fall back to "http" as before.
+    const transport = baked
+      ? resolveBuiltinTransport(key, env, prefix, baked)
+      : parseTransport(env[`${prefix}_TRANSPORT`], `${prefix}_TRANSPORT`);
+
+    if (baked) {
+      // ── Promotable builtin path: merge baked MODEL_INFO base under env overrides ──
+      const thinkingEnv = env[`${prefix}_THINKING`];
+      const base = {
+        key,
+        transport,
+        // DISPLAY_NAME env wins; else convention from baseName; else baked displayName; else key
+        displayName:
+          (env[`${prefix}_DISPLAY_NAME`] || "").trim() ||
+          (baked.baseName
+            ? computeDisplayName(
+                baked.baseName,
+                transport,
+                // cliKind for the display: baked value or env override
+                (env[`${prefix}_CLI_KIND`] || "").trim().toLowerCase() || baked.cliKind,
+              )
+            : baked.displayName) ||
+          key,
+        defaultModel: baked.defaultModel ?? null,
+        defaultBaseUrl:
+          baked.defaultBaseUrl ??
+          (transport === "anthropic" ? ANTHROPIC_DEFAULT_BASE_URL : null),
+        apiKeyEnv: baked.apiKeyEnv ?? Object.freeze([`${prefix}_API_KEY`]),
+        supportsThinking:
+          thinkingEnv !== undefined && thinkingEnv !== ""
+            ? parseThinkingFlag(thinkingEnv)
+            : Boolean(baked.supportsThinking),
+        // Carry the OpenAI-compat token-cap field switch from the baked entry so the
+        // http loader/client can read it for promotable builtins (e.g. mimo in Plan C).
+        ...(baked.usesMaxCompletionTokens ? { usesMaxCompletionTokens: true } : {}),
+      };
+
+      // Reasoning: explicit env override wins; else prefer baked capability; else infer
+      const explicitReasoning = (env[`${prefix}_REASONING`] || "").trim();
+      if (explicitReasoning) {
+        const validCaps = Object.values(CAPABILITY);
+        if (!validCaps.includes(explicitReasoning)) {
+          throw new MultipolyError(
+            "CONFIG",
+            `${prefix}_REASONING must be one of ${validCaps.join(", ")}, got ${JSON.stringify(explicitReasoning)}`,
+          );
+        }
+        base.reasoning = explicitReasoning;
+      // Baked capability wins over transport inference and is carried as-is even across a
+      // transport flip — an operator flipping kimi anthropic→http should also set
+      // MULTIPOLY_KIMI_REASONING. (All current baked entries declare reasoning explicitly,
+      // so the transport-inference arms below are unreached for them but kept defensively.)
+      } else if (baked.reasoning) {
+        base.reasoning = baked.reasoning;
+      } else if (transport === "anthropic") {
+        base.reasoning = CAPABILITY.ANTHROPIC_EFFORT;
+      } else if (transport === "http") {
+        base.reasoning = CAPABILITY.NONE;
       } else {
         base.reasoning = CAPABILITY.NONE;
       }
+
+      // reasoningVocab: env override, else baked
+      const vocabEnv = (env[`${prefix}_REASONING_VOCAB`] || "").trim();
+      if (vocabEnv && base.reasoning === CAPABILITY.OPENAI_EFFORT) {
+        base.reasoningVocab = vocabEnv;
+      } else if (baked.reasoningVocab && base.reasoning === CAPABILITY.OPENAI_EFFORT) {
+        base.reasoningVocab = baked.reasoningVocab;
+      }
+
+      // cliKind: env override, else baked
+      if (transport === "cli") {
+        const cliKindEnv = (env[`${prefix}_CLI_KIND`] || "").trim();
+        base.cliKind = cliKindEnv
+          ? parseCliKind(cliKindEnv, `${prefix}_CLI_KIND`)
+          : (baked.cliKind ?? parseCliKind(undefined, `${prefix}_CLI_KIND`));
+      }
+
+      // defaultEffort: baked wins, else "off"
+      base.defaultEffort = baked.defaultEffort ?? "off";
+
+      info[key] = Object.freeze(base);
     } else {
-      // cli transport
-      base.reasoning = CAPABILITY.NONE;
+      // ── From-scratch path for genuinely-custom keys ──
+      // `transport` already resolved above (falls back to "http" for custom keys).
+      const base = {
+        key,
+        transport,
+        displayName: (env[`${prefix}_DISPLAY_NAME`] || "").trim() || key,
+        // Custom models have no built-in defaults; loadOneModelConfig reads the
+        // model-specific MULTIPOLY_<K>_{MODEL,BASE_URL} envs directly.
+        defaultModel: null,
+        defaultBaseUrl: transport === "anthropic" ? ANTHROPIC_DEFAULT_BASE_URL : null,
+        apiKeyEnv: Object.freeze([`${prefix}_API_KEY`]),
+        supportsThinking: parseThinkingFlag(env[`${prefix}_THINKING`]),
+      };
+      if (transport === "cli") {
+        base.cliKind = parseCliKind(env[`${prefix}_CLI_KIND`], `${prefix}_CLI_KIND`);
+      }
+      // Reasoning capability: MULTIPOLY_<K>_REASONING overrides; otherwise infer by transport.
+      // http: from MULTIPOLY_<K>_REASONING_VOCAB (deepseek|gemini → OPENAI_EFFORT, glm → GLM_TOGGLE, qwen → QWEN_BUDGET);
+      //        else from MULTIPOLY_<K>_REASONING explicit; else NONE.
+      // anthropic: ANTHROPIC_EFFORT default (or KIMI_TOGGLE if explicitly declared).
+      // cli: NONE (cli reasoning handled by kind in Task 10).
+      const explicitReasoning = (env[`${prefix}_REASONING`] || "").trim();
+      if (explicitReasoning) {
+        const validCaps = Object.values(CAPABILITY);
+        if (!validCaps.includes(explicitReasoning)) {
+          throw new MultipolyError(
+            "CONFIG",
+            `${prefix}_REASONING must be one of ${validCaps.join(", ")}, got ${JSON.stringify(explicitReasoning)}`,
+          );
+        }
+        base.reasoning = explicitReasoning;
+      } else if (transport === "anthropic") {
+        base.reasoning = CAPABILITY.ANTHROPIC_EFFORT;
+      } else if (transport === "http") {
+        // Infer from REASONING_VOCAB when available.
+        const vocab = (env[`${prefix}_REASONING_VOCAB`] || "").trim().toLowerCase();
+        if (vocab === "deepseek" || vocab === "gemini") {
+          base.reasoning = CAPABILITY.OPENAI_EFFORT;
+        } else if (vocab === "glm") {
+          base.reasoning = CAPABILITY.GLM_TOGGLE;
+        } else if (vocab === "qwen") {
+          base.reasoning = CAPABILITY.QWEN_BUDGET;
+        } else {
+          base.reasoning = CAPABILITY.NONE;
+        }
+      } else {
+        // cli transport
+        base.reasoning = CAPABILITY.NONE;
+      }
+      // reasoningVocab: carry forward when OPENAI_EFFORT and REASONING_VOCAB is set.
+      const vocab = (env[`${prefix}_REASONING_VOCAB`] || "").trim();
+      if (vocab && base.reasoning === CAPABILITY.OPENAI_EFFORT) {
+        base.reasoningVocab = vocab;
+      }
+      // defaultEffort: env-defined custom models use "off" as baked default unless
+      // a reasoning effort or thinking env is set (Part A's resolution handles it).
+      base.defaultEffort = "off";
+      info[key] = Object.freeze(base);
     }
-    // reasoningVocab: carry forward when OPENAI_EFFORT and REASONING_VOCAB is set.
-    const vocab = (env[`${prefix}_REASONING_VOCAB`] || "").trim();
-    if (vocab && base.reasoning === CAPABILITY.OPENAI_EFFORT) {
-      base.reasoningVocab = vocab;
-    }
-    // defaultEffort: env-defined custom models use "off" as baked default unless
-    // a reasoning effort or thinking env is set (Part A's resolution handles it).
-    base.defaultEffort = "off";
-    info[key] = Object.freeze(base);
   }
 
   loadModelsFileInto(env, { keys, info, seen });
+  warnLegacyMigration(env);
   return { keys: Object.freeze(keys), info: Object.freeze(info) };
 }
 
-function parseTransport(raw, label) {
+const LEGACY_PREFIXES = [
+  { prefix: "MULTIPOLY_OPUS_", canonical: "MULTIPOLY_CLAUDE_*" },
+  { prefix: "MULTIPOLY_GPT55_", canonical: "MULTIPOLY_CODEX_*" },
+];
+
+function warnLegacyMigration(env) {
+  for (const { prefix, canonical } of LEGACY_PREFIXES) {
+    const hits = Object.keys(env).filter((k) => k.startsWith(prefix));
+    if (hits.length === 0) continue;
+    process.stderr.write(
+      JSON.stringify({
+        event: "legacy_env_ignored",
+        vars: hits,
+        message: `${prefix}* are no longer used to configure a model (values ignored as credentials). Use ${canonical} instead.`,
+      }) + "\n",
+    );
+  }
+}
+
+/**
+ * Resolve the effective transport for a promotable builtin (claude/codex/etc.)
+ * applying the transport-flip guard for claude:
+ *   - explicit MULTIPOLY_<K>_TRANSPORT always wins
+ *   - claude: if transport unset AND an Anthropic key is present, default to
+ *     "anthropic" (overrides the baked "cli" default). Strictly safer: avoids
+ *     silently routing API keys through the local CLI. Operator who wants CLI
+ *     with an Anthropic key in env sets MULTIPOLY_CLAUDE_TRANSPORT=cli explicitly.
+ *     NOTE: we do not detect CLI auth; unset transport + anthropic key ⇒ anthropic.
+ *   - codex: keeps baked cli (no prior API deployment to protect), just logs
+ *   - all other builtins: fall back to baked transport default
+ * Always emits a structured stderr transport_default log for claude/codex.
+ *
+ * @param {string} key - model key (e.g. "claude", "codex")
+ * @param {object} env - process.env or test env
+ * @param {string} prefix - e.g. "MULTIPOLY_CLAUDE"
+ * @param {object} baked - MODEL_INFO entry for this key
+ * @returns {string} resolved transport
+ */
+function resolveBuiltinTransport(key, env, prefix, baked) {
+  const explicit = (env[`${prefix}_TRANSPORT`] || "").trim();
+  if (explicit) return parseTransport(explicit, `${prefix}_TRANSPORT`);
+
+  if (key === "claude") {
+    const anthropicKeyPresent = firstNonEmpty(env, [
+      "ANTHROPIC_API_KEY",
+      "MULTIPOLY_CLAUDE_API_KEY",
+      "MULTIPOLY_OPUS_API_KEY",
+    ]);
+    const chosen = anthropicKeyPresent ? "anthropic" : (baked?.transport ?? "cli");
+    process.stderr.write(
+      JSON.stringify({
+        event: "transport_default",
+        model: "claude",
+        chosen,
+        reason: anthropicKeyPresent
+          ? "anthropic key present, transport unset"
+          : "no anthropic key; baked default",
+      }) + "\n",
+    );
+    return chosen;
+  }
+
+  if (key === "codex") {
+    const chosen = baked?.transport ?? "cli";
+    const codexKey = firstNonEmpty(env, ["OPENAI_API_KEY", "MULTIPOLY_CODEX_API_KEY"]);
+    if (codexKey) {
+      process.stderr.write(
+        JSON.stringify({
+          event: "transport_default",
+          model: "codex",
+          chosen,
+          reason: "baked default",
+        }) + "\n",
+      );
+    }
+    return chosen;
+  }
+
+  return parseTransport(undefined, `${prefix}_TRANSPORT`, baked?.transport);
+}
+
+function parseTransport(raw, label, fallback = "http") {
   const v = (raw || "").trim().toLowerCase();
-  if (!v) return "http";
+  if (!v) return fallback ?? "http";
   if (!TRANSPORTS.includes(v)) {
     throw new MultipolyError(
       "CONFIG",

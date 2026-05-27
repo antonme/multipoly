@@ -5,7 +5,9 @@ import {
   ENDPOINT_PROFILES,
   resolveCallTimeoutMs,
   TIMEOUT_BOUNDS,
+  normalizeSynthesizerChoice,
 } from "../scripts/lib/config.mjs";
+import { MODEL_INFO, MODEL_KEYS, loadModelRegistry } from "../scripts/lib/models.mjs";
 
 const base = { GLM_API_KEY: "test-key" };
 
@@ -376,13 +378,15 @@ test("config: MULTIPOLY_MODELS registers an env-defined custom model", () => {
 });
 
 test("config: a custom model missing its base URL is unconfigured, not fatal", () => {
+  // Use a genuinely-custom key (not a promotable builtin) — custom keys have no
+  // baked defaultBaseUrl, so a missing BASE_URL keeps the model unconfigured.
   const c = loadConfig({
     MULTIPOLY_GLM_API_KEY: "g",
-    MULTIPOLY_MODELS: "kimi",
-    MULTIPOLY_KIMI_API_KEY: "k",
-    MULTIPOLY_KIMI_MODEL: "kimi-k2",
+    MULTIPOLY_MODELS: "mymodel",
+    MULTIPOLY_MYMODEL_API_KEY: "k",
+    MULTIPOLY_MYMODEL_MODEL: "my-v1",
   });
-  assert.equal(c.models.kimi.configured, false);
+  assert.equal(c.models.mymodel.configured, false);
   assert.equal(c.models.glm.configured, true);
 });
 
@@ -450,4 +454,197 @@ test("config: missing qwen config does not prevent GLM-only startup", () => {
   assert.equal(c.models.glm.configured, true);
   assert.equal(c.models.qwen.configured, false);
   assert.equal(c.models.qwen.missing.length > 0, true);
+});
+
+// ── Task 3: baked MODEL_INFO entries for claude/codex/gemini/kimi ──
+
+test("claude/codex/gemini/kimi are baked MODEL_INFO entries with capability + base name", () => {
+  for (const k of ["claude", "codex", "gemini", "kimi"]) {
+    assert.ok(MODEL_INFO[k], `${k} should be in MODEL_INFO`);
+    assert.ok(MODEL_INFO[k].reasoning, `${k} should declare a reasoning capability`);
+    assert.ok(MODEL_INFO[k].baseName, `${k} should declare a display base name`);
+  }
+});
+
+test("OPUS_INFO is no longer exported (folded into claude)", async () => {
+  const mod = await import("../scripts/lib/models.mjs");
+  assert.equal(mod.OPUS_INFO, undefined);
+});
+
+test("baked builtins are NOT auto-registered (MODEL_KEYS unchanged)", async () => {
+  const { MODEL_KEYS: keys } = await import("../scripts/lib/models.mjs");
+  assert.deepEqual([...keys], ["glm", "qwen", "deepseek", "composer"]);
+});
+
+// ── Task 4: Registry merge for baked builtins ──
+
+test("MULTIPOLY_MODELS=claude merges baked MODEL_INFO base (capability, base name)", () => {
+  const { keys, info } = loadModelRegistry({
+    MULTIPOLY_MODELS: "claude",
+    MULTIPOLY_CLAUDE_TRANSPORT: "anthropic",
+    MULTIPOLY_CLAUDE_API_KEY: "x", // fake; just needs to be present for downstream config
+  });
+  assert.ok(keys.includes("claude"));
+  assert.equal(info.claude.reasoning, "anthropic_effort"); // baked
+  assert.equal(info.claude.transport, "anthropic"); // env override applied
+  // display name follows the convention for the chosen transport:
+  assert.equal(info.claude.displayName, "opus (api)");
+});
+
+test("MULTIPOLY_MODELS=claude with default (cli) transport names it 'opus (claude cli)'", () => {
+  const { info } = loadModelRegistry({ MULTIPOLY_MODELS: "claude" });
+  assert.equal(info.claude.transport, "cli");
+  assert.equal(info.claude.displayName, "opus (claude cli)");
+});
+
+test("listing an always-on builtin (glm) in MULTIPOLY_MODELS still errors", () => {
+  assert.throws(
+    () => loadModelRegistry({ MULTIPOLY_MODELS: "glm" }),
+    /duplicates a builtin/,
+  );
+});
+
+// ── Task 5: Transport-flip guard + startup transport log for claude/codex ──
+
+test("claude defaults to anthropic transport when an Anthropic key is present and transport is unset", () => {
+  const { info } = loadModelRegistry({
+    MULTIPOLY_MODELS: "claude",
+    ANTHROPIC_API_KEY: "x",
+  });
+  assert.equal(info.claude.transport, "anthropic");
+  assert.equal(info.claude.displayName, "opus (api)");
+});
+
+test("explicit MULTIPOLY_CLAUDE_TRANSPORT=cli wins over the Anthropic-key guard", () => {
+  const { info } = loadModelRegistry({
+    MULTIPOLY_MODELS: "claude",
+    ANTHROPIC_API_KEY: "x",
+    MULTIPOLY_CLAUDE_TRANSPORT: "cli",
+  });
+  assert.equal(info.claude.transport, "cli");
+});
+
+test("claude with no key and unset transport keeps baked cli", () => {
+  const { info } = loadModelRegistry({ MULTIPOLY_MODELS: "claude" });
+  assert.equal(info.claude.transport, "cli");
+});
+
+// ── Task 6: MULTIPOLY_OPUS_* / MULTIPOLY_GPT55_* migration warning ──
+
+test("a MULTIPOLY_OPUS_* var present emits a migration warning to stderr", () => {
+  const lines = [];
+  const orig = process.stderr.write;
+  process.stderr.write = (s) => { lines.push(String(s)); return true; };
+  try {
+    loadModelRegistry({ MULTIPOLY_OPUS_API_KEY: "x", MULTIPOLY_GLM_API_KEY: "y" });
+  } finally {
+    process.stderr.write = orig;
+  }
+  const blob = lines.join("");
+  assert.match(blob, /MULTIPOLY_OPUS_/);
+  assert.match(blob, /MULTIPOLY_CLAUDE_/);
+});
+
+test("no warning when no legacy vars are present", () => {
+  const lines = [];
+  const orig = process.stderr.write;
+  process.stderr.write = (s) => { lines.push(String(s)); return true; };
+  try {
+    loadModelRegistry({ MULTIPOLY_GLM_API_KEY: "y" });
+  } finally {
+    process.stderr.write = orig;
+  }
+  assert.ok(!lines.join("").includes("MULTIPOLY_OPUS_"));
+});
+
+// ── Task 7: Lenient synthesizer name resolution ──
+
+test("normalizeSynthesizerChoice: alias 'gpt' resolves to 'codex' when codex is configured", () => {
+  const keys = ["glm", "qwen", "deepseek", "composer", "codex"];
+  assert.equal(normalizeSynthesizerChoice("gpt", keys), "codex");
+});
+
+test("normalizeSynthesizerChoice: alias 'opus' resolves to 'claude' when claude is configured", () => {
+  const keys = ["glm", "claude"];
+  assert.equal(normalizeSynthesizerChoice("opus", keys), "claude");
+});
+
+test("normalizeSynthesizerChoice: harness sentinels are never alias-resolved (checked first)", () => {
+  // Even if "harness"/"none"/"caller" somehow appeared in an alias table they
+  // must resolve to HARNESS_SENTINEL, never to a model key.
+  const keys = ["glm", "codex", "claude"];
+  assert.equal(normalizeSynthesizerChoice("harness", keys), "harness");
+  assert.equal(normalizeSynthesizerChoice("none", keys), "harness");
+  assert.equal(normalizeSynthesizerChoice("caller", keys), "harness");
+});
+
+test("normalizeSynthesizerChoice: exact key resolves normally", () => {
+  const keys = ["glm", "qwen"];
+  assert.equal(normalizeSynthesizerChoice("glm", keys), "glm");
+  assert.equal(normalizeSynthesizerChoice("qwen", keys), "qwen");
+});
+
+test("normalizeSynthesizerChoice: unknown name returns null (caller raises the error)", () => {
+  const keys = ["glm", "qwen"];
+  assert.equal(normalizeSynthesizerChoice("gpt9999", keys), null);
+});
+
+// ── Plan C Task 1: mimo baked builtin ──
+
+test("mimo is a baked MODEL_INFO builtin with http_thinking_toggle capability", () => {
+  assert.ok(MODEL_INFO.mimo);
+  assert.equal(MODEL_INFO.mimo.reasoning, "http_thinking_toggle");
+  assert.equal(MODEL_INFO.mimo.usesMaxCompletionTokens, true);
+  assert.equal(MODEL_INFO.mimo.baseName, "mimo-v2.5-pro");
+});
+
+test("MULTIPOLY_MODELS=mimo merges baked base and recognizes XIAOMIMIMO_API_KEY", () => {
+  const { keys, info } = loadModelRegistry({ MULTIPOLY_MODELS: "mimo" });
+  assert.ok(keys.includes("mimo"));
+  assert.equal(info.mimo.reasoning, "http_thinking_toggle");
+  assert.equal(info.mimo.displayName, "mimo-v2.5-pro (api)"); // convention from Plan B
+  assert.deepEqual([...info.mimo.apiKeyEnv], ["MULTIPOLY_MIMO_API_KEY", "XIAOMIMIMO_API_KEY"]);
+});
+
+// ── Plan C Task 2: usesMaxCompletionTokens threaded onto loaded http config ──
+
+test("a configured mimo carries usesMaxCompletionTokens on its model config", () => {
+  const config = loadConfig({
+    MULTIPOLY_MODELS: "mimo",
+    MULTIPOLY_MIMO_API_KEY: "mimo", // fake
+  });
+  assert.equal(config.models.mimo.configured, true);
+  assert.equal(config.models.mimo.usesMaxCompletionTokens, true);
+});
+
+test("glm (max_tokens-style) does NOT set usesMaxCompletionTokens", () => {
+  const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "glm" });
+  assert.ok(!config.models.glm.usesMaxCompletionTokens);
+});
+
+// ── Plan C Task 4: MiMo inherits the GLM token floor (BUDGET-regression guard) ──
+
+test("mimo gets the http_thinking_toggle max_tokens floor by default (no empty-BUDGET regression)", () => {
+  const config = loadConfig({ MULTIPOLY_MODELS: "mimo", MULTIPOLY_MIMO_API_KEY: "mimo" });
+  assert.equal(config.models.mimo.maxTokens.review, 8192);
+  assert.equal(config.models.mimo.maxTokens.consult, 4096);
+});
+
+test("an explicit MULTIPOLY_MIMO_MAX_TOKENS_REVIEW overrides the floor", () => {
+  const config = loadConfig({
+    MULTIPOLY_MODELS: "mimo", MULTIPOLY_MIMO_API_KEY: "mimo",
+    MULTIPOLY_MIMO_MAX_TOKENS_REVIEW: "20000",
+  });
+  assert.equal(config.models.mimo.maxTokens.review, 20000);
+});
+
+// ── Display-name convention: always-on builtins surface "<base> (<transport>)" ──
+
+test("config: always-on builtins surface convention-form display names", () => {
+  // glm/qwen/deepseek are http → "(api)"; composer is cli/cursor → "(cursor cli)"
+  const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "x" });
+  assert.equal(config.models.glm.displayName, "glm-5.1 (api)");
+  assert.equal(config.models.qwen.displayName, "qwen3.7-max (api)");
+  assert.equal(config.models.deepseek.displayName, "deepseek-v4-pro (api)");
+  assert.equal(config.models.composer.displayName, "composer-2.5 (cursor cli)");
 });

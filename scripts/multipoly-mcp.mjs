@@ -167,6 +167,25 @@ function buildToolDefs(registry) {
     allowedKeys: new Set([...CONSULT_KEYS, ...COUNCIL_EXTRA_KEYS, "reasoning_effort"]),
     handler: handleCouncilConsult,
   });
+
+  // Curated alias tools: <alias>_review/_consult routed to a canonical handler.
+  // Registered only when the canonical key is present in the registry. Schema +
+  // allowedKeys are shared by reference from the canonical def so they can't drift.
+  const byName = Object.fromEntries(defs.map((d) => [d.name, d]));
+  for (const { alias, canonical } of ALIAS_TOOLS) {
+    for (const suffix of ["review", "consult"]) {
+      const target = byName[`${canonical}_${suffix}`];
+      if (!target) continue; // canonical not registered → no alias tool
+      defs.push({
+        name: `${alias}_${suffix}`,
+        description: `Alias for ${canonical}_${suffix} (${registry.info[canonical]?.displayName ?? canonical}).`,
+        inputSchema: target.inputSchema,
+        allowedKeys: target.allowedKeys,
+        handler: target.handler,
+      });
+    }
+  }
+
   return defs;
 }
 
@@ -193,7 +212,7 @@ export function buildTools(registry = BUILTIN_REGISTRY) {
 }
 
 /** Derive a tool-building registry ({ keys, info }) from a loaded config. */
-function registryFromConfig(config) {
+export function registryFromConfig(config) {
   return {
     keys: config.modelKeys,
     info: Object.fromEntries(
@@ -319,6 +338,14 @@ function main() {
 const REVIEW_KEYS = new Set(["diff_base", "paths", "focus", "timeout_ms"]);
 const CONSULT_KEYS = new Set(["prompt", "paths", "timeout_ms"]);
 const COUNCIL_EXTRA_KEYS = new Set(["models", "synthesizer", "include_individual_results"]);
+
+// Curated alias map: each entry registers <alias>_review and <alias>_consult as
+// thin aliases for the corresponding <canonical>_* tools. Defined at module scope
+// so the array is not re-allocated on every buildToolDefs call.
+const ALIAS_TOOLS = [
+  { alias: "opus", canonical: "claude" },
+  { alias: "gpt55", canonical: "codex" },
+];
 
 /**
  * Allowed argument keys per tool name, for the hand-rolled runtime validator.
