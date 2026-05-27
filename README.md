@@ -65,7 +65,7 @@ Compatibility aliases are accepted for API keys: GLM also accepts `GLM_API_KEY` 
 
 ### Baked builtins (opt-in)
 
-`claude`, `codex`, `gemini`, and `kimi` are **baked builtins** — they carry pre-configured capability metadata (transport, reasoning capability, default effort, base URL) but are **not registered by default**. Add them to `MULTIPOLY_MODELS` to enable their tools:
+`claude`, `codex`, `gemini`, `kimi`, and `mimo` are **baked builtins** — they carry pre-configured capability metadata (transport, reasoning capability, default effort, base URL) but are **not registered by default**. Add them to `MULTIPOLY_MODELS` to enable their tools:
 
 | Key | Default transport | Baked display name | Env override |
 |---|---|---|---|
@@ -73,8 +73,11 @@ Compatibility aliases are accepted for API keys: GLM also accepts `GLM_API_KEY` 
 | `codex` | `cli` | `gpt5.5 (codex cli)` | `MULTIPOLY_CODEX_API_KEY`, `OPENAI_API_KEY` |
 | `gemini` | `http` | `gemini-3.5-flash (api)` | `MULTIPOLY_GEMINI_API_KEY`, `GEMINI_API_KEY` |
 | `kimi` | `anthropic` | `kimi-k2.6 (api)` | `MULTIPOLY_KIMI_API_KEY`, `MOONSHOT_API_KEY` |
+| `mimo` | `http` | `mimo-v2.5-pro (api)` | `MULTIPOLY_MIMO_API_KEY`, `XIAOMIMIMO_API_KEY` |
 
 All env overrides from the custom-model table apply (`MULTIPOLY_<K>_TRANSPORT`, `_MODEL`, `_DISPLAY_NAME`, etc.). You no longer need to supply `MULTIPOLY_CLAUDE_DISPLAY_NAME` or `MULTIPOLY_CLAUDE_REASONING` — they are baked; env still overrides.
+
+`mimo` (Xiaomi MiMo V2.5 Pro) uses the same reasoning capability class as GLM: a top-level `thinking:{type}` toggle with no graded effort — `off` disables thinking, any other effort value enables it (default `high`). It gets a minimum token floor of 8192 (review) / 4096 (consult) when no explicit cap is set, preventing empty-response failures. On the wire it sends `max_completion_tokens` instead of `max_tokens` (the MiMo API rejects the legacy field). To enable mimo, add it to `MULTIPOLY_MODELS` and supply a key — `XIAOMIMIMO_API_KEY` is recognized so existing deployments need no rename. The per-deployment `MULTIPOLY_MIMO_DISPLAY_NAME`, `_REASONING`, `_BASE_URL`, and `_MODEL` env vars are no longer needed (baked); keep only `MULTIPOLY_MIMO_MAX_TOKENS_*` if you tuned the token cap.
 
 > **Migration from `MULTIPOLY_OPUS_*`.** The standalone `opus` model is removed. Use `MULTIPOLY_MODELS=claude` instead, and rename `MULTIPOLY_OPUS_*` env vars to `MULTIPOLY_CLAUDE_*`. At startup the server emits a structured stderr warning naming any `MULTIPOLY_OPUS_*` or `MULTIPOLY_GPT55_*` vars it finds — their values are no longer used to configure a model and are ignored as credentials (use `MULTIPOLY_CLAUDE_*` / `MULTIPOLY_CODEX_*` instead). Note: the mere presence of `MULTIPOLY_OPUS_API_KEY` is still honored as a legacy Anthropic-key signal for the claude transport-flip default (see below).
 
@@ -138,6 +141,7 @@ Every model that supports graded reasoning exposes a `reasoning_effort` argument
 | `codex` | `xhigh` | `reasoning_effort` (OpenAI effort) |
 | `gemini` | `high` | `reasoning_effort` (OpenAI effort) |
 | `kimi` | `high` | `thinking: {type: "enabled"\|"disabled"}` toggle |
+| `mimo` | `high` | `thinking: {type: "enabled"\|"disabled"}` toggle (same class as GLM; no graded effort) |
 | `composer` | `off` | no reasoning control (cursor-agent) |
 
 **Precedence order (highest to lowest):**

@@ -4,6 +4,34 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### MiMo first-class builtin + `max_completion_tokens` (2026-05-27)
+
+Xiaomi MiMo V2.5 Pro is now a baked `MODEL_INFO` builtin (opt-in, same as
+`claude`/`codex`/`gemini`/`kimi`), with a per-model `max_completion_tokens`
+switch so its wire format is correct out of the box.
+
+- **`mimo` baked builtin.** `mimo` is now in `MODEL_INFO` and `PROMOTABLE_BUILTINS`.
+  Enable it with `MULTIPOLY_MODELS=…,mimo` + an API key. Recognizes the existing
+  `XIAOMIMIMO_API_KEY` as a key alias (alongside `MULTIPOLY_MIMO_API_KEY`) — no
+  rename needed for existing deployments. The per-deployment `MULTIPOLY_MIMO_DISPLAY_NAME`,
+  `_REASONING`, `_BASE_URL`, and `_MODEL` env vars are no longer required (baked);
+  keep only `MULTIPOLY_MIMO_MAX_TOKENS_*` if you tuned the token cap.
+
+- **Reasoning capability: `http_thinking_toggle` (same class as GLM).** MiMo uses a
+  top-level `thinking:{type: "enabled"|"disabled"}` toggle with no graded effort —
+  `off` disables thinking, any other effort value enables it. Default effort: `high`.
+  `reasoning_content` is parsed from the response by the existing http client.
+
+- **GLM token-floor applies to MiMo.** MiMo inherits the 8192-review / 4096-consult
+  minimum `max_tokens` floor (the `http_thinking_toggle` floor introduced for GLM),
+  preventing the empty-response `BUDGET` failure mode when no explicit cap is set.
+  An explicit `MULTIPOLY_MIMO_MAX_TOKENS_REVIEW` / `_CONSULT` overrides the floor.
+
+- **`max_completion_tokens` per-model switch.** MiMo rejects the legacy `max_tokens`
+  field. A new `usesMaxCompletionTokens` flag on a model's config tells the http
+  client to emit `max_completion_tokens` instead of `max_tokens`. GLM and all other
+  existing models are unaffected (they continue to use `max_tokens`).
+
 ### Model-naming convention, baked builtins, and alias routing (2026-05-27)
 
 A stable `<model> (<transport>)` display-name convention, baked metadata for
