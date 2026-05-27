@@ -70,3 +70,33 @@ test("cli args: codex clamps xhigh→high, off→none, other kinds →[]", () =>
   assert.deepEqual(effortToCliReasoningArgs("codex", "off"), []);
   assert.deepEqual(effortToCliReasoningArgs("agy", "high"), []);
 });
+
+// --- Contract enforcement: adapters must receive a resolved concrete effort level ---
+test("adapters reject 'inherit': effortToGlmThinking", () => {
+  assert.throws(() => effortToGlmThinking("inherit"), (e) => e instanceof Error && e.code === "INTERNAL");
+  assert.throws(() => effortToGlmThinking("turbo"),   (e) => e instanceof Error && e.code === "INTERNAL");
+});
+test("adapters reject 'inherit': effortToKimiThinking", () => {
+  assert.throws(() => effortToKimiThinking("inherit"), (e) => e instanceof Error && e.code === "INTERNAL");
+  assert.throws(() => effortToKimiThinking("turbo"),   (e) => e instanceof Error && e.code === "INTERNAL");
+});
+test("adapters reject 'inherit': effortToOpenAiFields", () => {
+  assert.throws(() => effortToOpenAiFields("inherit", { vocab: "gemini" }), (e) => e instanceof Error && e.code === "INTERNAL");
+  assert.throws(() => effortToOpenAiFields("turbo",   { vocab: "gemini" }), (e) => e instanceof Error && e.code === "INTERNAL");
+});
+test("adapters reject 'inherit': effortToAnthropicEffort", () => {
+  assert.throws(() => effortToAnthropicEffort("inherit"), (e) => e instanceof Error && e.code === "INTERNAL");
+  assert.throws(() => effortToAnthropicEffort("turbo"),   (e) => e instanceof Error && e.code === "INTERNAL");
+});
+test("adapters reject 'inherit': effortToAnthropicBudget", () => {
+  assert.throws(() => effortToAnthropicBudget("inherit", { maxTokens: 20000 }), (e) => e instanceof Error && e.code === "INTERNAL");
+  assert.throws(() => effortToAnthropicBudget("turbo",   { maxTokens: 20000 }), (e) => e instanceof Error && e.code === "INTERNAL");
+});
+test("adapters reject 'inherit': effortToQwenFields", () => {
+  assert.throws(() => effortToQwenFields("inherit", { maxTokens: 20000 }), (e) => e instanceof Error && e.code === "INTERNAL");
+  assert.throws(() => effortToQwenFields("turbo",   { maxTokens: 20000 }), (e) => e instanceof Error && e.code === "INTERNAL");
+});
+test("adapters reject 'inherit': effortToCliReasoningArgs", () => {
+  assert.throws(() => effortToCliReasoningArgs("codex", "inherit"), (e) => e instanceof Error && e.code === "INTERNAL");
+  assert.throws(() => effortToCliReasoningArgs("codex", "turbo"),   (e) => e instanceof Error && e.code === "INTERNAL");
+});
