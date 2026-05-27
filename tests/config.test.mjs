@@ -637,3 +637,14 @@ test("an explicit MULTIPOLY_MIMO_MAX_TOKENS_REVIEW overrides the floor", () => {
   });
   assert.equal(config.models.mimo.maxTokens.review, 20000);
 });
+
+// ── Display-name convention: always-on builtins surface "<base> (<transport>)" ──
+
+test("config: always-on builtins surface convention-form display names", () => {
+  // glm/qwen/deepseek are http → "(api)"; composer is cli/cursor → "(cursor cli)"
+  const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "x" });
+  assert.equal(config.models.glm.displayName, "glm-5.1 (api)");
+  assert.equal(config.models.qwen.displayName, "qwen3.7-max (api)");
+  assert.equal(config.models.deepseek.displayName, "deepseek-v4-pro (api)");
+  assert.equal(config.models.composer.displayName, "composer-2.5 (cursor cli)");
+});

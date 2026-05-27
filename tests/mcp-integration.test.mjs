@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createServer, buildServerSurface } from "../scripts/multipoly-mcp.mjs";
+import { createServer, buildServerSurface, registryFromConfig } from "../scripts/multipoly-mcp.mjs";
 import { loadConfig } from "../scripts/lib/config.mjs";
 
 const BUILTIN_TOOL_NAMES = [
@@ -192,4 +192,46 @@ test("integration: council_review accepts reasoning_effort:'low' (not an unknown
   } finally {
     await conn.close();
   }
+});
+
+// ── Alias-tool end-to-end seam: loadConfig → registryFromConfig → buildServerSurface ──
+
+test("integration: opus alias tools present with correct handler identity and claude reasoning schema (real config path)", () => {
+  // Build config via the real loadConfig path: claude is promoted with anthropic transport.
+  // MULTIPOLY_CLAUDE_TRANSPORT=anthropic is set explicitly so the transport-flip
+  // default log doesn't depend on which Anthropic env vars are set in CI.
+  const config = loadConfig({
+    MULTIPOLY_MODELS: "claude",
+    MULTIPOLY_CLAUDE_TRANSPORT: "anthropic",
+    MULTIPOLY_CLAUDE_API_KEY: "x",
+    MULTIPOLY_GLM_API_KEY: "y",
+  });
+
+  // Derive the surface the same way createServer does.
+  const surface = buildServerSurface(registryFromConfig(config));
+
+  // opus_review and opus_consult must be present (alias tools for claude).
+  const toolNames = surface.tools.map((t) => t.name);
+  assert.ok(toolNames.includes("opus_review"), "opus_review must be present");
+  assert.ok(toolNames.includes("opus_consult"), "opus_consult must be present");
+
+  // Handler identity: alias routes to the same function as the canonical tool.
+  assert.strictEqual(
+    surface.handlers["opus_review"],
+    surface.handlers["claude_review"],
+    "opus_review handler must be identical to claude_review handler",
+  );
+  assert.strictEqual(
+    surface.handlers["opus_consult"],
+    surface.handlers["claude_consult"],
+    "opus_consult handler must be identical to claude_consult handler",
+  );
+
+  // claude is reasoning-capable (anthropic_effort) — schema must include reasoning_effort.
+  const claudeReview = surface.tools.find((t) => t.name === "claude_review");
+  assert.ok(claudeReview, "claude_review tool must exist");
+  assert.ok(
+    "reasoning_effort" in claudeReview.inputSchema.properties,
+    "claude_review schema must include reasoning_effort (claude is anthropic_effort capable)",
+  );
 });

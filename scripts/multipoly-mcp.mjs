@@ -212,7 +212,7 @@ export function buildTools(registry = BUILTIN_REGISTRY) {
 }
 
 /** Derive a tool-building registry ({ keys, info }) from a loaded config. */
-function registryFromConfig(config) {
+export function registryFromConfig(config) {
   return {
     keys: config.modelKeys,
     info: Object.fromEntries(

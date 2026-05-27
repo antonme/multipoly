@@ -413,7 +413,7 @@ function warnLegacyMigration(env) {
       JSON.stringify({
         event: "legacy_env_ignored",
         vars: hits,
-        message: `${prefix}* is no longer used; the model folded into its canonical key. Use ${canonical} instead. These vars are currently IGNORED.`,
+        message: `${prefix}* are no longer used to configure a model (values ignored as credentials). Use ${canonical} instead.`,
       }) + "\n",
     );
   }
