@@ -4,6 +4,21 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Public-repo hygiene (2026-05-27)
+
+Prep for publishing: removed personal/identifying details and internal-doc
+links from user-facing files.
+
+- **README:** use a `/path/to/multipoly` placeholder in the install/config
+  examples instead of an absolute home-directory path, and drop the
+  `docs/superpowers/` design/plan pointers from Status (internal notes, not
+  user-facing docs).
+- **`scripts/smoke-cli.mjs`:** resolve the `kimi` binary from `PATH` like the
+  other agents instead of a hardcoded absolute path — also makes the smoke
+  script portable across machines.
+- **Tests:** genericize `/Users/…` fixtures in `transport-cli` /
+  `transport-config` to neutral `/home/user/…` paths.
+
 ### Second-pass review fixes (2026-05-27)
 
 Found by a follow-up multi-reviewer pass (self-review + Codex) over the

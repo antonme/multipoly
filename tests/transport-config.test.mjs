@@ -113,9 +113,9 @@ test("transport: custom cli binary override", () => {
     MULTIPOLY_K_TRANSPORT: "cli",
     MULTIPOLY_K_CLI_KIND: "kimi",
     MULTIPOLY_K_ENABLED: "1",
-    MULTIPOLY_K_CLI: "/Users/anton/.local/bin/kimi",
+    MULTIPOLY_K_CLI: "/home/user/.local/bin/kimi",
   });
-  assert.equal(c.models.k.binary, "/Users/anton/.local/bin/kimi");
+  assert.equal(c.models.k.binary, "/home/user/.local/bin/kimi");
 });
 
 test("transport: agy requires explicit unsafe opt-in (weak sandbox)", () => {

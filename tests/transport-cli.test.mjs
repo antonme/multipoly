@@ -272,7 +272,7 @@ test("cli: empty output is a failure (not a 0-finding success)", async () => {
 test("cli: a secret in the child error is redacted from the thrown error", async () => {
   const cap = [];
   const leakyExec = () => {
-    const e = new Error("auth failed using token sk-cursor-SECRET-9999 at /Users/anton/.cursor");
+    const e = new Error("auth failed using token sk-cursor-SECRET-9999 at /home/user/.cursor");
     throw e;
   };
   await assert.rejects(

@@ -10,7 +10,7 @@ const KINDS = [
   { kind: "codex", model: "gpt-5.5" },
   { kind: "cursor", model: "composer-2.5", authTokenEnv: "CURSOR_API_KEY" },
   { kind: "gemini", model: "gemini-2.5-flash" },
-  { kind: "kimi", model: "kimi-code/kimi-for-coding", binary: "/Users/anton/.local/bin/kimi" },
+  { kind: "kimi", model: "kimi-code/kimi-for-coding" },
   { kind: "agy", model: null, unsafe: true },
 ];
 

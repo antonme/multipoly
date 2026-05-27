@@ -25,7 +25,7 @@ MULTIPOLY_GLM_API_KEY=dummy npm run health
 Register with Claude Code:
 
 ```sh
-claude mcp add multipoly -- node /Users/anton/dev/multipoly/scripts/multipoly-mcp.mjs
+claude mcp add multipoly -- node /path/to/multipoly/scripts/multipoly-mcp.mjs
 ```
 
 Or register as a local plugin in `~/.claude/settings.json`:
@@ -33,7 +33,7 @@ Or register as a local plugin in `~/.claude/settings.json`:
 ```json
 {
   "plugins": {
-    "multipoly": { "path": "/Users/anton/dev/multipoly" }
+    "multipoly": { "path": "/path/to/multipoly" }
   }
 }
 ```
@@ -43,7 +43,7 @@ Or register as a local plugin in `~/.claude/settings.json`:
 Opencode is an MCP client. Register the same MCP server via opencode's MCP config:
 
 ```sh
-opencode mcp add multipoly -- node /Users/anton/dev/multipoly/scripts/multipoly-mcp.mjs
+opencode mcp add multipoly -- node /path/to/multipoly/scripts/multipoly-mcp.mjs
 ```
 
 ## Configuration
@@ -314,7 +314,7 @@ Example `~/.codex/config.toml`:
 ```toml
 [mcp_servers.multipoly]
 command = "node"
-args = ["/Users/anton/dev/multipoly/scripts/multipoly-mcp.mjs"]
+args = ["/path/to/multipoly/scripts/multipoly-mcp.mjs"]
 startup_timeout_sec = 15
 tool_timeout_sec = 600
 ```
@@ -346,4 +346,4 @@ npm run start
 
 ## Status
 
-v0.1.0 - multimodel fork in active development. See `docs/superpowers/specs/` for design context and `docs/superpowers/plans/` for the implementation plan.
+v0.1.0 — multimodel fork in active development.
