@@ -83,7 +83,8 @@ Server-wide settings:
 
 | Var | Default | Notes |
 |---|---|---|
-| `MULTIPOLY_THINKING` | mode-default | `on` / `off` / `auto`. Default: on for review, off for consult. |
+| `MULTIPOLY_REASONING_EFFORT` | (per-model default) | `off\|low\|medium\|high\|xhigh` — server-wide effort baseline for all models. |
+| `MULTIPOLY_THINKING` | `auto` | Coarse alias: `on` → `medium` effort, `off` → `off`, `auto` → inherit. `MULTIPOLY_REASONING_EFFORT` takes precedence when both are set. |
 | `MULTIPOLY_SYNTHESIZER` | (unset) | Default council synthesizer: any active model key (`glm`/`qwen`/`deepseek`/`composer`/`opus`/custom), or `harness`/`none`/`caller` to defer to the calling harness. Unset = defer. Overridable per-call. |
 | `MULTIPOLY_MAX_TOKENS_REVIEW` | 131072 | Output-token cap for review and council review synthesis. |
 | `MULTIPOLY_MAX_TOKENS_CONSULT` | 131072 | Output-token cap for consult and council consult synthesis. |
@@ -95,11 +96,43 @@ Server-wide settings:
 | `MULTIPOLY_ALLOW_SECRETS` | 0 | Override the secret scanner after explicit user consent. |
 | `MULTIPOLY_DEBUG_REASONING` | 0 | Surface `reasoning_content` as a second text block. |
 
-Legacy `GLM_*` names are still accepted for server-wide settings during migration.
+Per-model reasoning effort overrides (replace `<K>` with the uppercase model key, e.g. `GLM`):
 
-`MULTIPOLY_THINKING` is only sent to models that declare support for the `thinking` request field; currently the builtins that do are `glm` and `opus`. Other profiles omit the field even when the server-wide setting is `on`.
+| Var | Notes |
+|---|---|
+| `MULTIPOLY_<K>_REASONING_EFFORT` | Per-model effort, overrides server-wide `MULTIPOLY_REASONING_EFFORT`. |
+| `MULTIPOLY_<K>_THINKING` | Per-model coarse alias (same mapping as the server-wide `MULTIPOLY_THINKING`). |
+
+Legacy `GLM_*` names are still accepted for server-wide settings during migration. `GLM_THINKING` (without the `MULTIPOLY_` prefix) is accepted as a per-GLM override only, and never leaks to other models.
 
 The 131072 token default is GLM-specific. Non-GLM profiles omit `max_tokens` by default so their provider default applies. Set `MULTIPOLY_MAX_TOKENS_REVIEW` / `MULTIPOLY_MAX_TOKENS_CONSULT` to apply one cap to every model, or use model-specific caps such as `MULTIPOLY_QWEN_MAX_TOKENS_REVIEW` and `MULTIPOLY_QWEN_MAX_TOKENS_CONSULT`.
+
+### Reasoning effort
+
+Every model that supports graded reasoning exposes a `reasoning_effort` argument on its `_review` and `_consult` tools (`off|low|medium|high|xhigh`). Omitting it uses the per-model default.
+
+**Per-model defaults:**
+
+| Model | Default effort | Backend mechanism |
+|---|---|---|
+| `glm` | `high` | `thinking: {type: "enabled"\|"disabled"}` toggle |
+| `qwen` | `high` | `enable_thinking` + `thinking_budget` |
+| `deepseek` | `high` | `reasoning_effort` (`high`/`max`) |
+| `opus` | `xhigh` | `output_config.effort` + `thinking: {type: "adaptive"}` |
+| `composer` | `off` | no reasoning control (cursor-agent) |
+
+**Precedence order (highest to lowest):**
+
+1. Per-call `reasoning_effort` tool argument
+2. Per-model env `MULTIPOLY_<K>_REASONING_EFFORT`
+3. Per-model env `MULTIPOLY_<K>_THINKING` (coarse alias)
+4. Server-wide `MULTIPOLY_REASONING_EFFORT`
+5. Server-wide `MULTIPOLY_THINKING` (coarse alias)
+6. Per-model baked default (table above)
+
+Models with `CAPABILITY.NONE` (e.g. `composer`) do not expose the `reasoning_effort` argument and ignore all effort settings.
+
+> **Note:** The old review-on / consult-off "mode-default" asymmetry was retired. All modes now use the same per-model default effort. Use `MULTIPOLY_REASONING_EFFORT=off` if you want to disable reasoning server-wide.
 
 ## Transports
 
@@ -122,14 +155,7 @@ back to prompt-instructed JSON. Anthropic requires `max_tokens`; when no
 model-specific cap is set it defaults to 16384 — raise
 `MULTIPOLY_OPUS_MAX_TOKENS_REVIEW` (or the server-wide cap) for large reviews.
 
-Extended thinking: when thinking is enabled (the mode-default for review, or
-`MULTIPOLY_THINKING=on`) the request sends `thinking: { type: "enabled",
-budget_tokens }` with a budget of `min(8192, max_tokens − 1024)`. If the cap is
-too small to leave room for both reasoning and an answer, thinking is skipped
-(raise `MULTIPOLY_OPUS_MAX_TOKENS_*`). Native structured output and extended
-thinking are not safely combinable on all model/endpoint versions, so a review
-with thinking on uses prompt-instructed JSON (the validate/reprompt loop) rather
-than `output_config`.
+Opus 4.7 uses Anthropic's `output_config.effort` + `thinking: {type: "adaptive"}` mechanism (no `budget_tokens`). Effort defaults to `xhigh`; override per-call or via `MULTIPOLY_OPUS_REASONING_EFFORT`. Review mode attempts to send the JSON schema alongside the effort in `output_config`; if the endpoint rejects the format field, it falls back to prompt-instructed JSON while keeping the effort setting. If reasoning is set to `off`, the thinking field is omitted entirely.
 A custom anthropic model:
 
 ```
@@ -138,6 +164,23 @@ MULTIPOLY_HAIKU_TRANSPORT=anthropic
 MULTIPOLY_HAIKU_API_KEY=...      # or rely on ANTHROPIC_API_KEY via the file registry
 MULTIPOLY_HAIKU_MODEL=claude-haiku-4-5
 ```
+
+> **Non-Claude Anthropic-compatible models (e.g. Kimi):** The default reasoning
+> capability for an `anthropic`-transport custom model is `ANTHROPIC_EFFORT` —
+> the `output_config.effort` + `thinking: {type: "adaptive"}` shape used by
+> Claude Opus 4.7. Models that do **not** speak that protocol (Kimi uses a bare
+> `thinking: {type: "enabled"|"disabled"}` toggle instead) must declare their
+> capability explicitly:
+>
+> ```
+> MULTIPOLY_KIMI_REASONING=kimi_toggle
+> ```
+>
+> The general form is `MULTIPOLY_<KEY>_REASONING=<cap>` where `<cap>` is one of
+> the values listed in `CAPABILITY` (`kimi_toggle`, `glm_toggle`,
+> `anthropic_budget`, `openai_effort`, `qwen_budget`, `none`). Without this
+> override, sending the Opus-style payload to a non-Claude endpoint will result
+> in an API error.
 
 ### CLI agents (Claude Code, Codex, Cursor/Composer, Gemini, agy, Kimi)
 
@@ -165,7 +208,7 @@ Per-cli env (`<K>` is the model key, e.g. `COMPOSER`):
 | `MULTIPOLY_<K>_AUTH_TOKEN_ENV` | name of an env var the agent needs (e.g. `CURSOR_API_KEY`); presence is checked before spawning |
 | `MULTIPOLY_<K>_CWD` | `repo` (default) or `temp` — see the trust boundary below |
 | `MULTIPOLY_<K>_UNSAFE` | `1`, required for `agy` (no real read-only mode) |
-| `MULTIPOLY_<K>_REASONING_EFFORT` | codex only (`-c model_reasoning_effort=...`) |
+| `MULTIPOLY_<K>_REASONING_EFFORT` | override reasoning effort for this cli model |
 | `MULTIPOLY_<K>_TIMEOUT_MS` | per-model timeout override |
 
 > **⚠️ Trust boundary (cli, repo cwd).** By default a cli agent runs in the
@@ -224,7 +267,8 @@ there is no `argv` field (argv is built from the controlled `cliKind` recipe).
 
 Allowed entry fields: `transport`, `displayName`, `model`, `baseUrl`,
 `apiKeyEnv`, `supportsThinking`, `cliKind`, `binary`, `authTokenEnv`, `cwd`,
-`unsafe`, `reasoningEffort`, `enabled`. Env vars override file-declared values.
+`unsafe`, `reasoningEffort`, `reasoning`, `reasoningVocab`, `defaultEffort`,
+`enabled`. Env vars override file-declared values.
 
 ## Tool Reference
 

@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadConfig } from "../scripts/lib/config.mjs";
-import { loadModelRegistry, CLI_KINDS } from "../scripts/lib/models.mjs";
+import { loadModelRegistry, CLI_KINDS, MODEL_INFO, modelCapability, modelHasReasoningControl, modelSupportsThinking } from "../scripts/lib/models.mjs";
+import { CAPABILITY } from "../scripts/lib/reasoning.mjs";
 
 const glm = { MULTIPOLY_GLM_API_KEY: "g" };
 
@@ -254,4 +255,157 @@ test("transport: registry includes opus only via loadModelRegistry env gate", ()
   const r = loadModelRegistry({ ANTHROPIC_API_KEY: "k" });
   assert.ok(r.keys.includes("opus"));
   assert.equal(r.info.opus.transport, "anthropic");
+});
+
+// --- Task 5: static capability + defaults on MODEL_INFO; modelHasReasoningControl ---
+
+test("models: capability + default effort on builtins", () => {
+  assert.equal(MODEL_INFO.glm.reasoning, CAPABILITY.GLM_TOGGLE);
+  assert.equal(MODEL_INFO.glm.defaultEffort, "high");
+  assert.equal(MODEL_INFO.qwen.reasoning, CAPABILITY.QWEN_BUDGET);
+  assert.equal(MODEL_INFO.qwen.defaultEffort, "high");
+  assert.equal(MODEL_INFO.deepseek.reasoning, CAPABILITY.OPENAI_EFFORT);
+  assert.equal(MODEL_INFO.deepseek.reasoningVocab, "deepseek");
+  assert.equal(MODEL_INFO.deepseek.defaultEffort, "high");
+  assert.equal(MODEL_INFO.composer.reasoning, CAPABILITY.NONE);
+  assert.equal(MODEL_INFO.composer.defaultEffort, "off");
+});
+
+test("models: modelSupportsThinking stays true only for GLM_TOGGLE/KIMI_TOGGLE/ANTHROPIC_BUDGET", () => {
+  const c = { models: { glm: MODEL_INFO.glm, deepseek: MODEL_INFO.deepseek } };
+  assert.equal(modelSupportsThinking(c, "glm"), true);
+  assert.equal(modelSupportsThinking(c, "deepseek"), false);
+});
+
+test("models: modelCapability reads from model info", () => {
+  const c = { models: { glm: MODEL_INFO.glm, deepseek: MODEL_INFO.deepseek, composer: MODEL_INFO.composer } };
+  assert.equal(modelCapability(c, "glm"), CAPABILITY.GLM_TOGGLE);
+  assert.equal(modelCapability(c, "deepseek"), CAPABILITY.OPENAI_EFFORT);
+  assert.equal(modelCapability(c, "composer"), CAPABILITY.NONE);
+});
+
+test("models: modelHasReasoningControl is true for non-NONE, false for NONE", () => {
+  const c = { models: { glm: MODEL_INFO.glm, deepseek: MODEL_INFO.deepseek, composer: MODEL_INFO.composer } };
+  assert.equal(modelHasReasoningControl(c, "deepseek"), true);
+  assert.equal(modelHasReasoningControl(c, "glm"), true);
+  assert.equal(modelHasReasoningControl(c, "composer"), false);
+});
+
+test("models: modelCapability falls back to NONE for custom models without a reasoning field", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "mykimi",
+    MULTIPOLY_MYKIMI_TRANSPORT: "cli",
+    MULTIPOLY_MYKIMI_CLI_KIND: "kimi",
+    MULTIPOLY_MYKIMI_ENABLED: "1",
+  });
+  // custom cli model is created without reasoning field; modelCapability falls back to NONE
+  assert.equal(modelCapability(c, "mykimi"), CAPABILITY.NONE);
+});
+
+// --- Task 6: per-model baseline reasoning effort + GLM floor; retire mode-default ---
+
+test("config: per-model effort beats server; legacy GLM_THINKING is per-model only", () => {
+  const c = loadConfig({ ...glm, MULTIPOLY_REASONING_EFFORT: "low", MULTIPOLY_GLM_REASONING_EFFORT: "xhigh" });
+  assert.equal(c.models.glm.reasoningEffort, "xhigh");
+});
+
+test("config: server THINKING=off → effort off when nothing more specific", () => {
+  const c = loadConfig({ ...glm, MULTIPOLY_THINKING: "off" });
+  assert.equal(c.models.glm.reasoningEffort, "off");
+});
+
+test("config: GLM_THINKING does NOT leak onto deepseek", () => {
+  const c = loadConfig({ ...glm, MULTIPOLY_DEEPSEEK_API_KEY: "d", GLM_THINKING: "off" });
+  assert.equal(c.models.deepseek.reasoningEffort, "high"); // unaffected
+  assert.equal(c.models.glm.reasoningEffort, "off");       // glm honors its legacy var
+});
+
+test("config: GLM max_tokens floor applies by default but not over explicit", () => {
+  assert.ok(loadConfig({ ...glm }).models.glm.maxTokens.review >= 8192);
+  assert.equal(loadConfig({ ...glm, MULTIPOLY_GLM_MAX_TOKENS_REVIEW: "2048" }).models.glm.maxTokens.review, 2048);
+});
+
+test("config: model config carries reasoning and reasoningVocab from model info", () => {
+  const c = loadConfig({ ...glm, MULTIPOLY_DEEPSEEK_API_KEY: "d" });
+  assert.equal(c.models.glm.reasoning, CAPABILITY.GLM_TOGGLE);
+  assert.equal(c.models.deepseek.reasoning, CAPABILITY.OPENAI_EFFORT);
+  assert.equal(c.models.deepseek.reasoningVocab, "deepseek");
+});
+
+test("config: retire mode-default — unset MULTIPOLY_THINKING gives auto", () => {
+  const c = loadConfig({ ...glm });
+  assert.equal(c.thinking, "auto");
+});
+
+test("config: all-inherit resolves to baked default effort (glm → high)", () => {
+  const c = loadConfig({ ...glm });
+  assert.equal(c.models.glm.reasoningEffort, "high");
+});
+
+test("config: composer baseline resolves to off (NONE capability)", () => {
+  const c = loadConfig({ ...glm });
+  assert.equal(c.models.composer.reasoningEffort, "off");
+});
+
+// --- Part B: env-defined custom models get capability ---
+
+test("models: env-defined anthropic custom model gets ANTHROPIC_EFFORT capability", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "claude",
+    MULTIPOLY_CLAUDE_TRANSPORT: "anthropic",
+    MULTIPOLY_CLAUDE_API_KEY: "sk-ant-xxx",
+    MULTIPOLY_CLAUDE_MODEL: "claude-sonnet-4-5",
+  });
+  assert.equal(modelCapability(c, "claude"), CAPABILITY.ANTHROPIC_EFFORT);
+});
+
+test("models: env-defined http model with REASONING_VOCAB=deepseek gets OPENAI_EFFORT", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "mydeep",
+    MULTIPOLY_MYDEEP_API_KEY: "k",
+    MULTIPOLY_MYDEEP_BASE_URL: "https://ds.example/v1",
+    MULTIPOLY_MYDEEP_MODEL: "deepseek-v3",
+    MULTIPOLY_MYDEEP_REASONING_VOCAB: "deepseek",
+  });
+  assert.equal(modelCapability(c, "mydeep"), CAPABILITY.OPENAI_EFFORT);
+  assert.equal(c.models.mydeep.reasoningVocab, "deepseek");
+});
+
+test("models: env-defined http model with REASONING=kimi_toggle gets KIMI_TOGGLE", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "kimi",
+    MULTIPOLY_KIMI_API_KEY: "k",
+    MULTIPOLY_KIMI_BASE_URL: "https://kimi.example/v1",
+    MULTIPOLY_KIMI_MODEL: "kimi-k2",
+    MULTIPOLY_KIMI_REASONING: "kimi_toggle",
+  });
+  assert.equal(modelCapability(c, "kimi"), CAPABILITY.KIMI_TOGGLE);
+});
+
+test("models: env-defined http model with no reasoning hint gets NONE", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "mymodel",
+    MULTIPOLY_MYMODEL_API_KEY: "k",
+    MULTIPOLY_MYMODEL_BASE_URL: "https://my.example/v1",
+    MULTIPOLY_MYMODEL_MODEL: "my-model-1",
+  });
+  assert.equal(modelCapability(c, "mymodel"), CAPABILITY.NONE);
+});
+
+// ── Part A-1: GLM floor regression guard ──────────────────────────────────────
+// Guards the original empty-BUDGET bug: when GLM_MAX_TOKENS_REVIEW is not
+// explicitly set, the floor must kick in and yield at least 8192 tokens
+// (MIN_THINKING_BUDGET + MIN_OUTPUT_RESERVE = 1024 + 1024 fits inside that).
+
+test("regression: GLM default config yields maxTokens.review >= 8192 (floor guard)", () => {
+  const c = loadConfig({ ...glm });
+  assert.ok(
+    c.models.glm.maxTokens.review >= 8192,
+    `Expected GLM maxTokens.review >= 8192 (floor), got ${c.models.glm.maxTokens.review}`,
+  );
 });

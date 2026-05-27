@@ -27,7 +27,8 @@ export async function runModel(args) {
 
   if (transport === "http") {
     // Forward exactly the args streamChatCompletion understands; execFileImpl
-    // is ignored by the http path.
+    // is ignored by the http path. reasoningEffort is passed through so the
+    // transport can resolve and apply it (Tasks 8-10 consume it).
     const { execFileImpl, ...httpArgs } = args;
     return streamChatCompletion(httpArgs);
   }

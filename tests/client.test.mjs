@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { streamChatCompletion } from "../scripts/lib/client.mjs";
+import { CAPABILITY } from "../scripts/lib/reasoning.mjs";
 
 const enc = new TextEncoder();
 
@@ -47,6 +48,8 @@ const baseConfig = {
       apiKey: "k",
       model: "glm-5.1",
       supportsThinking: true,
+      reasoning: CAPABILITY.GLM_TOGGLE,
+      reasoningEffort: "high",
       maxTokens: { review: 8192, consult: 16384 },
     },
   },
@@ -70,7 +73,8 @@ test("client: happy path streams content", async () => {
   const sent = JSON.parse(fetchImpl.calls[0].opts.body);
   assert.equal(sent.model, "glm-5.1");
   assert.equal(sent.stream, true);
-  assert.deepEqual(sent.thinking, { type: "disabled" }); // consult default off
+  // GLM_TOGGLE capability with reasoningEffort="high" → thinking enabled (mode no longer drives effort)
+  assert.deepEqual(sent.thinking, { type: "enabled" });
 });
 
 test("client: sends request to selected model config", async () => {
@@ -171,7 +175,10 @@ test("client: review mode enables thinking by default", async () => {
   assert.deepEqual(sent.thinking, { type: "enabled" });
 });
 
-test("client: GLM_THINKING=auto omits thinking field", async () => {
+test("client: GLM capability ignores legacy config.thinking (capability drives thinking field)", async () => {
+  // Previously config.thinking="auto" omitted the thinking field. After capability dispatch,
+  // GLM_TOGGLE always sends thinking based on effort — config.thinking is no longer consulted
+  // by the http transport.
   const fetchImpl = makeFetch({});
   await streamChatCompletion({
     config: { ...baseConfig, thinking: "auto" },
@@ -181,7 +188,8 @@ test("client: GLM_THINKING=auto omits thinking field", async () => {
     fetchImpl,
   });
   const sent = JSON.parse(fetchImpl.calls[0].opts.body);
-  assert.equal(sent.thinking, undefined);
+  // reasoningEffort="high" → thinking enabled regardless of config.thinking
+  assert.deepEqual(sent.thinking, { type: "enabled" });
 });
 
 test("client: 401 fails fast (no retry)", async () => {
@@ -444,4 +452,178 @@ test("client: reasoning progress skips generating line when no reasoning emitted
     process.stderr.write = originalWrite;
   }
   assert.equal(writes.some((s) => /generating/.test(s)), false);
+});
+
+// ─── Task 8: capability-dispatched http reasoning fields ─────────────────────
+
+function makeCapConfig({ key, capability, vocab, reasoningEffort, model, baseUrl, maxTokens }) {
+  return {
+    ...baseConfig,
+    models: {
+      [key]: {
+        configured: true,
+        key,
+        displayName: key,
+        baseUrl: baseUrl ?? "https://api.test/v1",
+        apiKey: "k",
+        model: model ?? key + "-model",
+        reasoning: capability,
+        ...(vocab !== undefined ? { reasoningVocab: vocab } : {}),
+        reasoningEffort: reasoningEffort ?? "high",
+        maxTokens: maxTokens ?? { review: 8192, consult: 16384 },
+      },
+    },
+  };
+}
+
+test("client[Task8]: GLM + per-call off → thinking disabled, no reasoningEffort key", async () => {
+  const fetchImpl = makeFetch({});
+  await streamChatCompletion({
+    config: makeCapConfig({ key: "glm", capability: CAPABILITY.GLM_TOGGLE, reasoningEffort: "high" }),
+    modelKey: "glm",
+    messages: [{ role: "user", content: "x" }],
+    mode: "review",
+    reasoningEffort: "off",
+    fetchImpl,
+  });
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.deepEqual(sent.thinking, { type: "disabled" });
+  assert.equal("reasoningEffort" in sent, false, "junk reasoningEffort key must not be sent");
+});
+
+test("client[Task8]: GLM + no per-call → thinking enabled (baseline high preserved)", async () => {
+  const fetchImpl = makeFetch({});
+  await streamChatCompletion({
+    config: makeCapConfig({ key: "glm", capability: CAPABILITY.GLM_TOGGLE, reasoningEffort: "high" }),
+    modelKey: "glm",
+    messages: [{ role: "user", content: "x" }],
+    mode: "consult",
+    fetchImpl,
+  });
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.deepEqual(sent.thinking, { type: "enabled" });
+  assert.equal("reasoningEffort" in sent, false);
+});
+
+test("client[Task8]: deepseek + xhigh → reasoning_effort=max", async () => {
+  const fetchImpl = makeFetch({});
+  await streamChatCompletion({
+    config: makeCapConfig({ key: "deepseek", capability: CAPABILITY.OPENAI_EFFORT, vocab: "deepseek", reasoningEffort: "high" }),
+    modelKey: "deepseek",
+    messages: [{ role: "user", content: "x" }],
+    mode: "review",
+    reasoningEffort: "xhigh",
+    fetchImpl,
+  });
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.equal(sent.reasoning_effort, "max");
+  assert.equal("reasoningEffort" in sent, false);
+});
+
+test("client[Task8]: deepseek + off → thinking disabled, no reasoning_effort", async () => {
+  const fetchImpl = makeFetch({});
+  await streamChatCompletion({
+    config: makeCapConfig({ key: "deepseek", capability: CAPABILITY.OPENAI_EFFORT, vocab: "deepseek", reasoningEffort: "high" }),
+    modelKey: "deepseek",
+    messages: [{ role: "user", content: "x" }],
+    mode: "review",
+    reasoningEffort: "off",
+    fetchImpl,
+  });
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.deepEqual(sent.thinking, { type: "disabled" });
+  assert.equal("reasoning_effort" in sent, false);
+  assert.equal("reasoningEffort" in sent, false);
+});
+
+test("client[Task8]: qwen (QWEN_BUDGET) + high → top-level enable_thinking + thinking_budget (not under extra_body)", async () => {
+  const fetchImpl = makeFetch({});
+  await streamChatCompletion({
+    config: makeCapConfig({ key: "qwen", capability: CAPABILITY.QWEN_BUDGET, reasoningEffort: "high", maxTokens: { review: 20000, consult: 20000 } }),
+    modelKey: "qwen",
+    messages: [{ role: "user", content: "x" }],
+    mode: "review",
+    fetchImpl,
+  });
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.equal(sent.enable_thinking, true);
+  assert.ok(typeof sent.thinking_budget === "number" && sent.thinking_budget > 0, "thinking_budget must be a positive number");
+  assert.equal(sent.extra_body, undefined, "must NOT be nested under extra_body");
+  assert.equal("reasoningEffort" in sent, false);
+});
+
+test("client[Task8]: gemini vocab + off → reasoning_effort=minimal", async () => {
+  const fetchImpl = makeFetch({});
+  await streamChatCompletion({
+    config: makeCapConfig({ key: "gemini", capability: CAPABILITY.OPENAI_EFFORT, vocab: "gemini", reasoningEffort: "high" }),
+    modelKey: "gemini",
+    messages: [{ role: "user", content: "x" }],
+    mode: "review",
+    reasoningEffort: "off",
+    fetchImpl,
+  });
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.equal(sent.reasoning_effort, "minimal");
+  assert.equal("reasoningEffort" in sent, false);
+});
+
+test("client[Task8]: per-call effort overrides model baseline", async () => {
+  const fetchImpl = makeFetch({});
+  // baseline is "high" → thinking enabled; per-call "off" must win
+  await streamChatCompletion({
+    config: makeCapConfig({ key: "glm", capability: CAPABILITY.GLM_TOGGLE, reasoningEffort: "high" }),
+    modelKey: "glm",
+    messages: [{ role: "user", content: "x" }],
+    mode: "review",
+    reasoningEffort: "off",
+    fetchImpl,
+  });
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.deepEqual(sent.thinking, { type: "disabled" });
+});
+
+test("client[Task8]: NONE capability → no reasoning fields added to body", async () => {
+  const fetchImpl = makeFetch({});
+  await streamChatCompletion({
+    config: makeCapConfig({ key: "composer", capability: CAPABILITY.NONE, reasoningEffort: "off" }),
+    modelKey: "composer",
+    messages: [{ role: "user", content: "x" }],
+    mode: "review",
+    fetchImpl,
+  });
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.equal(sent.thinking, undefined);
+  assert.equal(sent.reasoning_effort, undefined);
+  assert.equal(sent.enable_thinking, undefined);
+  assert.equal("reasoningEffort" in sent, false);
+});
+
+test("client[Task8]: reasoning_effort rejection retries once without it and succeeds", async () => {
+  let calls = 0;
+  const fetchImpl = async (url, opts) => {
+    calls++;
+    const body = JSON.parse(opts.body);
+    if (calls === 1) {
+      // First call: reject with reasoning_effort-shaped error
+      return new Response(
+        JSON.stringify({ error: { message: "reasoning_effort is not supported by this model" } }),
+        { status: 400 },
+      );
+    }
+    // Second call: succeed; assert reasoning_effort was removed
+    assert.equal("reasoning_effort" in body, false, "retry must not include reasoning_effort");
+    return new Response(
+      chunksToReadableStream(['data: {"choices":[{"delta":{"content":"ok-retry"}}]}\n\n', "data: [DONE]\n\n"]),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+  };
+  const out = await streamChatCompletion({
+    config: makeCapConfig({ key: "deepseek", capability: CAPABILITY.OPENAI_EFFORT, vocab: "deepseek", reasoningEffort: "high" }),
+    modelKey: "deepseek",
+    messages: [{ role: "user", content: "x" }],
+    mode: "review",
+    fetchImpl,
+  });
+  assert.equal(out.content, "ok-retry");
+  assert.equal(calls, 2);
 });

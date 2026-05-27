@@ -20,7 +20,7 @@ test("config: defaults", () => {
   assert.deepEqual(c.models.qwen.maxTokens, { review: undefined, consult: undefined });
   assert.equal(c.models.deepseek.configured, false);
   assert.equal(c.models.composer.configured, false);
-  assert.equal(c.thinking, "mode-default");
+  assert.equal(c.thinking, "auto"); // mode-default retired: unset MULTIPOLY_THINKING now means "auto" (don't send a thinking toggle; rely on per-model reasoningEffort)
   assert.equal(c.maxTokens.review, 131072);
   assert.equal(c.maxTokens.consult, 131072);
   assert.equal("freeform" in c.maxTokens, false);

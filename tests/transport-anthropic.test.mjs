@@ -31,22 +31,24 @@ function anthropicFetch(events, capture, { status = 200 } = {}) {
 }
 
 function anthropicConfig(overrides = {}) {
+  const modelBase = {
+    key: "m",
+    displayName: "Opus",
+    transport: "anthropic",
+    configured: true,
+    model: "claude-opus-4-7",
+    baseUrl: overrides.baseUrl ?? "https://api.anthropic.com",
+    apiKey: "sk-ant-test",
+    apiKeyEnv: "ANTHROPIC_API_KEY",
+    anthropicVersion: "2023-06-01",
+    supportsThinking: overrides.supportsThinking ?? true,
+    maxTokens: { review: overrides.reviewMax, consult: overrides.consultMax },
+  };
+  // Allow tests to set capability (reasoning) and reasoningEffort on the model config.
+  if (overrides.reasoning !== undefined) modelBase.reasoning = overrides.reasoning;
+  if (overrides.reasoningEffort !== undefined) modelBase.reasoningEffort = overrides.reasoningEffort;
   return {
-    models: {
-      m: {
-        key: "m",
-        displayName: "Opus",
-        transport: "anthropic",
-        configured: true,
-        model: "claude-opus-4-7",
-        baseUrl: overrides.baseUrl ?? "https://api.anthropic.com",
-        apiKey: "sk-ant-test",
-        apiKeyEnv: "ANTHROPIC_API_KEY",
-        anthropicVersion: "2023-06-01",
-        supportsThinking: overrides.supportsThinking ?? true,
-        maxTokens: { review: overrides.reviewMax, consult: overrides.consultMax },
-      },
-    },
+    models: { m: modelBase },
     thinking: overrides.thinking ?? "off",
     timeoutMs: 5000,
     progress: "off",
@@ -242,10 +244,18 @@ test("anthropic: stop_reason max_tokens maps to finish_reason length", async () 
   assert.equal(out.finishReason, "length");
 });
 
-test("anthropic: enables extended thinking when thinking is on", async () => {
+test("anthropic: enables extended thinking for ANTHROPIC_BUDGET capability", async () => {
+  // UPDATED (Task 9): buildThinkingField replaced by capability branch.
+  // ANTHROPIC_BUDGET models use effortToAnthropicBudget; the old config.thinking="on"
+  // path (buildThinkingField) is removed in favor of resolveReasoningEffort + capability.
   const cap = {};
+  const { CAPABILITY } = await import("../scripts/lib/reasoning.mjs");
   await runModel({
-    config: anthropicConfig({ thinking: "on", consultMax: 16384 }),
+    config: anthropicConfig({
+      reasoning: CAPABILITY.ANTHROPIC_BUDGET,
+      reasoningEffort: "high",
+      consultMax: 16384,
+    }),
     modelKey: "m",
     messages,
     mode: "consult",
@@ -269,17 +279,24 @@ test("anthropic: omits thinking when thinking is off", async () => {
   assert.equal("thinking" in cap.body, false);
 });
 
-test("anthropic: per-call thinking arg overrides config", async () => {
+test("anthropic: per-call reasoningEffort arg overrides model baseline", async () => {
+  // UPDATED (Task 9): the old per-call `thinking` boolean arg path is replaced by
+  // `reasoningEffort`. Per-call effort overrides the model config baseline.
   const cap = {};
+  const { CAPABILITY } = await import("../scripts/lib/reasoning.mjs");
   await runModel({
-    config: anthropicConfig({ thinking: "off", consultMax: 16384 }),
+    config: anthropicConfig({
+      reasoning: CAPABILITY.ANTHROPIC_BUDGET,
+      reasoningEffort: "off",  // model baseline = off
+      consultMax: 16384,
+    }),
     modelKey: "m",
     messages,
     mode: "consult",
-    thinking: true,
+    reasoningEffort: "high",   // per-call override → enables thinking
     fetchImpl: anthropicFetch(basicEvents, cap),
   });
-  assert.ok(cap.body.thinking, "explicit thinking arg should enable thinking despite config off");
+  assert.ok(cap.body.thinking, "per-call reasoningEffort=high should enable thinking despite model baseline off");
   assert.equal(cap.body.thinking.type, "enabled");
 });
 
@@ -295,28 +312,47 @@ test("anthropic: never sends thinking for a model that doesn't support it", asyn
   assert.equal("thinking" in cap.body, false);
 });
 
-test("anthropic: thinking on in review omits native output_config (uses prompt-JSON)", async () => {
+test("anthropic: ANTHROPIC_BUDGET thinking in review omits output_config.format (uses prompt-JSON)", async () => {
+  // UPDATED (Task 9): for ANTHROPIC_BUDGET (legacy), when thinking is enabled,
+  // output_config.format is NOT sent (prompt-JSON path). This preserves the old
+  // "omit output_config whenever thinking is enabled" behavior for budget models.
+  // (ANTHROPIC_EFFORT has a different policy: it tries to send both, see Task9 tests below.)
   const cap = {};
+  const { CAPABILITY } = await import("../scripts/lib/reasoning.mjs");
   const responseFormat = {
     type: "json_schema",
     json_schema: { name: "m_review", strict: true, schema: { type: "object", properties: {}, additionalProperties: false } },
   };
   await runModel({
-    config: anthropicConfig({ thinking: "on", reviewMax: 16384 }),
+    config: anthropicConfig({
+      reasoning: CAPABILITY.ANTHROPIC_BUDGET,
+      reasoningEffort: "high",
+      reviewMax: 16384,
+    }),
     modelKey: "m",
     messages,
     mode: "review",
     responseFormat,
     fetchImpl: anthropicFetch(basicEvents, cap),
   });
-  assert.ok(cap.body.thinking, "thinking should be enabled");
-  assert.equal("output_config" in cap.body, false, "output_config must be omitted when thinking is on");
+  assert.ok(cap.body.thinking, "thinking should be enabled for ANTHROPIC_BUDGET");
+  assert.equal(cap.body.thinking.type, "enabled");
+  assert.equal("output_config" in cap.body, false, "output_config must be omitted when ANTHROPIC_BUDGET thinking is on");
 });
 
 test("anthropic: skips thinking when max_tokens is too small for a budget", async () => {
+  // UPDATED (Task 9): now exercises ANTHROPIC_BUDGET capability explicitly.
+  // With the old buildThinkingField path removed, max_tokens gating is handled by
+  // effortToAnthropicBudget; a model must have reasoning: ANTHROPIC_BUDGET to see
+  // thinking at all, and a tiny max_tokens collapses to no thinking field.
   const cap = {};
+  const { CAPABILITY } = await import("../scripts/lib/reasoning.mjs");
   await runModel({
-    config: anthropicConfig({ thinking: "on", consultMax: 1024 }),
+    config: anthropicConfig({
+      reasoning: CAPABILITY.ANTHROPIC_BUDGET,
+      reasoningEffort: "high",
+      consultMax: 1024,
+    }),
     modelKey: "m",
     messages,
     mode: "consult",
@@ -324,4 +360,263 @@ test("anthropic: skips thinking when max_tokens is too small for a budget", asyn
   });
   assert.equal("thinking" in cap.body, false, "1024 max_tokens cannot fit a >=1024 thinking budget plus output");
   assert.equal(cap.body.max_tokens, 1024);
+});
+
+// ── Task 9: New capability-based reasoning tests ──────────────────────────────
+
+test("anthropic Task9: ANTHROPIC_EFFORT + xhigh → adaptive thinking, output_config.effort, no budget_tokens, no sampling params", async () => {
+  const cap = {};
+  const { CAPABILITY } = await import("../scripts/lib/reasoning.mjs");
+  await runModel({
+    config: anthropicConfig({
+      reasoning: CAPABILITY.ANTHROPIC_EFFORT,
+      reasoningEffort: "xhigh",
+      consultMax: 16384,
+    }),
+    modelKey: "m",
+    messages,
+    mode: "consult",
+    fetchImpl: anthropicFetch(basicEvents, cap),
+  });
+  assert.deepEqual(cap.body.thinking, { type: "adaptive" }, "thinking must be {type:'adaptive'} for ANTHROPIC_EFFORT");
+  assert.equal(cap.body.output_config?.effort, "xhigh", "output_config.effort must be 'xhigh'");
+  assert.equal("budget_tokens" in (cap.body.thinking ?? {}), false, "must never have budget_tokens for ANTHROPIC_EFFORT");
+  assert.equal("temperature" in cap.body, false, "temperature must be stripped for ANTHROPIC_EFFORT thinking");
+  assert.equal("top_p" in cap.body, false, "top_p must be stripped");
+  assert.equal("top_k" in cap.body, false, "top_k must be stripped");
+  assert.equal("reasoningEffort" in cap.body, false, "camelCase reasoningEffort must never appear on outbound body");
+});
+
+test("anthropic Task9: ANTHROPIC_EFFORT + off → no thinking field, no output_config.effort", async () => {
+  const cap = {};
+  const { CAPABILITY } = await import("../scripts/lib/reasoning.mjs");
+  await runModel({
+    config: anthropicConfig({
+      reasoning: CAPABILITY.ANTHROPIC_EFFORT,
+      reasoningEffort: "off",
+      consultMax: 16384,
+    }),
+    modelKey: "m",
+    messages,
+    mode: "consult",
+    fetchImpl: anthropicFetch(basicEvents, cap),
+  });
+  assert.equal("thinking" in cap.body, false, "no thinking when effort=off");
+  // output_config.effort should not appear when effort is off (null from adapter)
+  assert.equal(cap.body.output_config?.effort, undefined, "no output_config.effort when off");
+});
+
+test("anthropic Task9: KIMI_TOGGLE + high → thinking enabled (no budget_tokens), sampling params stripped", async () => {
+  const cap = {};
+  const { CAPABILITY } = await import("../scripts/lib/reasoning.mjs");
+  await runModel({
+    config: anthropicConfig({
+      reasoning: CAPABILITY.KIMI_TOGGLE,
+      reasoningEffort: "high",
+      consultMax: 16384,
+    }),
+    modelKey: "m",
+    messages,
+    mode: "consult",
+    fetchImpl: anthropicFetch(basicEvents, cap),
+  });
+  assert.deepEqual(cap.body.thinking, { type: "enabled" }, "KIMI_TOGGLE high → thinking:{type:'enabled'}");
+  assert.equal("budget_tokens" in (cap.body.thinking ?? {}), false, "KIMI_TOGGLE must never have budget_tokens");
+  assert.equal("temperature" in cap.body, false, "temperature must be stripped for KIMI_TOGGLE thinking");
+  assert.equal("top_p" in cap.body, false, "top_p must be stripped");
+  assert.equal("top_k" in cap.body, false, "top_k must be stripped");
+});
+
+test("anthropic Task9: ANTHROPIC_BUDGET + high + large max_tokens → budget_tokens in range", async () => {
+  const cap = {};
+  const { CAPABILITY } = await import("../scripts/lib/reasoning.mjs");
+  await runModel({
+    config: anthropicConfig({
+      reasoning: CAPABILITY.ANTHROPIC_BUDGET,
+      reasoningEffort: "high",
+      consultMax: 20000,
+    }),
+    modelKey: "m",
+    messages,
+    mode: "consult",
+    fetchImpl: anthropicFetch(basicEvents, cap),
+  });
+  assert.ok(cap.body.thinking, "thinking must be present for ANTHROPIC_BUDGET + high");
+  assert.equal(cap.body.thinking.type, "enabled");
+  assert.ok(cap.body.thinking.budget_tokens >= 1024, "budget_tokens must be >= 1024");
+  assert.ok(cap.body.thinking.budget_tokens < 20000, "budget_tokens must be < max_tokens");
+});
+
+test("anthropic Task9: per-call reasoningEffort overrides model baseline; no camelCase reasoningEffort key on body", async () => {
+  const cap = {};
+  const { CAPABILITY } = await import("../scripts/lib/reasoning.mjs");
+  // model baseline = high; per-call = xhigh → xhigh wins
+  await runModel({
+    config: anthropicConfig({
+      reasoning: CAPABILITY.ANTHROPIC_EFFORT,
+      reasoningEffort: "high",
+      consultMax: 16384,
+    }),
+    modelKey: "m",
+    messages,
+    mode: "consult",
+    reasoningEffort: "xhigh",
+    fetchImpl: anthropicFetch(basicEvents, cap),
+  });
+  assert.equal(cap.body.output_config?.effort, "xhigh", "per-call effort xhigh must override model baseline high");
+  assert.equal("reasoningEffort" in cap.body, false, "camelCase reasoningEffort key must never appear on body");
+});
+
+test("anthropic Task9: ANTHROPIC_EFFORT review mode first attempt sends output_config with both effort and format", async () => {
+  const calls = [];
+  const { CAPABILITY } = await import("../scripts/lib/reasoning.mjs");
+  const responseFormat = {
+    type: "json_schema",
+    json_schema: { name: "m_review", strict: true, schema: { type: "object", properties: {}, additionalProperties: false } },
+  };
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push(body);
+    const frames = basicEvents.map((e) => enc.encode(`data: ${JSON.stringify(e)}\n\n`));
+    let i = 0;
+    return new Response(
+      new ReadableStream({ pull(c) { if (i < frames.length) c.enqueue(frames[i++]); else c.close(); } }),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+  };
+  await runModel({
+    config: anthropicConfig({
+      reasoning: CAPABILITY.ANTHROPIC_EFFORT,
+      reasoningEffort: "high",
+      reviewMax: 16384,
+    }),
+    modelKey: "m",
+    messages,
+    mode: "review",
+    responseFormat,
+    fetchImpl,
+  });
+  assert.equal(calls.length, 1, "should succeed on first attempt");
+  assert.equal(calls[0].output_config?.effort, "high", "first attempt must include output_config.effort");
+  assert.ok(calls[0].output_config?.format?.schema, "first attempt must include output_config.format.schema");
+});
+
+test("anthropic Task9: ANTHROPIC_EFFORT review mode falls back and KEEPS output_config.effort when format rejected", async () => {
+  let callCount = 0;
+  const { CAPABILITY } = await import("../scripts/lib/reasoning.mjs");
+  const responseFormat = {
+    type: "json_schema",
+    json_schema: { name: "m_review", strict: true, schema: { type: "object", properties: {}, additionalProperties: false } },
+  };
+  const bodies = [];
+  const fetchImpl = async (url, init) => {
+    callCount++;
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    if (callCount === 1) {
+      // First attempt: must have both effort and format in output_config
+      assert.equal(body.output_config?.effort, "high", "first attempt: output_config.effort present");
+      assert.ok(body.output_config?.format, "first attempt: output_config.format present");
+      return new Response(
+        JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "output_config.format is not supported for this model" } }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      );
+    }
+    // Fallback: must keep output_config.effort but drop format
+    assert.equal(body.output_config?.effort, "high", "fallback: output_config.effort preserved");
+    assert.equal(body.output_config?.format, undefined, "fallback: output_config.format dropped");
+    const frames = basicEvents.map((e) => enc.encode(`data: ${JSON.stringify(e)}\n\n`));
+    let i = 0;
+    return new Response(
+      new ReadableStream({ pull(c) { if (i < frames.length) c.enqueue(frames[i++]); else c.close(); } }),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+  };
+  const out = await runModel({
+    config: anthropicConfig({
+      reasoning: CAPABILITY.ANTHROPIC_EFFORT,
+      reasoningEffort: "high",
+      reviewMax: 16384,
+    }),
+    modelKey: "m",
+    messages,
+    mode: "review",
+    responseFormat,
+    fetchImpl,
+  });
+  assert.equal(callCount, 2, "should have retried once");
+  assert.equal(out.fellBackFromJsonSchema, true, "fellBackFromJsonSchema must be true");
+});
+
+// ── Part A-2: Opus latent-400 regression guard ────────────────────────────────
+// ANTHROPIC_EFFORT models (Opus 4.7) must NEVER include budget_tokens in the
+// request body at any effort level. budget_tokens causes a 400 from the API.
+// This guard covers: xhigh, high, medium, low (off → no thinking at all).
+
+for (const effort of ["low", "medium", "high", "xhigh"]) {
+  test(`regression: ANTHROPIC_EFFORT effort=${effort} never sends budget_tokens (latent-400 guard)`, async () => {
+    const cap = {};
+    const { CAPABILITY: CAP } = await import("../scripts/lib/reasoning.mjs");
+    await runModel({
+      config: anthropicConfig({
+        reasoning: CAP.ANTHROPIC_EFFORT,
+        reasoningEffort: effort,
+        consultMax: 16384,
+      }),
+      modelKey: "m",
+      messages,
+      mode: "consult",
+      fetchImpl: anthropicFetch(basicEvents, cap),
+    });
+    const body = cap.body;
+    assert.equal(
+      "budget_tokens" in (body.thinking ?? {}),
+      false,
+      `ANTHROPIC_EFFORT effort=${effort} must never send budget_tokens in thinking, got: ${JSON.stringify(body.thinking)}`,
+    );
+  });
+}
+
+// Also verify the output_config fallback path (review mode) does not add budget_tokens.
+test("regression: ANTHROPIC_EFFORT review mode (output_config fallback path) never sends budget_tokens", async () => {
+  const bodies = [];
+  const { CAPABILITY: CAP } = await import("../scripts/lib/reasoning.mjs");
+  const responseFormat = {
+    type: "json_schema",
+    json_schema: { name: "m_review", strict: true, schema: { type: "object", properties: {}, additionalProperties: false } },
+  };
+  let call = 0;
+  const fetchImpl = async (url, init) => {
+    call++;
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    if (call === 1) {
+      // Simulate output_config.format rejection to exercise the fallback path.
+      return new Response(
+        JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "output_config.format is not supported for this model" } }),
+        { status: 400, headers: { "content-type": "application/json" } },
+      );
+    }
+    const frames = basicEvents.map((e) => enc.encode(`data: ${JSON.stringify(e)}\n\n`));
+    let i = 0;
+    return new Response(
+      new ReadableStream({ pull(c) { if (i < frames.length) c.enqueue(frames[i++]); else c.close(); } }),
+      { status: 200, headers: { "content-type": "text/event-stream" } },
+    );
+  };
+  await runModel({
+    config: anthropicConfig({ reasoning: CAP.ANTHROPIC_EFFORT, reasoningEffort: "high", reviewMax: 16384 }),
+    modelKey: "m",
+    messages,
+    mode: "review",
+    responseFormat,
+    fetchImpl,
+  });
+  for (const body of bodies) {
+    assert.equal(
+      "budget_tokens" in (body.thinking ?? {}),
+      false,
+      `ANTHROPIC_EFFORT output_config fallback path must never send budget_tokens, got: ${JSON.stringify(body.thinking)}`,
+    );
+  }
 });

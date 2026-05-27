@@ -27,7 +27,8 @@ import {
   normalizeSynthesizerChoice,
 } from "./lib/config.mjs";
 import { MultipolyError, logError } from "./lib/errors.mjs";
-import { MODEL_KEYS, MODEL_INFO } from "./lib/models.mjs";
+import { MODEL_KEYS, MODEL_INFO, modelHasReasoningControl } from "./lib/models.mjs";
+import { EFFORT_LEVELS } from "./lib/reasoning.mjs";
 import { handleModelReview } from "./lib/model-review.mjs";
 import { handleModelConsult } from "./lib/model-consult.mjs";
 import { handleCouncilReview, handleCouncilConsult } from "./lib/council.mjs";
@@ -38,6 +39,14 @@ const TIMEOUT_ARG_SCHEMA = {
   minimum: TIMEOUT_BOUNDS.min,
   maximum: TIMEOUT_BOUNDS.max,
   description: "Optional upstream stream inactivity timeout override in milliseconds.",
+};
+
+const REASONING_EFFORT_ARG_SCHEMA = {
+  type: "string",
+  enum: [...EFFORT_LEVELS],
+  description:
+    "Per-call reasoning effort override. One of off|low|medium|high|xhigh. " +
+    "Omit to inherit the per-model or server-wide default.",
 };
 
 const REVIEW_TOOL_SCHEMA = {
@@ -96,30 +105,47 @@ const BUILTIN_REGISTRY = { keys: MODEL_KEYS, info: MODEL_INFO };
  */
 function buildToolDefs(registry) {
   const extra = councilExtraProperties(registry.keys);
+  // Council tools always advertise reasoning_effort (members may each support it;
+  // the per-member capability gate happens inside the council handler at runtime).
   const councilReviewSchema = {
     ...REVIEW_TOOL_SCHEMA,
-    properties: { ...REVIEW_TOOL_SCHEMA.properties, ...extra },
+    properties: { ...REVIEW_TOOL_SCHEMA.properties, ...extra, reasoning_effort: REASONING_EFFORT_ARG_SCHEMA },
   };
   const councilConsultSchema = {
     ...CONSULT_TOOL_SCHEMA,
-    properties: { ...CONSULT_TOOL_SCHEMA.properties, ...extra },
+    properties: { ...CONSULT_TOOL_SCHEMA.properties, ...extra, reasoning_effort: REASONING_EFFORT_ARG_SCHEMA },
   };
 
   const defs = [];
   for (const key of registry.keys) {
     const displayName = registry.info[key]?.displayName ?? key;
+    // Build a config-like object the capability check can use. registryFromConfig
+    // copies the `reasoning` field from the loaded config model onto registry.info,
+    // so modelHasReasoningControl can read it without a full config object.
+    const capConfig = { models: { [key]: registry.info[key] ?? {} } };
+    const hasReasoning = modelHasReasoningControl(capConfig, key);
+    // Per-key schema clone: add reasoning_effort only for capable models.
+    const reviewSchema = hasReasoning
+      ? { ...REVIEW_TOOL_SCHEMA, properties: { ...REVIEW_TOOL_SCHEMA.properties, reasoning_effort: REASONING_EFFORT_ARG_SCHEMA } }
+      : REVIEW_TOOL_SCHEMA;
+    const consultSchema = hasReasoning
+      ? { ...CONSULT_TOOL_SCHEMA, properties: { ...CONSULT_TOOL_SCHEMA.properties, reasoning_effort: REASONING_EFFORT_ARG_SCHEMA } }
+      : CONSULT_TOOL_SCHEMA;
+    // Per-key allowedKeys clone: add reasoning_effort only for capable models.
+    const reviewKeys = hasReasoning ? new Set([...REVIEW_KEYS, "reasoning_effort"]) : REVIEW_KEYS;
+    const consultKeys = hasReasoning ? new Set([...CONSULT_KEYS, "reasoning_effort"]) : CONSULT_KEYS;
     defs.push({
       name: `${key}_review`,
       description: `Delegate a structured code review to ${displayName}. Supply exactly one of diff_base or paths.`,
-      inputSchema: REVIEW_TOOL_SCHEMA,
-      allowedKeys: REVIEW_KEYS,
+      inputSchema: reviewSchema,
+      allowedKeys: reviewKeys,
       handler: (input, ctx) => handleModelReview(key, input, ctx),
     });
     defs.push({
       name: `${key}_consult`,
       description: `Ask ${displayName} for a design or implementation consultation.`,
-      inputSchema: CONSULT_TOOL_SCHEMA,
-      allowedKeys: CONSULT_KEYS,
+      inputSchema: consultSchema,
+      allowedKeys: consultKeys,
       handler: (input, ctx) => handleModelConsult(key, input, ctx),
     });
   }
@@ -129,7 +155,7 @@ function buildToolDefs(registry) {
       "Run multiple model reviews in parallel. By default returns each model's findings for you (the calling harness) to merge; " +
       "set `synthesizer` (or MULTIPOLY_SYNTHESIZER) to a model to merge server-side instead. Supply exactly one of diff_base or paths.",
     inputSchema: councilReviewSchema,
-    allowedKeys: new Set([...REVIEW_KEYS, ...COUNCIL_EXTRA_KEYS]),
+    allowedKeys: new Set([...REVIEW_KEYS, ...COUNCIL_EXTRA_KEYS, "reasoning_effort"]),
     handler: handleCouncilReview,
   });
   defs.push({
@@ -138,7 +164,7 @@ function buildToolDefs(registry) {
       "Run multiple model consultations in parallel. By default returns each model's answer for you (the calling harness) to synthesize; " +
       "set `synthesizer` (or MULTIPOLY_SYNTHESIZER) to a model to synthesize server-side instead.",
     inputSchema: councilConsultSchema,
-    allowedKeys: new Set([...CONSULT_KEYS, ...COUNCIL_EXTRA_KEYS]),
+    allowedKeys: new Set([...CONSULT_KEYS, ...COUNCIL_EXTRA_KEYS, "reasoning_effort"]),
     handler: handleCouncilConsult,
   });
   return defs;
@@ -171,7 +197,19 @@ function registryFromConfig(config) {
   return {
     keys: config.modelKeys,
     info: Object.fromEntries(
-      config.modelKeys.map((k) => [k, { key: k, displayName: config.models[k]?.displayName ?? k }]),
+      config.modelKeys.map((k) => {
+        const m = config.models[k] ?? {};
+        return [
+          k,
+          {
+            key: k,
+            displayName: m.displayName ?? k,
+            // reasoning capability is needed by buildToolDefs to decide whether
+            // to add reasoning_effort to the per-key schema clone and allowedKeys.
+            reasoning: m.reasoning,
+          },
+        ];
+      }),
     ),
   };
 }
@@ -306,6 +344,18 @@ function validateToolInput(name, raw, modelKeys, toolKeySpec) {
       if (!allowedKeySet.has(k)) {
         throw new MultipolyError("INVALID_INPUT", `${name}: unknown argument '${k}'`);
       }
+    }
+  }
+  // Validate reasoning_effort value when present. The key is only in the
+  // allowedKeySet for reasoning-capable tools (so unknown-key rejection above
+  // already guards NONE models), but we also validate the concrete value here.
+  if ("reasoning_effort" in input) {
+    const v = input.reasoning_effort;
+    if (typeof v !== "string" || !EFFORT_LEVELS.includes(v.trim().toLowerCase())) {
+      throw new MultipolyError(
+        "INVALID_INPUT",
+        `${name}.reasoning_effort must be a concrete level: ${EFFORT_LEVELS.join("|")}, got ${JSON.stringify(v)}`,
+      );
     }
   }
   if (name.endsWith("_review")) {
