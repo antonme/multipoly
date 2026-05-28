@@ -17,6 +17,13 @@ test("alias maps to canonical key when configured", () => {
   assert.equal(resolveModelAlias("flash", KEYS), "gemini");
 });
 
+test("grok aliases resolve to grok when configured", () => {
+  const keys = [...KEYS, "grok"];
+  assert.equal(resolveModelAlias("grok", keys), "grok"); // exact key
+  assert.equal(resolveModelAlias("xai", keys), "grok");
+  assert.equal(resolveModelAlias("grok-build", keys), "grok"); // punctuation stripped
+});
+
 test("alias to an UNCONFIGURED canonical key does not resolve", () => {
   // claude not in the configured set → its alias must not resolve to it
   assert.equal(resolveModelAlias("opus", ["glm", "qwen"]), null);

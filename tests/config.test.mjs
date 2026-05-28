@@ -642,6 +642,33 @@ test("an explicit MULTIPOLY_MIMO_MAX_TOKENS_REVIEW overrides the floor", () => {
   assert.equal(config.models.mimo.maxTokens.review, 20000);
 });
 
+// ── grok baked cli builtin (opt-in via MULTIPOLY_MODELS + ENABLED) ──
+
+test("MULTIPOLY_MODELS=grok merges baked base: cli transport, grok kind, convention name", () => {
+  const { keys, info } = loadModelRegistry({ MULTIPOLY_MODELS: "grok" });
+  assert.ok(keys.includes("grok"));
+  assert.equal(info.grok.transport, "cli");
+  assert.equal(info.grok.cliKind, "grok");
+  assert.equal(info.grok.reasoning, "anthropic_effort"); // baked graded effort
+  assert.equal(info.grok.displayName, "grok-build (grok cli)");
+});
+
+test("grok stays unconfigured until MULTIPOLY_GROK_ENABLED=1 (cli opt-in gate)", () => {
+  const off = loadConfig({ MULTIPOLY_GLM_API_KEY: "g", MULTIPOLY_MODELS: "grok" });
+  assert.equal(off.models.grok.configured, false);
+  assert.ok(off.models.grok.missing.some((m) => /MULTIPOLY_GROK_ENABLED=1/.test(m)));
+
+  const on = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "grok",
+    MULTIPOLY_GROK_ENABLED: "1",
+  });
+  assert.equal(on.models.grok.configured, true);
+  assert.equal(on.models.grok.cliKind, "grok");
+  assert.equal(on.models.grok.binary, "grok");
+  assert.equal(on.models.grok.model, "grok-build"); // baked default
+});
+
 // ── Display-name convention: always-on builtins surface "<base> (<transport>)" ──
 
 test("config: always-on builtins surface convention-form display names", () => {

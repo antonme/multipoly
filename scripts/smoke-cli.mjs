@@ -12,6 +12,7 @@ const KINDS = [
   { kind: "gemini", model: "gemini-2.5-flash" },
   { kind: "kimi", model: "kimi-code/kimi-for-coding" },
   { kind: "agy", model: null, unsafe: true },
+  { kind: "grok", model: "grok-build" },
 ];
 
 function cfg(spec) {

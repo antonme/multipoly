@@ -65,7 +65,7 @@ Compatibility aliases are accepted for API keys: GLM also accepts `GLM_API_KEY` 
 
 ### Baked builtins (opt-in)
 
-`claude`, `codex`, `gemini`, `kimi`, and `mimo` are **baked builtins** — they carry pre-configured capability metadata (transport, reasoning capability, default effort, base URL) but are **not registered by default**. Add them to `MULTIPOLY_MODELS` to enable their tools:
+`claude`, `codex`, `gemini`, `kimi`, `mimo`, and `grok` are **baked builtins** — they carry pre-configured capability metadata (transport, reasoning capability, default effort, base URL) but are **not registered by default**. Add them to `MULTIPOLY_MODELS` to enable their tools:
 
 | Key | Default transport | Baked display name | Env override |
 |---|---|---|---|
@@ -74,10 +74,13 @@ Compatibility aliases are accepted for API keys: GLM also accepts `GLM_API_KEY` 
 | `gemini` | `http` | `gemini-3.5-flash (api)` | `MULTIPOLY_GEMINI_API_KEY`, `GEMINI_API_KEY` |
 | `kimi` | `anthropic` | `kimi-k2.6 (api)` | `MULTIPOLY_KIMI_API_KEY`, `MOONSHOT_API_KEY` |
 | `mimo` | `http` | `mimo-v2.5-pro (api)` | `MULTIPOLY_MIMO_API_KEY`, `XIAOMIMIMO_API_KEY` |
+| `grok` | `cli` | `grok-build (grok cli)` | `MULTIPOLY_GROK_API_KEY`, `XAI_API_KEY` |
 
 All env overrides from the custom-model table apply (`MULTIPOLY_<K>_TRANSPORT`, `_MODEL`, `_DISPLAY_NAME`, etc.). You no longer need to supply `MULTIPOLY_CLAUDE_DISPLAY_NAME` or `MULTIPOLY_CLAUDE_REASONING` — they are baked; env still overrides.
 
 `mimo` (Xiaomi MiMo V2.5 Pro) uses the same reasoning capability class as GLM: a top-level `thinking:{type}` toggle with no graded effort — `off` disables thinking, any other effort value enables it (default `high`). It gets a minimum token floor of 8192 (review) / 4096 (consult) when no explicit cap is set, preventing empty-response failures. On the wire it sends `max_completion_tokens` instead of `max_tokens` (the MiMo API rejects the legacy field). To enable mimo, add it to `MULTIPOLY_MODELS` and supply a key — `XIAOMIMIMO_API_KEY` is recognized so existing deployments need no rename. The per-deployment `MULTIPOLY_MIMO_DISPLAY_NAME`, `_REASONING`, `_BASE_URL`, and `_MODEL` env vars are no longer needed (baked); keep only `MULTIPOLY_MIMO_MAX_TOKENS_*` if you tuned the token cap.
+
+`grok` (xAI **Grok Build**) is a local coding-agent CLI, driven read-only like Claude Code/Codex. It is **cli-only** (no HTTP API is exposed here) and authenticates with the grok CLI's own OAuth — run `grok login` once; no API key env is required. Its `--effort` flag is graded and `xhigh`-native (`low|medium|high|xhigh|max`), so it shares Claude's effort class (default `xhigh`). To enable it: install the grok CLI, then add `grok` to `MULTIPOLY_MODELS` and set `MULTIPOLY_GROK_ENABLED=1` (cli models are off by default). The default model is `grok-build`; override with `MULTIPOLY_GROK_MODEL`.
 
 > **Migration from `MULTIPOLY_OPUS_*`.** The standalone `opus` model is removed. Use `MULTIPOLY_MODELS=claude` instead, and rename `MULTIPOLY_OPUS_*` env vars to `MULTIPOLY_CLAUDE_*`. At startup the server emits a structured stderr warning naming any `MULTIPOLY_OPUS_*` or `MULTIPOLY_GPT55_*` vars it finds — their values are no longer used to configure a model and are ignored as credentials (use `MULTIPOLY_CLAUDE_*` / `MULTIPOLY_CODEX_*` instead). Note: the mere presence of `MULTIPOLY_OPUS_API_KEY` is still honored as a legacy Anthropic-key signal for the claude transport-flip default (see below).
 
@@ -142,6 +145,7 @@ Every model that supports graded reasoning exposes a `reasoning_effort` argument
 | `gemini` | `high` | `reasoning_effort` (OpenAI effort) |
 | `kimi` | `high` | `thinking: {type: "enabled"\|"disabled"}` toggle |
 | `mimo` | `high` | `thinking: {type: "enabled"\|"disabled"}` toggle (same class as GLM; no graded effort) |
+| `grok` | `xhigh` | `--effort` cli flag (graded `low`–`xhigh`, `xhigh`-native; same class as claude) |
 | `composer` | `off` | no reasoning control (cursor-agent) |
 
 **Precedence order (highest to lowest):**
@@ -200,7 +204,7 @@ MULTIPOLY_HAIKU_MODEL=claude-haiku-4-5
 > override, sending the Opus-style payload to a non-Claude endpoint will result
 > in an API error.
 
-### CLI agents (Claude Code, Codex, Cursor/Composer, Gemini, agy, Kimi)
+### CLI agents (Claude Code, Codex, Cursor/Composer, Gemini, agy, Kimi, Grok)
 
 A `cli` model shells out to a local agent in its **read-only** mode. Each kind
 also runs with config/MCP isolation so the spawned agent can't auto-load your
@@ -214,6 +218,7 @@ operator MCP servers or rules. CLI models are **opt-in** (`MULTIPOLY_<K>_ENABLED
 | `gemini` | `gemini` | `--approval-mode plan` + workspace-trust env | OAuth / `GEMINI_API_KEY` |
 | `agy` | `agy` | weak sandbox only — **opt-in unsafe** (`MULTIPOLY_<K>_UNSAFE=1`) | gemini OAuth |
 | `kimi` | `kimi` | `--print --plan` (`--print` implies auto-run, so `--plan` is mandatory) | `kimi login` / `KIMI_API_KEY` |
+| `grok` | `grok` | `--permission-mode plan` (+ `--no-subagents`, `--disable-web-search`); prompt via `--prompt-file` | `grok login` (OAuth) |
 
 Per-cli env (`<K>` is the model key, e.g. `COMPOSER`):
 
@@ -254,6 +259,11 @@ Notes from live verification:
   `--quiet` so only the final message is returned.
 - **gemini**'s prompt is passed on argv (`-p`), so prefer another transport for
   very large reviews.
+- **grok** runs headless via `--prompt-file` (prompt in a scratch file, not argv,
+  so large reviews are safe) and prints the final message to stdout. The default
+  model is `grok-build`; `--effort` is graded (`low`–`xhigh`). A benign background
+  worker may log an auth warning to stderr even on success — it does not affect
+  the result (exit 0 with output is treated as success).
 
 Example — enable codex as a council-eligible cli model:
 

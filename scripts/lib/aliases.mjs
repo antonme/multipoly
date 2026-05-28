@@ -20,6 +20,7 @@ const RAW_ALIASES = {
   "deepseek-v4": "deepseek",
   "qwen-max": "qwen",
   xiaomi: "mimo", "mi-mo": "mimo",
+  xai: "grok", "grok-build": "grok",
 };
 
 // Exposed (normalized) for tests / introspection.

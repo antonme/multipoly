@@ -114,6 +114,16 @@ test("regression: claude effortToCliReasoningArgs maps off → []", () => {
   assert.deepEqual(effortToCliReasoningArgs("claude", "off"), []);
 });
 
+// ── grok branch of effortToCliReasoningArgs (grok --effort low|medium|high|xhigh|max) ──
+
+test("grok effortToCliReasoningArgs maps high → --effort high (xhigh native, no clamp)", () => {
+  assert.deepEqual(effortToCliReasoningArgs("grok", "high"), ["--effort", "high"]);
+  assert.deepEqual(effortToCliReasoningArgs("grok", "xhigh"), ["--effort", "xhigh"]);
+});
+test("grok effortToCliReasoningArgs maps off → []", () => {
+  assert.deepEqual(effortToCliReasoningArgs("grok", "off"), []);
+});
+
 // ── Part A-3: Capability completeness — every MODEL_INFO entry ──
 
 test("regression: every MODEL_INFO entry has a valid CAPABILITY value for 'reasoning'", () => {

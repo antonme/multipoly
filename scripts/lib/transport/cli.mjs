@@ -247,6 +247,10 @@ export function flattenMessages(messages, wantJson) {
  *              opt-in at config time).
  *   - kimi:    --print --plan (--print implies --afk → --plan makes it
  *              read-only) -m <model> --prompt <prompt>.
+ *   - grok:    --prompt-file <file> (headless single-turn, prints to stdout and
+ *              exits) + --permission-mode plan (read-only) + --output-format plain.
+ *              --no-subagents/--disable-web-search keep it bounded & deterministic.
+ *              Prompt goes in a file (not argv) to avoid E2BIG on large reviews.
  */
 export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, prompt, scratch }) {
   switch (kind) {
@@ -348,6 +352,34 @@ export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, pro
         stdin: prompt,
         env: {},
       };
+    case "grok": {
+      // grok reads the prompt from a file (headless single-turn), prints the
+      // final response to stdout, and exits. --permission-mode plan is the
+      // read-only guarantee (no file writes); --no-subagents/--disable-web-search
+      // keep the run bounded and deterministic over the provided prompt. The
+      // prompt lives in the scratch dir (cleaned after the call) rather than on
+      // argv so large reviews can't hit the OS E2BIG limit.
+      const promptFile = join(scratch, "grok-prompt.md");
+      writeFileSync(promptFile, prompt);
+      const args = [
+        "--prompt-file",
+        promptFile,
+        "-m",
+        model,
+        "--output-format",
+        "plain",
+        "--permission-mode",
+        "plan",
+        "--no-subagents",
+        "--disable-web-search",
+      ];
+      args.push(...effortToCliReasoningArgs("grok", reasoningEffort));
+      return {
+        args,
+        stdin: "", // prompt is in the file, not stdin
+        env: {},
+      };
+    }
     case "kimi":
       // --quiet = `--print --output-format text --final-message-only`, so the
       // output is just the final assistant message (no TurnBegin/ThinkPart

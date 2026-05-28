@@ -1,6 +1,6 @@
 {
   "name": "multipoly",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Use multiple coding models from Claude Code for review, consultation, and council synthesis.",
   "author": {
     "name": "Anton Volnuhin"

@@ -216,6 +216,50 @@ test("cli: kimi — print + plan (read-only) + model, prompt on stdin (not argv)
   assert.ok(opts.input.includes("Review this."));
 });
 
+test("cli: grok — read-only plan mode, prompt via file, plain output, prompt NOT in argv", async () => {
+  const cap = [];
+  // grok reads the prompt from --prompt-file (scratch dir, cleaned after the
+  // call), so capture its content DURING exec like real grok would.
+  let promptFileContent = null;
+  const exec = (file, args, opts) => {
+    cap.push({ file, args, opts });
+    const i = args.indexOf("--prompt-file");
+    if (i >= 0 && args[i + 1]) promptFileContent = readFileSync(args[i + 1], "utf8");
+    return "grok output";
+  };
+  const out = await runModel({
+    config: cliConfig("grok"),
+    modelKey: "m",
+    messages,
+    mode: "consult",
+    execFileImpl: exec,
+    env: {},
+  });
+  assert.equal(out.content, "grok output");
+  const { file, args, opts } = cap[0];
+  assert.equal(file, "grok"); // default binary for grok
+  assert.deepEqual(args.slice(args.indexOf("-m"), args.indexOf("-m") + 2), ["-m", "the-model"]);
+  assert.ok(args.includes("--permission-mode"));
+  assert.equal(args[args.indexOf("--permission-mode") + 1], "plan"); // read-only
+  assert.deepEqual(args.slice(args.indexOf("--output-format"), args.indexOf("--output-format") + 2), ["--output-format", "plain"]);
+  assert.ok(args.includes("--prompt-file"));
+  assert.equal(opts.input, ""); // prompt is in the file, not stdin
+  // The prompt must NOT be on argv (leaks reviewed code / risks E2BIG on large reviews).
+  assert.ok(!args.some((a) => a.includes("Review this.")));
+  assert.ok(promptFileContent && promptFileContent.includes("Review this."));
+});
+
+test("cli: grok + xhigh effort → --effort xhigh in argv (xhigh native, no clamp)", () => {
+  const { args } = buildInvocation({ kind: "grok", binary: "grok", model: "m", cwd: "/tmp", reasoningEffort: "xhigh", prompt: "p", scratch: scratch() });
+  assert.ok(args.includes("--effort"), `expected --effort flag for grok: ${args.join(" ")}`);
+  assert.equal(args[args.indexOf("--effort") + 1], "xhigh");
+});
+
+test("cli: grok + off effort → no --effort flag in argv", () => {
+  const { args } = buildInvocation({ kind: "grok", binary: "grok", model: "m", cwd: "/tmp", reasoningEffort: "off", prompt: "p", scratch: scratch() });
+  assert.ok(!args.includes("--effort"), `off must produce no --effort flag: ${args.join(" ")}`);
+});
+
 test("cli: an unconfigured model is refused before spawning (opt-in gate)", async () => {
   const cap = [];
   const cfg = cliConfig("cursor");

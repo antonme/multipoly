@@ -74,6 +74,7 @@ export function effortToQwenFields(e, { maxTokens }) {
 
 const CODEX_EFFORTS = new Set(["low", "medium", "high"]);
 // claude --help confirms: --effort <level> (low, medium, high, xhigh, max) — graded effort flag.
+// grok  --help confirms: --effort <LEVEL> (low, medium, high, xhigh, max) — same graded flag as claude.
 // gemini --help: no reasoning/effort/think flag found.
 // cursor-agent --help: no reasoning/effort/think flag found.
 // agy: not installed / no matching flag.
@@ -83,7 +84,8 @@ export function effortToCliReasoningArgs(kind, e) {
   assertConcreteEffort(e);
   if (e === "off") return [];
   if (kind === "codex") { const v = CODEX_EFFORTS.has(e) ? e : "high"; return ["-c", `model_reasoning_effort="${v}"`]; }
-  if (kind === "claude") { const v = CLAUDE_EFFORTS.has(e) ? e : "xhigh"; return ["--effort", v]; }
+  // claude and grok share the same graded --effort flag (low|medium|high|xhigh, xhigh-native).
+  if (kind === "claude" || kind === "grok") { const v = CLAUDE_EFFORTS.has(e) ? e : "xhigh"; return ["--effort", v]; }
   return []; // gemini/cursor/agy/kimi: no graded effort flag verified
 }
 

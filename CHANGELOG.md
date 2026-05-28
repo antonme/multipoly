@@ -2,7 +2,25 @@
 
 All notable changes to this project are documented here.
 
-## Unreleased
+## 0.2.0 (2026-05-28)
+
+### Grok Build CLI support (2026-05-28)
+
+- **New baked builtin `grok`** (xAI **Grok Build**) — a local coding-agent CLI
+  driven read-only like Claude Code/Codex. Add `grok` to `MULTIPOLY_MODELS` and
+  set `MULTIPOLY_GROK_ENABLED=1` to expose `grok_review` / `grok_consult` and make
+  it council-eligible. It is **cli-only** (no HTTP API exposed) and authenticates
+  via the grok CLI's own OAuth (`grok login`) — no API key env required.
+  - **Read-only recipe (verified against `grok 0.2.3`):** headless
+    `--prompt-file <scratch>` (prompt in a file, not argv, so large reviews don't
+    hit the OS `E2BIG` limit) + `--permission-mode plan` (no file writes) +
+    `--output-format plain`, with `--no-subagents` and `--disable-web-search` to
+    keep the run bounded and deterministic over the provided prompt.
+  - **Graded effort:** grok's `--effort` flag is `xhigh`-native
+    (`low|medium|high|xhigh|max`), so it shares Claude's effort class
+    (`ANTHROPIC_EFFORT`); default effort is `xhigh`. `off` omits the flag.
+  - **Aliases:** `xai` and `grok-build` resolve to `grok`. Default model
+    `grok-build` (override with `MULTIPOLY_GROK_MODEL`).
 
 ### Large-PR council reliability upgrade (2026-05-28)
 

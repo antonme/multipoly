@@ -217,10 +217,12 @@ test("transport: invalid cwd mode is a CONFIG error", () => {
 test("transport: CLI_KINDS exposes the known agent kinds", () => {
   assert.deepEqual(
     Object.keys(CLI_KINDS).sort(),
-    ["agy", "claude", "codex", "cursor", "gemini", "kimi"],
+    ["agy", "claude", "codex", "cursor", "gemini", "grok", "kimi"],
   );
   assert.equal(CLI_KINDS.agy.weakSandbox, true);
   assert.equal(CLI_KINDS.cursor.binary, "cursor-agent");
+  assert.equal(CLI_KINDS.grok.binary, "grok");
+  assert.equal(CLI_KINDS.grok.defaultModel, "grok-build");
 });
 
 
@@ -236,6 +238,16 @@ test("models: capability + default effort on builtins", () => {
   assert.equal(MODEL_INFO.deepseek.defaultEffort, "high");
   assert.equal(MODEL_INFO.composer.reasoning, CAPABILITY.NONE);
   assert.equal(MODEL_INFO.composer.defaultEffort, "off");
+});
+
+test("models: grok is a cli baked builtin with graded effort (ANTHROPIC_EFFORT, xhigh)", () => {
+  assert.ok(MODEL_INFO.grok, "grok should be in MODEL_INFO");
+  assert.equal(MODEL_INFO.grok.transport, "cli");
+  assert.equal(MODEL_INFO.grok.cliKind, "grok");
+  assert.equal(MODEL_INFO.grok.baseName, "grok-build");
+  assert.equal(MODEL_INFO.grok.defaultModel, "grok-build");
+  assert.equal(MODEL_INFO.grok.reasoning, CAPABILITY.ANTHROPIC_EFFORT);
+  assert.equal(MODEL_INFO.grok.defaultEffort, "xhigh");
 });
 
 test("models: modelSupportsThinking stays true only for GLM_TOGGLE/KIMI_TOGGLE/ANTHROPIC_BUDGET", () => {

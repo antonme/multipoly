@@ -43,7 +43,7 @@ export const MODEL_KEYS = Object.freeze(["glm", "qwen", "deepseek", "composer"])
 // Promotable builtins: present in MODEL_INFO but NOT in MODEL_KEYS (opt-in via
 // MULTIPOLY_MODELS). When listed, the registry loader merges the baked MODEL_INFO
 // base under env overrides instead of building from scratch.
-const PROMOTABLE_BUILTINS = new Set(["claude", "codex", "gemini", "kimi", "mimo"]);
+const PROMOTABLE_BUILTINS = new Set(["claude", "codex", "gemini", "kimi", "mimo", "grok"]);
 
 // The three transports a model can be reached over. `http` is the default
 // OpenAI-compatible streaming client; `anthropic` is the native Messages API;
@@ -62,6 +62,9 @@ export const CLI_KINDS = Object.freeze({
   // agy has no --model flag and only a weak sandbox.
   agy: Object.freeze({ binary: "agy", weakSandbox: true, noModelFlag: true }),
   kimi: Object.freeze({ binary: "kimi" }),
+  // xAI "Grok Build" coding CLI: claude-code-like agent with a graded --effort
+  // flag and a read-only `--permission-mode plan`.
+  grok: Object.freeze({ binary: "grok", defaultModel: "grok-build" }),
 });
 
 // The native Anthropic API endpoint and pinned version header.
@@ -185,6 +188,23 @@ export const MODEL_INFO = Object.freeze({
     reasoning: CAPABILITY.GLM_TOGGLE, // "http_thinking_toggle"
     defaultEffort: "high",
     usesMaxCompletionTokens: true,    // MiMo expects max_completion_tokens, not max_tokens
+  }),
+  // xAI Grok Build — local coding-agent CLI (cli-only; no http API exposed here).
+  // Auth is the grok CLI's own OAuth (grok login), so no authTokenEnv is required;
+  // apiKeyEnv is named for symmetry/future use. `--effort` is graded and xhigh-native
+  // (low|medium|high|xhigh|max), so it inherits the ANTHROPIC_EFFORT capability class
+  // like claude — the cli transport maps it to argv via effortToCliReasoningArgs.
+  grok: Object.freeze({
+    key: "grok",
+    baseName: "grok-build",
+    transport: "cli",
+    cliKind: "grok",
+    defaultModel: "grok-build",
+    defaultBaseUrl: null,
+    apiKeyEnv: ["MULTIPOLY_GROK_API_KEY", "XAI_API_KEY"],
+    supportsThinking: false,
+    reasoning: CAPABILITY.ANTHROPIC_EFFORT, // graded effort, xhigh-native (matches grok --effort)
+    defaultEffort: "xhigh",
   }),
 });
 
