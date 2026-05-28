@@ -29,6 +29,21 @@ test("secrets: Slack token detected", () => {
   assert.equal(r.hits[0].pattern, "slack_token");
 });
 
+test("secrets: Slack session-cookie token (xoxd) detected", () => {
+  // xoxd-/xoxc- are real Slack token subtypes the old [baprs] class missed;
+  // xoxd is the highly sensitive session-cookie token. The "xox*" contract
+  // must cover all single-letter subtypes.
+  const r = scan("token=xoxd-" + "1234567890abcdef", "src");
+  assert.equal(r.clean, false);
+  assert.equal(r.hits[0].pattern, "slack_token");
+});
+
+test("secrets: Slack config token (xoxc) detected", () => {
+  const r = scan("token=xoxc-" + "1234567890abcdef", "src");
+  assert.equal(r.clean, false);
+  assert.equal(r.hits[0].pattern, "slack_token");
+});
+
 test("secrets: PEM private key detected", () => {
   const pem = "-----BEGIN OPENSSH PRIVATE KEY-----\nstuff\n-----END-----";
   const r = scan(pem, "id_rsa");

@@ -101,9 +101,12 @@ const PATTERNS = Object.freeze([
   // fine-grained (github_pat_). Fine-grained tokens are longer and prefixed.
   { name: "github_token", re: /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/ },
   { name: "github_fine_grained_token", re: /\bgithub_pat_[A-Za-z0-9_]{20,}\b/ },
-  // Slack: user tokens (xoxp, xoxb, xoxa, xoxr, xoxs), bot tokens, and
-  // app-level tokens (xapp).
-  { name: "slack_token", re: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },
+  // Slack: any `xox<letter>-` token — user (xoxp), bot (xoxb), app (xoxa),
+  // refresh (xoxr), config (xoxc) and the sensitive session-cookie token
+  // (xoxd), plus future subtypes. `xox[a-z]` keeps coverage broad rather than
+  // enumerating a subset that silently misses new prefixes. App-level tokens
+  // (xapp) are caught by the dedicated pattern below.
+  { name: "slack_token", re: /\bxox[a-z]-[A-Za-z0-9-]{10,}\b/ },
   { name: "slack_app_token", re: /\bxapp-[A-Za-z0-9-]{10,}\b/ },
   {
     name: "pem_private_key",
@@ -244,10 +247,16 @@ export function formatHitsForError(hits) {
   return lines.join("\n");
 }
 
+const HIT_LABEL_MAX = 512;
+
 function sanitizeHitLabel(label) {
   const raw = String(label ?? "");
   let out = "";
   for (let i = 0; i < raw.length; i++) {
+    // Output is capped at HIT_LABEL_MAX; stop scanning once we have enough so a
+    // pathologically long label can't make sanitization cost scale with its
+    // full length. One extra char past the cap is enough to trigger truncation.
+    if (out.length > HIT_LABEL_MAX) break;
     const cp = raw.codePointAt(i);
     if (cp === undefined) break;
     if (cp < 0x20 || cp === 0x7f) out += "?";
@@ -255,5 +264,5 @@ function sanitizeHitLabel(label) {
     else out += String.fromCodePoint(cp);
     if (cp >= 0x10000) i++;
   }
-  return out.length > 512 ? out.slice(0, 512) + "..." : out;
+  return out.length > HIT_LABEL_MAX ? out.slice(0, HIT_LABEL_MAX) + "..." : out;
 }
