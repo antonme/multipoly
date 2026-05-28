@@ -215,7 +215,11 @@ export function scanMany(pieces) {
   const allHits = [];
   for (const { text, label } of pieces) {
     const { hits } = scan(text, label);
-    allHits.push(...hits);
+    // Append element-by-element: `push(...hits)` spreads the array as call
+    // arguments and throws RangeError ("Maximum call stack size exceeded") when
+    // a single piece yields a very large number of hits (attacker-controlled
+    // outbound content). A loop stays linear with no argument-count limit.
+    for (const h of hits) allHits.push(h);
   }
   return { hits: allHits, clean: allHits.length === 0 };
 }

@@ -67,6 +67,20 @@ test("secrets: scanMany aggregates", () => {
   assert.equal(r.hits[0].label, "b");
 });
 
+test("secrets: scanMany handles a piece with a very large hit count without overflowing the call stack", () => {
+  // scanMany used `allHits.push(...hits)`, spreading the hits array as call
+  // arguments. A piece producing ~150k matches blew the argument limit with
+  // `RangeError: Maximum call stack size exceeded` — a DoS on attacker-
+  // controlled outbound content. Appending without spreading keeps it linear.
+  const N = 150000;
+  const lines = new Array(N);
+  for (let i = 0; i < N; i++) lines[i] = "AKIA" + String(i).padStart(16, "A");
+  const text = lines.join("\n");
+  const r = scanMany([{ text, label: "huge" }]);
+  assert.equal(r.clean, false);
+  assert.equal(r.hits.length, N);
+});
+
 test("secrets: formatted hit labels cannot inject extra lines", () => {
   const out = formatHitsForError([{ pattern: "aws_access_key_id", label: "evil\n- injected", line: 7 }]);
   assert.equal(out.split("\n").length, 1);
