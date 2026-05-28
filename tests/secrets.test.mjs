@@ -231,6 +231,14 @@ test("secrets: URL with a percent-encoded opaque token in the path must be flagg
   assert.equal(r.clean, false, "percent-encoded opaque URL token must be flagged");
 });
 
+test("secrets: a trailing malformed percent-escape must not re-enable the encoded URL bypass", () => {
+  // %FF is invalid UTF-8 and makes decodeURIComponent throw. A whole-string
+  // fall-back to the raw tail would let `%4d` stay encoded and revive the bypass.
+  // Per-escape decoding must still reassemble the opaque run from `%4d` -> M.
+  const r = scan('WEBHOOK_TOKEN = "https://hooks.example.com/services/abcdEFGH1234ijkl%4dNOP5678qrst%FF"', "t");
+  assert.equal(r.clean, false, "malformed trailing escape must not disable decoding of the rest");
+});
+
 test("scanner: KNOWN GAP — code-shaped camouflage with a short/separator-broken tail is not flagged (tier-2 boundary)", () => {
   // The generic assignment heuristics are a tier-2 best-effort catch-all that
   // sits BEHIND the dedicated high-precision patterns (sk-, ghp_, AKIA, Slack,

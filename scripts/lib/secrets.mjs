@@ -45,6 +45,17 @@ function embedsOpaqueSecret(s) {
   return /[A-Za-z0-9]{24,}/.test(s);
 }
 
+function decodePercentEscapesLoose(s) {
+  // Decode each %XX escape to its single byte INDEPENDENTLY. decodeURIComponent
+  // throws on invalid UTF-8 (e.g. a stray %FF), and a whole-string fall-back to
+  // the undecoded tail would let an attacker re-enable the encoding bypass by
+  // appending one malformed escape. Per-escape decoding never throws, and only
+  // affects opaque-run detection: %XX that maps to an alnum byte joins a run,
+  // anything else (incl. malformed/non-ASCII) breaks it — exactly like the raw
+  // escape did. The regex guarantees two hex digits, so parseInt is always valid.
+  return s.replace(/%[0-9A-Fa-f]{2}/g, (m) => String.fromCharCode(parseInt(m.slice(1), 16)));
+}
+
 function looksLikeNonSecretValue(v) {
   if (v == null) return false;
   const s = String(v).trim();
@@ -69,15 +80,9 @@ function looksLikeNonSecretValue(v) {
     }
     if (u.username || u.password) return false; // embedded credentials are secrets
     // Decode the tail first so percent-encoding can't break up an opaque run
-    // (e.g. `abcdEFGH1234ijkl%4dNOP5678qrst` -> `abcd...MNOP...qrst`). Malformed
-    // escapes throw — fall back to the raw tail (conservative) in that case.
-    const rawTail = u.pathname + u.search + u.hash;
-    let tail = rawTail;
-    try {
-      tail = decodeURIComponent(rawTail);
-    } catch {
-      tail = rawTail;
-    }
+    // (e.g. `abcdEFGH1234ijkl%4dNOP5678qrst` -> `abcd...MNOP...qrst`). Per-escape
+    // decoding tolerates malformed escapes so one bad byte can't disable the rest.
+    const tail = decodePercentEscapesLoose(u.pathname + u.search + u.hash);
     // 24 chars ≈ minimum Slack/GitHub webhook secret length in a URL path;
     // a longer opaque tail => treat as a secret-bearing URL, not a plain base URL.
     if (/[A-Za-z0-9_\-]{24,}/.test(tail)) return false; // opaque token — keep flagged
