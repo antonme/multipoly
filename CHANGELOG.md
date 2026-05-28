@@ -4,6 +4,55 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Large-PR council reliability upgrade (2026-05-28)
+
+A coordinated set of improvements (D1 + D2 + D3) targeting the failure modes
+observed in production large-PR council reviews: member budget exhaustion,
+ambiguous errors, payload bloat, and secret-scanner false-positives.
+
+- **IPv6 happy-eyeballs (§5).** `net.setDefaultAutoSelectFamily` is called at
+  server startup so dual-stack DNS probes both A and AAAA in parallel, reducing
+  connection latency on IPv6-capable networks. Requires Node ≥18.18 to engage
+  (no-op on older versions). Escape hatch:
+  `NODE_OPTIONS=--dns-result-order=ipv4first`.
+
+- **HTTP error-cause surfacing (§6).** Network errors now include the underlying
+  cause code (e.g. `UND_ERR_CONNECT_TIMEOUT`) in the structured error, making
+  transient failures diagnosable. Council results include a `failure_summary`
+  line when any members fail (e.g. `"3/10 members failed: glm (BUDGET), kimi
+  (BUDGET)"`).
+
+- **Council payload de-duplication + `compact` mode (§2).** `council_review`
+  no longer duplicates failed-member details: when `include_individual_results`
+  is set, only failed members appear in `member_results`; successful members are
+  listed in `members`. New `compact: true` parameter drops per-model prose
+  summaries, keeping only structured findings — use it when the harness reports
+  the large-payload `notice` (triggered at ≥80000 chars).
+
+- **Reasoning max_tokens floors + adaptive BUDGET retry (§1).** All reasoning
+  models now get a 32768-token floor for review calls and an 8192-token floor
+  for consult calls (raised from the previous GLM-only 8192/4096 floors). When
+  a member returns `BUDGET`, one adaptive retry doubles `max_tokens` and steps
+  `reasoning_effort` down one level before giving up. Per-model cap lever:
+  `MULTIPOLY_<K>_MAX_TOKENS_REVIEW` / server-wide `MULTIPOLY_MAX_TOKENS_REVIEW`.
+
+- **Prose-wrapped JSON extraction (§4).** CLI agents that wrap their JSON output
+  in prose (e.g. "Here is the review: ```json…```") are now recovered by
+  `extractJsonObject`, eliminating `SCHEMA` failures from otherwise correct
+  agent output.
+
+- **Scanner precision + per-call `allow_secrets` (§3).** The unquoted
+  `NAME=value` pattern is now case-sensitive (SCREAMING_CASE only) — dropping
+  `/i` eliminates camelCase identifier false-positives. A `looksLikeNonSecretValue`
+  suppressor skips both assignment patterns when the value is a code expression
+  (function call, template literal, member/index reference) or a plain base URL
+  with no long opaque token in the path. Known recall tradeoff: unquoted
+  lowercase keys (`apikey=…`) are not flagged by the unquoted pattern; quoted
+  forms and dedicated provider patterns still catch them.
+  New per-call `allow_secrets: true` boolean on every `*_review`, `*_consult`,
+  and `council_*` tool bypasses the scanner for one call without a server
+  restart. `MULTIPOLY_ALLOW_SECRETS` remains the global escape.
+
 ### MiMo first-class builtin + `max_completion_tokens` (2026-05-27)
 
 Xiaomi MiMo V2.5 Pro is now a baked `MODEL_INFO` builtin (opt-in, same as

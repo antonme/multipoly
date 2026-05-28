@@ -384,7 +384,8 @@ Council tools accept the same review/consult arguments plus:
 {
   "models": ["glm", "qwen"],
   "synthesizer": "qwen",        // optional — see below
-  "include_individual_results": false
+  "include_individual_results": false,
+  "compact": true               // optional — drop per-model prose summaries (findings only)
 }
 ```
 
@@ -398,6 +399,47 @@ To merge server-side instead, set a `synthesizer`:
 - `harness` / `none` / `caller` forces the default defer-to-harness behavior even when `MULTIPOLY_SYNTHESIZER` names a model.
 
 The per-call `synthesizer` argument overrides the `MULTIPOLY_SYNTHESIZER` env default. When server-side synthesis runs, member outputs are re-scanned for secrets before being sent to the synthesizer provider.
+
+**`compact: true`** drops per-model prose summaries from the council payload, keeping only structured findings. Use this when the harness reports a large-payload notice (triggered at ≥80000 chars) to reduce context pressure on the synthesizer.
+
+**`failure_summary`** — when one or more council members fail, a `failure_summary` line is included in the result (e.g. `"3/10 members failed: glm (BUDGET), kimi (BUDGET)"`). Failed-member details are included only under `member_results` when `include_individual_results` is set; successful members are listed in `members`.
+
+#### Interpreting council output
+
+Council results are strong candidate-finding generators, not ground truth. Members can disagree on severity, and a plurality can be wrong — for example, a field case found that a plurality of members mis-rated a fail-closed guard as a high-severity bug when it was correct code. **Always verify severity and correctness against the actual code before acting on a finding, especially for security issues.**
+
+Callers can reduce false confidence by asking council members to state their confidence level and cite the specific line they verified. A finding reported without a concrete line reference warrants extra skepticism.
+
+## Large Reviews
+
+### Reasoning-model token floors
+
+Reasoning models need a generous output budget to avoid empty-response `BUDGET` failures during large reviews. Multipoly enforces a minimum `max_tokens` floor for every model whose reasoning capability class uses an explicit token cap:
+
+| Scenario | Floor |
+|---|---|
+| `*_review` / `council_review` | 32768 tokens |
+| `*_consult` / `council_consult` | 8192 tokens |
+
+These floors apply unless you have set a model-specific cap smaller than the floor, in which case your explicit cap wins. The previous floor (GLM/MiMo only, 8192/4096) was raised and extended to all reasoning models.
+
+To raise the cap beyond the floor for an especially large review, set:
+
+```sh
+# Per-model (e.g. GLM):
+MULTIPOLY_GLM_MAX_TOKENS_REVIEW=65536
+
+# Server-wide (all models):
+MULTIPOLY_MAX_TOKENS_REVIEW=65536
+```
+
+### Adaptive BUDGET retry
+
+When a member returns a `BUDGET` error (output truncated), multipoly automatically retries once with `max_tokens` doubled and `reasoning_effort` stepped down one level (e.g. `xhigh` → `high`). If the retry also fails, the original `BUDGET` error is returned. This handles transient budget exhaustion on large payloads without manual tuning.
+
+### Reducing council payload size
+
+If the harness reports that the council payload is large (≥80000 chars), use `compact: true` on the `council_review` call to drop per-model prose summaries (keeping only structured findings). This is the fastest way to reduce context pressure when a council synthesis is hitting harness limits.
 
 ## Client-Side Timeout
 
@@ -434,6 +476,32 @@ If the client kills the call first, no server-side setting can save it. Raise th
 - All HTTP calls use an `AbortController` timeout; 401/403 fail fast, and 429/5xx use exponential backoff with bounded `Retry-After` handling.
 - CLI-transport agents run in their read-only mode with config/MCP isolation, in their own process group (timeouts kill the whole group), and surface errors with secrets/paths redacted. Note the [repo-cwd trust boundary](#transports): the pre-flight secret scan covers only the gathered payload, not the whole workspace a repo-cwd agent can read.
 - The JSON registry file is loaded only from an explicit `MULTIPOLY_MODELS_FILE` path (never the cwd), rejects secret-bearing fields, and never accepts arbitrary argv.
+
+### Secret scanner
+
+The scanner flags common secret shapes — AWS keys, GitHub tokens, OpenAI/Anthropic `sk-` keys, PEM private keys, quoted and unquoted `NAME=value` assignments, and more. When a hit is found the call is refused and no matched content is logged.
+
+**Precision improvements:** The unquoted `NAME=value` pattern (`env_style_secret`) is case-sensitive (SCREAMING_CASE keys only) to avoid false-positives on camelCase identifiers in code. Both assignment patterns suppress hits when the value is plainly a code expression (function call, template literal, member/index reference) or a plain base URL with no long opaque token in the path. This eliminates the most common false-positives from ordinary code reviews.
+
+**Known recall tradeoff:** Unquoted lowercase keys (e.g. `apikey=...`) are not flagged by the unquoted pattern (only SCREAMING_CASE there); quoted forms (e.g. `apiKey: "..."`) and the dedicated provider key patterns still catch them.
+
+**Per-call override:** Pass `allow_secrets: true` on any `*_review`, `*_consult`, or `council_*` call to bypass the scanner for that one call. Use this when the scanner false-positives on your code and you have confirmed no real secrets are present.
+
+```jsonc
+{ "diff_base": "main", "allow_secrets": true }
+```
+
+**Global override:** `MULTIPOLY_ALLOW_SECRETS=1` bypasses the scanner for all calls on this server instance. Prefer the per-call form — the global escape requires a server restart and applies to every call.
+
+## Runtime Requirements
+
+**Node.js ≥18.18** is required. The server uses `net.setDefaultAutoSelectFamily` (happy-eyeballs dual-stack DNS) at startup to reduce connection latency on IPv6-capable networks. This call is a no-op on older Node versions, so the server still starts, but happy-eyeballs is not active below 18.18.
+
+If happy-eyeballs causes unexpected behaviour on your network (e.g. a provider that mis-advertises IPv6 support), disable it with:
+
+```sh
+NODE_OPTIONS=--dns-result-order=ipv4first node /path/to/multipoly/scripts/multipoly-mcp.mjs
+```
 
 ## Development
 
