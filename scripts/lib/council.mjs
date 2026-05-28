@@ -252,6 +252,13 @@ function buildMemberStatus(memberResults) {
   );
 }
 
+function buildFailureSummary(memberResults, models) {
+  const failed = Object.entries(memberResults).filter(([, v]) => !v.ok);
+  if (failed.length === 0) return "";
+  const parts = failed.map(([k, v]) => `${k} (${v.error?.code ?? "UNKNOWN"})`);
+  return `${failed.length}/${models.length} members failed: ${parts.join(", ")}`;
+}
+
 async function synthesizeCouncilReview({
   config,
   synthesizer,
@@ -390,6 +397,7 @@ function buildHarnessReviewResult({ input, models, memberResults, prepared }) {
     files: prepared.gathered.files.map(({ content, ...rest }) => rest),
     truncated: prepared.gathered.truncated,
     member_status: buildMemberStatus(memberResults),
+    failure_summary: buildFailureSummary(memberResults, models),
     ...(input.include_individual_results ? { member_results: memberResults } : {}),
   };
 }
@@ -410,7 +418,9 @@ function buildHarnessConsultResult({ models, memberResults, successful, input })
   const individual = input.include_individual_results
     ? `\n\nIndividual results:\n\n${safeFence(JSON.stringify(memberResults, null, 2), "json")}`
     : "";
-  return parts.join("\n") + individual;
+  const body = parts.join("\n") + individual;
+  const summary = buildFailureSummary(memberResults, models);
+  return summary ? `${summary}\n\n${body}` : body;
 }
 
 export async function handleCouncilReview(input, { config, fetchImpl, execFileImpl } = {}) {
@@ -462,6 +472,7 @@ export async function handleCouncilReview(input, { config, fetchImpl, execFileIm
       files: prepared.gathered.files.map(({ content, ...rest }) => rest),
       truncated: prepared.gathered.truncated,
       member_status: buildMemberStatus(memberResults),
+      failure_summary: buildFailureSummary(memberResults, models),
       ...(input.include_individual_results ? { member_results: memberResults } : {}),
     },
     reasoning,
@@ -514,7 +525,8 @@ export async function handleCouncilConsult(input, { config, fetchImpl, execFileI
     const suffix = truncated
       ? `\n\n> Output truncated at ${maxTokens ?? "provider/default max_tokens"}. Raise MULTIPOLY_MAX_TOKENS_CONSULT or a model-specific cap for a complete answer.`
       : "";
-    const status = `\n\n---\n\nMember status: ${successful.length}/${models.length} succeeded.`;
+    const failureSummary = buildFailureSummary(memberResults, models);
+    const status = `\n\n---\n\nMember status: ${successful.length}/${models.length} succeeded.${failureSummary ? ` ${failureSummary}` : ""}`;
     const individual = input.include_individual_results
       ? `\n\nIndividual results:\n\n${safeFence(JSON.stringify(memberResults, null, 2), "json")}`
       : "";

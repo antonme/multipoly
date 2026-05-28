@@ -447,10 +447,12 @@ async function callWithRetry({ url, apiKey, body, timeoutMs, correlationId, fetc
         });
       }
       // Network errors: retry
-      lastErr = new MultipolyError("HTTP", `network error: ${e.message}`, {
-        correlationId,
-        cause: e,
-      });
+      const causeCode = e?.cause?.code ?? e?.code;
+      lastErr = new MultipolyError(
+        "HTTP",
+        `network error: ${e.message}${causeCode ? ` (${causeCode})` : ""}`,
+        { correlationId, cause: e, details: causeCode ? { cause: causeCode } : undefined },
+      );
       if (attempt < MAX_RETRIES) {
         await sleep(backoffMs(attempt));
         attempt++;

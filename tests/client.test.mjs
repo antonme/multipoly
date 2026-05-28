@@ -672,3 +672,36 @@ test("client[Task8]: reasoning_effort rejection retries once without it and succ
   assert.equal(out.content, "ok-retry");
   assert.equal(calls, 2);
 });
+
+// ── Task D1/2a: surface HTTP error cause code in network error ───────────────
+
+test("client: network error includes cause code in MultipolyError details and message", async () => {
+  // callWithRetry retries network errors MAX_RETRIES (3) times; fake must reject
+  // all 4 attempts (initial + 3 retries) so the final thrown error is inspectable.
+  let attempts = 0;
+  const fetchImpl = async () => {
+    attempts++;
+    const e = Object.assign(new Error("fetch failed"), {
+      cause: { code: "UND_ERR_CONNECT_TIMEOUT" },
+    });
+    throw e;
+  };
+  const err = await assert.rejects(
+    () =>
+      streamChatCompletion({
+        config: { ...baseConfig, timeoutMs: 100 },
+        modelKey: "glm",
+        messages: [{ role: "user", content: "x" }],
+        mode: "consult",
+        fetchImpl,
+      }),
+    (e) => {
+      assert.equal(e.code, "HTTP");
+      assert.equal(e.details?.cause, "UND_ERR_CONNECT_TIMEOUT");
+      assert.match(e.message, /UND_ERR_CONNECT_TIMEOUT/);
+      return true;
+    },
+  );
+  // All 4 attempts must have been made (initial + 3 retries)
+  assert.equal(attempts, 4, `expected 4 attempts, got ${attempts}`);
+});

@@ -796,3 +796,185 @@ test("council: resolveCouncilModels errors with did-you-mean hint on unknown mem
     "near-miss member name should produce a did-you-mean hint",
   );
 });
+
+// ── Task D1/2b: failure_summary in council results ────────────────────────────
+
+test("council review (harness-defer): failure_summary is empty when all members succeed", async () => {
+  const repo = await makeCommittedRepo("multipoly-council-fs-all-ok-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const fetchImpl = async (url) => {
+      const who = url.includes("glm") ? "glm" : "qwen";
+      return new Response(stream(reviewJson(`${who} ok`)), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    const out = await handleCouncilReview(
+      { paths: ["a.txt"], models: ["glm", "qwen"] },
+      { config, fetchImpl },
+    );
+    assert.equal(out.result.failure_summary, "");
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("council review (harness-defer): failure_summary names failed members + error codes", async () => {
+  const repo = await makeCommittedRepo("multipoly-council-fs-fail-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const fetchImpl = async (url) => {
+      if (url.includes("qwen.test")) {
+        return new Response("bad key", { status: 401 });
+      }
+      // glm succeeds (one success + one fail = under quorum for 2-model council)
+      // Use 3 models so glm+deepseek succeed, qwen fails.
+      return new Response(stream(reviewJson("glm ok")), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    const out = await handleCouncilReview(
+      { paths: ["a.txt"], models: ["glm", "qwen", "deepseek"] },
+      { config, fetchImpl },
+    );
+    assert.match(out.result.failure_summary, /\d+\/\d+ members failed/);
+    assert.match(out.result.failure_summary, /qwen/);
+    assert.match(out.result.failure_summary, /AUTH/);
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("council review (synthesis): failure_summary names failed members + error codes", async () => {
+  const repo = await makeCommittedRepo("multipoly-council-fs-synth-fail-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    let qwenCalls = 0;
+    const fetchImpl = async (url) => {
+      if (url.includes("qwen.test")) {
+        qwenCalls++;
+        if (qwenCalls === 1) {
+          // qwen member fails
+          return new Response("bad key", { status: 401 });
+        }
+        // Second qwen call = synthesizer
+        return new Response(stream(councilReviewJson()), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }
+      return new Response(stream(reviewJson("glm ok")), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    // Use glm + qwen + deepseek so there's quorum even with qwen member failing
+    const out = await handleCouncilReview(
+      { paths: ["a.txt"], models: ["glm", "qwen", "deepseek"], synthesizer: "qwen" },
+      { config, fetchImpl },
+    );
+    assert.match(out.result.failure_summary, /\d+\/\d+ members failed/);
+    assert.match(out.result.failure_summary, /qwen/);
+    assert.match(out.result.failure_summary, /AUTH/);
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("council consult (synthesis): failure_summary names failed members", async () => {
+  const repo = await makeCommittedRepo("multipoly-council-fs-consult-synth-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    let qwenCalls = 0;
+    const fetchImpl = async (url) => {
+      if (url.includes("qwen.test")) {
+        qwenCalls++;
+        if (qwenCalls === 1) {
+          return new Response("bad key", { status: 401 });
+        }
+        return new Response(stream("synthesis answer"), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }
+      if (url.includes("deepseek.test")) {
+        return new Response(stream("deepseek answer"), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }
+      return new Response(stream("glm answer"), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    const out = await handleCouncilConsult(
+      { prompt: "what now?", models: ["glm", "qwen", "deepseek"], synthesizer: "qwen" },
+      { config, fetchImpl },
+    );
+    // synthesis consult returns a string; failure_summary is added via status line
+    assert.match(out.result, /\d+\/\d+ members failed/);
+    assert.match(out.result, /qwen/);
+    assert.match(out.result, /AUTH/);
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("council consult (harness-defer): failure_summary prepended to text when members fail", async () => {
+  const repo = await makeCommittedRepo("multipoly-council-fs-consult-harness-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const fetchImpl = async (url) => {
+      if (url.includes("qwen.test")) {
+        return new Response("bad key", { status: 401 });
+      }
+      return new Response(stream("answer"), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    const out = await handleCouncilConsult(
+      { prompt: "what?", models: ["glm", "qwen", "deepseek"] },
+      { config, fetchImpl },
+    );
+    // failure_summary must be the first line of the returned text
+    const firstLine = out.result.split("\n")[0];
+    assert.match(firstLine, /\d+\/\d+ members failed/);
+    assert.match(firstLine, /qwen/);
+    assert.match(firstLine, /AUTH/);
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("council consult (harness-defer): no failure_summary prefix when all succeed", async () => {
+  const repo = await makeCommittedRepo("multipoly-council-fs-consult-ok-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const fetchImpl = async (url) => {
+      const who = url.includes("glm") ? "glm" : "qwen";
+      return new Response(stream(`${who} answer`), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    const out = await handleCouncilConsult(
+      { prompt: "what?", models: ["glm", "qwen"] },
+      { config, fetchImpl },
+    );
+    // First line should NOT be a failure summary
+    const firstLine = out.result.split("\n")[0];
+    assert.doesNotMatch(firstLine, /members failed/);
+  } finally {
+    process.chdir(prev);
+  }
+});
