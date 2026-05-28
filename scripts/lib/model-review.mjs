@@ -5,7 +5,7 @@ import {
   REVIEW_SYSTEM_PROMPT,
   REVIEW_JSON_ONLY_PREFIX,
   renderReviewUserMessage,
-  stripCodeFence,
+  parseModelJson,
 } from "./prompts.mjs";
 import { REVIEW_SCHEMA, validateReview, normalizeFindings } from "./schema.mjs";
 import { resolveCallTimeoutMs, resolveMaxTokensForModel } from "./config.mjs";
@@ -98,7 +98,7 @@ export async function runPreparedReview(modelKey, prepared, { config, fetchImpl,
     effectiveEffort,
   });
 
-  let parsed = tryParseJson(attempt1.content);
+  let parsed = parseModelJson(attempt1.content);
   let validation = parsed.ok ? validateReview(parsed.value) : { valid: false, reason: parsed.error };
 
   let reasoning = attempt1.reasoning;
@@ -132,7 +132,7 @@ export async function runPreparedReview(modelKey, prepared, { config, fetchImpl,
       effectiveEffort,
     });
     if (attempt2.reasoning) reasoning = attempt2.reasoning;
-    parsed = tryParseJson(attempt2.content);
+    parsed = parseModelJson(attempt2.content);
     validation = parsed.ok ? validateReview(parsed.value) : { valid: false, reason: parsed.error };
     if (!validation.valid) {
       throw new MultipolyError("SCHEMA", `${modelKey} review output failed validation: ${validation.reason}`, {
@@ -165,13 +165,4 @@ function safeTruncate(s, max) {
   const last = cut.charCodeAt(cut.length - 1);
   if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1);
   return cut + "\n...[prior invalid output truncated]";
-}
-
-function tryParseJson(text) {
-  const stripped = stripCodeFence(text).trim();
-  try {
-    return { ok: true, value: JSON.parse(stripped) };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
 }

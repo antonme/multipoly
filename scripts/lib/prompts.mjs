@@ -53,6 +53,95 @@ function stripFenceAt(text, fenceStart) {
 }
 
 /**
+ * Scan `text` for top-level JSON objects, walking character-by-character while
+ * tracking brace depth and skipping string literals (including \" escapes).
+ * Returns the LARGEST balanced `{...}` span as a string, or null if none found.
+ *
+ * This is intentionally conservative: only top-level objects are candidates.
+ * Arrays and bare scalars are not returned (the review schema is always an
+ * object). If multiple top-level objects are found, the longest wins so that
+ * a verbose model preamble or epilogue containing a tiny `{}` doesn't beat the
+ * real review object.
+ */
+export function extractJsonObject(text) {
+  const s = String(text);
+  const candidates = [];
+  let i = 0;
+  while (i < s.length) {
+    if (s[i] !== "{") {
+      i++;
+      continue;
+    }
+    // Found the start of a potential top-level object. Walk forward tracking
+    // brace depth and skipping string contents.
+    const start = i;
+    let depth = 0;
+    let j = i;
+    while (j < s.length) {
+      const ch = s[j];
+      if (ch === '"') {
+        // Enter a string literal — advance past it respecting \" escapes.
+        j++;
+        while (j < s.length) {
+          if (s[j] === "\\") {
+            j += 2; // skip escaped character
+          } else if (s[j] === '"') {
+            j++; // closing quote
+            break;
+          } else {
+            j++;
+          }
+        }
+        continue;
+      }
+      if (ch === "{") {
+        depth++;
+      } else if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          // Balanced top-level object found.
+          candidates.push(s.slice(start, j + 1));
+          i = j + 1; // resume outer scan after this object
+          break;
+        }
+      }
+      j++;
+    }
+    if (depth !== 0) {
+      // Unbalanced — no complete object starting here; advance past this `{`.
+      i++;
+    }
+  }
+  if (candidates.length === 0) return null;
+  // Return the largest candidate by string length.
+  return candidates.reduce((best, c) => (c.length > best.length ? c : best));
+}
+
+/**
+ * Parse a model's text output as JSON. First tries stripCodeFence + JSON.parse
+ * (the normal path for clean http/anthropic responses). On failure, falls back
+ * to extractJsonObject which recovers JSON embedded in prose (common with CLI
+ * agentic models). Returns {ok:true, value} or {ok:false, error}.
+ */
+export function parseModelJson(text) {
+  const stripped = stripCodeFence(text).trim();
+  try {
+    return { ok: true, value: JSON.parse(stripped) };
+  } catch (_directErr) {
+    // Direct parse failed — try extracting a JSON object from prose.
+    const extracted = extractJsonObject(stripped) ?? extractJsonObject(String(text));
+    if (extracted !== null) {
+      try {
+        return { ok: true, value: JSON.parse(extracted) };
+      } catch (e) {
+        return { ok: false, error: e.message };
+      }
+    }
+    return { ok: false, error: _directErr.message };
+  }
+}
+
+/**
  * Sanitize repo-derived strings (file paths, omission reasons) before they
  * appear in markdown structure. Git tracks filenames with embedded newlines,
  * tabs, and control bytes; interpolating them raw into a `## ${f.path}`

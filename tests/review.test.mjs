@@ -381,3 +381,33 @@ test("review: secret allowed when GLM_ALLOW_SECRETS enabled", async () => {
     process.chdir(prev);
   }
 });
+
+test("review: prose-wrapped JSON is recovered without reprompt (extractJsonObject)", async () => {
+  const { repo, baseSha } = await makeRepo();
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const payload = JSON.stringify({
+      schema_version: "1",
+      findings: [],
+      summary_md: "extracted from prose",
+    });
+    // Simulate a CLI agentic model that emits prose before the JSON
+    const proseWrapped = `I will now output the review as requested.\n${payload}`;
+    const body = [
+      `data: {"choices":[{"delta":{"content":${JSON.stringify(proseWrapped)}}}]}\n\n`,
+      "data: [DONE]\n\n",
+    ];
+    const fetchImpl = makeFetch(body);
+    const out = await handleReview(
+      { diff_base: baseSha },
+      { config: baseConfig, fetchImpl },
+    );
+    assert.equal(out.result.schema_version, "1");
+    assert.equal(out.result.summary_md, "extracted from prose");
+    // Only one fetch call — prose extraction succeeded, no reprompt needed
+    assert.equal(fetchImpl.calls.length, 1);
+  } finally {
+    process.chdir(prev);
+  }
+});

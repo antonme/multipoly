@@ -11,7 +11,7 @@ import {
   renderCouncilReviewSynthesisMessage,
   renderCouncilConsultSynthesisMessage,
   safeFence,
-  stripCodeFence,
+  parseModelJson,
 } from "./prompts.mjs";
 import { COUNCIL_REVIEW_SCHEMA, validateCouncilReview, normalizeFindings } from "./schema.mjs";
 import { assertContentBudget } from "./budget.mjs";
@@ -232,14 +232,6 @@ function renderCouncilReviewOriginalRequest(prepared) {
   return JSON.stringify(request, null, 2);
 }
 
-function tryParseJson(text) {
-  try {
-    return { ok: true, value: JSON.parse(stripCodeFence(text).trim()) };
-  } catch (e) {
-    return { ok: false, error: e.message };
-  }
-}
-
 function budgetContextFor(config, modelKey) {
   return { modelKey, supportsThinking: modelSupportsThinking(config, modelKey) };
 }
@@ -301,7 +293,7 @@ async function synthesizeCouncilReview({
   const budgetContext = budgetContextFor(config, synthesizer);
   assertContentBudget(attempt1, maxTokens, "review", budgetContext);
 
-  let parsed = tryParseJson(attempt1.content);
+  let parsed = parseModelJson(attempt1.content);
   let validation = parsed.ok ? validateCouncilReview(parsed.value) : { valid: false, reason: parsed.error };
   let reasoning = attempt1.reasoning;
 
@@ -327,7 +319,7 @@ async function synthesizeCouncilReview({
     });
     assertContentBudget(attempt2, maxTokens, "review", budgetContext);
     if (attempt2.reasoning) reasoning = attempt2.reasoning;
-    parsed = tryParseJson(attempt2.content);
+    parsed = parseModelJson(attempt2.content);
     validation = parsed.ok ? validateCouncilReview(parsed.value) : { valid: false, reason: parsed.error };
     if (!validation.valid) {
       throw new MultipolyError("SCHEMA", `council review output failed validation: ${validation.reason}`);

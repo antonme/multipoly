@@ -7,7 +7,96 @@ import {
   renderCouncilConsultSynthesisMessage,
   renderReviewUserMessage,
   renderConsultUserMessage,
+  extractJsonObject,
+  parseModelJson,
 } from "../scripts/lib/prompts.mjs";
+
+// ── extractJsonObject ─────────────────────────────────────────────────────────
+
+test("extractJsonObject: plain JSON object → returns it", () => {
+  const result = extractJsonObject('{"a":1}');
+  assert.deepEqual(JSON.parse(result), { a: 1 });
+});
+
+test("extractJsonObject: prose preamble + JSON → returns the JSON span", () => {
+  const result = extractJsonObject('I will start by listing the directory...\n{"a":1}');
+  assert.deepEqual(JSON.parse(result), { a: 1 });
+});
+
+test("extractJsonObject: JSON + trailing prose → returns the JSON span", () => {
+  const result = extractJsonObject('{"a":1}\nHope that helps!');
+  assert.deepEqual(JSON.parse(result), { a: 1 });
+});
+
+test("extractJsonObject: string value containing braces → correct span", () => {
+  const result = extractJsonObject('{"a":"}{"}');
+  assert.deepEqual(JSON.parse(result), { a: "}{" });
+});
+
+test("extractJsonObject: string value with escaped quote → correct span", () => {
+  const result = extractJsonObject('{"a":"say \\"hi\\""}');
+  assert.deepEqual(JSON.parse(result), { a: 'say "hi"' });
+});
+
+test("extractJsonObject: multiple top-level objects → returns the LARGEST", () => {
+  // small one first, then big one
+  const small = '{"x":1}';
+  const big = '{"findings":[],"summary_md":"lots of detail here"}';
+  const result = extractJsonObject(`${small} blah ${big}`);
+  assert.deepEqual(JSON.parse(result), JSON.parse(big));
+});
+
+test("extractJsonObject: no object → returns null", () => {
+  assert.equal(extractJsonObject("no JSON here"), null);
+  assert.equal(extractJsonObject(""), null);
+  assert.equal(extractJsonObject("[1,2,3]"), null);
+});
+
+test("extractJsonObject: nested objects → whole outer object returned", () => {
+  const json = '{"outer":{"inner":42}}';
+  const result = extractJsonObject(`preamble ${json} postamble`);
+  assert.deepEqual(JSON.parse(result), { outer: { inner: 42 } });
+});
+
+// ── parseModelJson ────────────────────────────────────────────────────────────
+
+test("parseModelJson: clean JSON → ok:true, value parsed", () => {
+  const r = parseModelJson('{"a":1}');
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.value, { a: 1 });
+});
+
+test("parseModelJson: code-fenced JSON → ok:true, value parsed (direct parse path)", () => {
+  const r = parseModelJson('```json\n{"a":1}\n```');
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.value, { a: 1 });
+});
+
+test("parseModelJson: prose + JSON → ok:true via extractJsonObject fallback", () => {
+  const payload = JSON.stringify({ findings: [], summary_md: "ok" });
+  const r = parseModelJson(`I will now output the review:\n${payload}`);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.value, JSON.parse(payload));
+});
+
+test("parseModelJson: JSON + trailing prose → ok:true via extractJsonObject fallback", () => {
+  const payload = JSON.stringify({ findings: [], summary_md: "ok" });
+  const r = parseModelJson(`${payload}\nLet me know if you need more detail.`);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.value, JSON.parse(payload));
+});
+
+test("parseModelJson: completely invalid text → ok:false with error", () => {
+  const r = parseModelJson("nothing useful here");
+  assert.equal(r.ok, false);
+  assert.ok(typeof r.error === "string" && r.error.length > 0);
+});
+
+test("parseModelJson: string with braces in value → ok:true", () => {
+  const r = parseModelJson('{"a":"}{"}');
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.value, { a: "}{" });
+});
 
 test("prompts: file content with triple backticks can't break out of the fence", () => {
   const gathered = {
