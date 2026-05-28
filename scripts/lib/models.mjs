@@ -191,9 +191,10 @@ export const MODEL_INFO = Object.freeze({
   }),
   // xAI Grok Build — local coding-agent CLI (cli-only; no http API exposed here).
   // Auth is the grok CLI's own OAuth (grok login), so no authTokenEnv is required;
-  // apiKeyEnv is named for symmetry/future use. `--effort` is graded and xhigh-native
-  // (low|medium|high|xhigh|max), so it inherits the ANTHROPIC_EFFORT capability class
-  // like claude — the cli transport maps it to argv via effortToCliReasoningArgs.
+  // apiKeyEnv is named for symmetry/future use. grok's `--effort` is graded and
+  // xhigh-native, so it inherits the ANTHROPIC_EFFORT capability class like claude;
+  // the cli transport maps it to argv via effortToCliReasoningArgs. (multipoly's
+  // effort scale caps at xhigh → `--effort xhigh`; grok's native `max` is not used.)
   grok: Object.freeze({
     key: "grok",
     baseName: "grok-build",

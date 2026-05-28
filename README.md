@@ -16,29 +16,114 @@ Tools are generated per configured model — builtins, baked models opted-in via
 
 ## Install
 
-### Local Development
+multipoly is a stdio MCP server — Node ≥18.18, no build step. Clone it, install
+dependencies, and verify it starts:
 
 ```sh
+git clone https://github.com/antonme/multipoly.git ~/dev/multipoly
 cd ~/dev/multipoly
 npm install
-MULTIPOLY_GLM_API_KEY=dummy npm run health
+MULTIPOLY_GLM_API_KEY=dummy npm run health   # prints the resolved model registry; no network, no spend
 ```
 
-Register with Claude Code:
+`npm run health` (i.e. `node scripts/multipoly-mcp.mjs --health`) prints every
+model and whether it is `configured`, **without spending any tokens** — use it to
+validate a config before wiring it into a client.
+
+### Example configuration
+
+multipoly never reads a `.env` — every credential is passed to the server as an
+environment variable by the client that launches it. A good starting council
+(three API models + two local CLI agents) looks like this:
 
 ```sh
-claude mcp add multipoly -- node /path/to/multipoly/scripts/multipoly-mcp.mjs
+# ── API models (HTTP) ──
+MULTIPOLY_GLM_API_KEY=<glm-key>              # GLM 5.1 — always on
+MULTIPOLY_DEEPSEEK_API_KEY=<deepseek-key>    # DeepSeek
+MULTIPOLY_DEEPSEEK_BASE_URL=https://api.deepseek.com
+
+# ── Opt-in baked builtins: list the keys, then enable/key each one ──
+MULTIPOLY_MODELS=gemini,grok,claude
+MULTIPOLY_GEMINI_API_KEY=<gemini-key>        # Gemini — HTTP
+MULTIPOLY_GROK_ENABLED=1                      # Grok Build — local CLI (run `grok login` once)
+MULTIPOLY_CLAUDE_ENABLED=1                     # Claude Code — local CLI (OAuth)
+
+# ── Optional: 60-min cap so slow CLI reviews aren't killed early ──
+MULTIPOLY_TIMEOUT_MS=3600000
 ```
 
-Or register as a local plugin in `~/.claude/settings.json`:
+Each model exposes `<key>_review` / `<key>_consult` tools, and `council_review` /
+`council_consult` **default to all configured models** — so the set above gives a
+five-member council (`glm`, `deepseek`, `gemini`, `grok`, `claude`). See
+[Configuration](#configuration) for the full env reference and
+[Transports](#transports) for the CLI-agent auth details.
+
+### Set up in Claude Code
+
+Register at **user scope** (available in every project), passing each credential
+as an `-e` flag:
+
+```sh
+claude mcp add multipoly -s user \
+  -e MULTIPOLY_GLM_API_KEY=<glm-key> \
+  -e MULTIPOLY_DEEPSEEK_API_KEY=<deepseek-key> \
+  -e MULTIPOLY_DEEPSEEK_BASE_URL=https://api.deepseek.com \
+  -e MULTIPOLY_MODELS=gemini,grok,claude \
+  -e MULTIPOLY_GEMINI_API_KEY=<gemini-key> \
+  -e MULTIPOLY_GROK_ENABLED=1 \
+  -e MULTIPOLY_CLAUDE_ENABLED=1 \
+  -- node /path/to/multipoly/scripts/multipoly-mcp.mjs
+```
+
+**Restart Claude Code afterwards** — MCP tools are loaded at startup, so new
+`mcp__multipoly__*` tools (and council members) only appear after a relaunch.
+Verify with `claude mcp get multipoly` or `/mcp`. To change the config later,
+`claude mcp remove multipoly -s user` and re-add, or hand-edit the
+`mcpServers.multipoly` block in `~/.claude.json`.
+
+Alternatively, register it as a local plugin in `~/.claude/settings.json`:
 
 ```json
 {
-  "plugins": {
-    "multipoly": { "path": "/path/to/multipoly" }
-  }
+  "plugins": { "multipoly": { "path": "/path/to/multipoly" } }
 }
 ```
+
+### Set up in Codex
+
+Codex (`codex-cli`) reads MCP servers from `~/.codex/config.toml`. Add an
+`mcp_servers` entry with the same env values:
+
+```toml
+[mcp_servers.multipoly]
+command = "node"
+args = ["/path/to/multipoly/scripts/multipoly-mcp.mjs"]
+
+[mcp_servers.multipoly.env]
+MULTIPOLY_GLM_API_KEY = "<glm-key>"
+MULTIPOLY_DEEPSEEK_API_KEY = "<deepseek-key>"
+MULTIPOLY_DEEPSEEK_BASE_URL = "https://api.deepseek.com"
+MULTIPOLY_MODELS = "gemini,grok,claude"
+MULTIPOLY_GEMINI_API_KEY = "<gemini-key>"
+MULTIPOLY_GROK_ENABLED = "1"
+MULTIPOLY_CLAUDE_ENABLED = "1"
+```
+
+Or from the CLI (`--env` repeats per variable):
+
+```sh
+codex mcp add multipoly \
+  --env MULTIPOLY_GLM_API_KEY=<glm-key> \
+  --env MULTIPOLY_MODELS=gemini,grok,claude \
+  --env MULTIPOLY_GEMINI_API_KEY=<gemini-key> \
+  --env MULTIPOLY_GROK_ENABLED=1 \
+  --env MULTIPOLY_CLAUDE_ENABLED=1 \
+  -- node /path/to/multipoly/scripts/multipoly-mcp.mjs
+```
+
+Check it loaded with `codex mcp list` / `codex mcp get multipoly`. (Editing
+`config.toml` keeps secrets out of your shell history — prefer it over `mcp add`
+for credential-bearing servers.)
 
 ### With Opencode
 
@@ -80,7 +165,7 @@ All env overrides from the custom-model table apply (`MULTIPOLY_<K>_TRANSPORT`, 
 
 `mimo` (Xiaomi MiMo V2.5 Pro) uses the same reasoning capability class as GLM: a top-level `thinking:{type}` toggle with no graded effort — `off` disables thinking, any other effort value enables it (default `high`). It gets a minimum token floor of 8192 (review) / 4096 (consult) when no explicit cap is set, preventing empty-response failures. On the wire it sends `max_completion_tokens` instead of `max_tokens` (the MiMo API rejects the legacy field). To enable mimo, add it to `MULTIPOLY_MODELS` and supply a key — `XIAOMIMIMO_API_KEY` is recognized so existing deployments need no rename. The per-deployment `MULTIPOLY_MIMO_DISPLAY_NAME`, `_REASONING`, `_BASE_URL`, and `_MODEL` env vars are no longer needed (baked); keep only `MULTIPOLY_MIMO_MAX_TOKENS_*` if you tuned the token cap.
 
-`grok` (xAI **Grok Build**) is a local coding-agent CLI, driven read-only like Claude Code/Codex. It is **cli-only** (no HTTP API is exposed here) and authenticates with the grok CLI's own OAuth — run `grok login` once; no API key env is required. Its `--effort` flag is graded and `xhigh`-native (`low|medium|high|xhigh|max`), so it shares Claude's effort class (default `xhigh`). To enable it: install the grok CLI, then add `grok` to `MULTIPOLY_MODELS` and set `MULTIPOLY_GROK_ENABLED=1` (cli models are off by default). The default model is `grok-build`; override with `MULTIPOLY_GROK_MODEL`.
+`grok` (xAI **Grok Build**) is a local coding-agent CLI, driven read-only like Claude Code/Codex. It is **cli-only** (no HTTP API is exposed here) and authenticates with the grok CLI's own OAuth — run `grok login` once; no API key env is required. Its `--effort` flag is graded and `xhigh`-native, so it shares Claude's effort class (default `xhigh`). multipoly's effort scale tops out at `xhigh` (which maps to `--effort xhigh`); grok's CLI also accepts a native `max`, but that level is not exposed through multipoly. To enable it: install the grok CLI, then add `grok` to `MULTIPOLY_MODELS` and set `MULTIPOLY_GROK_ENABLED=1` (cli models are off by default). The default model is `grok-build`; override with `MULTIPOLY_GROK_MODEL`.
 
 > **Migration from `MULTIPOLY_OPUS_*`.** The standalone `opus` model is removed. Use `MULTIPOLY_MODELS=claude` instead, and rename `MULTIPOLY_OPUS_*` env vars to `MULTIPOLY_CLAUDE_*`. At startup the server emits a structured stderr warning naming any `MULTIPOLY_OPUS_*` or `MULTIPOLY_GPT55_*` vars it finds — their values are no longer used to configure a model and are ignored as credentials (use `MULTIPOLY_CLAUDE_*` / `MULTIPOLY_CODEX_*` instead). Note: the mere presence of `MULTIPOLY_OPUS_API_KEY` is still honored as a legacy Anthropic-key signal for the claude transport-flip default (see below).
 
@@ -206,9 +291,14 @@ MULTIPOLY_HAIKU_MODEL=claude-haiku-4-5
 
 ### CLI agents (Claude Code, Codex, Cursor/Composer, Gemini, agy, Kimi, Grok)
 
-A `cli` model shells out to a local agent in its **read-only** mode. Each kind
-also runs with config/MCP isolation so the spawned agent can't auto-load your
-operator MCP servers or rules. CLI models are **opt-in** (`MULTIPOLY_<K>_ENABLED=1`).
+A `cli` model shells out to a local agent in its **read-only** mode. CLI models
+are **opt-in** (`MULTIPOLY_<K>_ENABLED=1`). Config/MCP isolation varies by kind:
+`claude` (`--strict-mcp-config`) and `codex` (an isolated `CODEX_HOME`) fully
+prevent auto-loading your operator MCP servers and rules; the plan-mode kinds
+(`cursor`, `gemini`, `kimi`, `grok`) rely on read-only/plan mode and may still
+load operator config — `grok` additionally gets `--no-memory` (no cross-session
+memory) but has no single-run MCP-disable flag. All kinds run read-only, so none
+can write.
 
 | `cliKind` | Binary | Read-only mode | Auth |
 |---|---|---|---|
@@ -218,7 +308,7 @@ operator MCP servers or rules. CLI models are **opt-in** (`MULTIPOLY_<K>_ENABLED
 | `gemini` | `gemini` | `--approval-mode plan` + workspace-trust env | OAuth / `GEMINI_API_KEY` |
 | `agy` | `agy` | weak sandbox only — **opt-in unsafe** (`MULTIPOLY_<K>_UNSAFE=1`) | gemini OAuth |
 | `kimi` | `kimi` | `--print --plan` (`--print` implies auto-run, so `--plan` is mandatory) | `kimi login` / `KIMI_API_KEY` |
-| `grok` | `grok` | `--permission-mode plan` (+ `--no-subagents`, `--disable-web-search`); prompt via `--prompt-file` | `grok login` (OAuth) |
+| `grok` | `grok` | `--permission-mode plan` (+ `--no-subagents`, `--disable-web-search`, `--no-memory`); prompt via `--prompt-file` (0600) | `grok login` (OAuth) |
 
 Per-cli env (`<K>` is the model key, e.g. `COMPOSER`):
 

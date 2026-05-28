@@ -75,6 +75,7 @@ export function effortToQwenFields(e, { maxTokens }) {
 const CODEX_EFFORTS = new Set(["low", "medium", "high"]);
 // claude --help confirms: --effort <level> (low, medium, high, xhigh, max) — graded effort flag.
 // grok  --help confirms: --effort <LEVEL> (low, medium, high, xhigh, max) — same graded flag as claude.
+//        multipoly's scale caps at xhigh, so the resolved effort never reaches grok's native "max".
 // gemini --help: no reasoning/effort/think flag found.
 // cursor-agent --help: no reasoning/effort/think flag found.
 // agy: not installed / no matching flag.

@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, copyFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, copyFileSync, chmodSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { MultipolyError } from "../errors.mjs";
@@ -249,8 +249,10 @@ export function flattenMessages(messages, wantJson) {
  *              read-only) -m <model> --prompt <prompt>.
  *   - grok:    --prompt-file <file> (headless single-turn, prints to stdout and
  *              exits) + --permission-mode plan (read-only) + --output-format plain.
- *              --no-subagents/--disable-web-search keep it bounded & deterministic.
- *              Prompt goes in a file (not argv) to avoid E2BIG on large reviews.
+ *              --no-subagents/--disable-web-search keep it bounded & deterministic;
+ *              --no-memory avoids auto-loading operator cross-session memory (grok
+ *              has no --strict-mcp-config / config-home equivalent). Prompt goes in
+ *              a file (not argv) to avoid E2BIG on large reviews; the file is 0600.
  */
 export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, prompt, scratch }) {
   switch (kind) {
@@ -304,6 +306,7 @@ export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, pro
     case "cursor": {
       const promptFile = join(scratch, "cursor-prompt.md");
       writeFileSync(promptFile, prompt);
+      chmodSync(promptFile, 0o600); // owner-only; the scratch dir is 0700, this is defense-in-depth
       return {
         args: [
           "-p",
@@ -361,6 +364,7 @@ export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, pro
       // argv so large reviews can't hit the OS E2BIG limit.
       const promptFile = join(scratch, "grok-prompt.md");
       writeFileSync(promptFile, prompt);
+      chmodSync(promptFile, 0o600); // owner-only; the scratch dir is 0700, this is defense-in-depth
       const args = [
         "--prompt-file",
         promptFile,
@@ -372,6 +376,7 @@ export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, pro
         "plan",
         "--no-subagents",
         "--disable-web-search",
+        "--no-memory", // don't auto-load operator cross-session memory (grok has no MCP-isolation flag)
       ];
       args.push(...effortToCliReasoningArgs("grok", reasoningEffort));
       return {

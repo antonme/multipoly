@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, statSync } from "node:fs";
 import { runModel } from "../scripts/lib/run-model.mjs";
 import { buildInvocation } from "../scripts/lib/transport/cli.mjs";
 
@@ -241,6 +241,7 @@ test("cli: grok — read-only plan mode, prompt via file, plain output, prompt N
   assert.deepEqual(args.slice(args.indexOf("-m"), args.indexOf("-m") + 2), ["-m", "the-model"]);
   assert.ok(args.includes("--permission-mode"));
   assert.equal(args[args.indexOf("--permission-mode") + 1], "plan"); // read-only
+  assert.ok(args.includes("--no-memory")); // don't auto-load operator cross-session memory
   assert.deepEqual(args.slice(args.indexOf("--output-format"), args.indexOf("--output-format") + 2), ["--output-format", "plain"]);
   assert.ok(args.includes("--prompt-file"));
   assert.equal(opts.input, ""); // prompt is in the file, not stdin
@@ -258,6 +259,20 @@ test("cli: grok + xhigh effort → --effort xhigh in argv (xhigh native, no clam
 test("cli: grok + off effort → no --effort flag in argv", () => {
   const { args } = buildInvocation({ kind: "grok", binary: "grok", model: "m", cwd: "/tmp", reasoningEffort: "off", prompt: "p", scratch: scratch() });
   assert.ok(!args.includes("--effort"), `off must produce no --effort flag: ${args.join(" ")}`);
+});
+
+test("cli: grok — prompt file is written 0600 (not world-readable)", () => {
+  const { args } = buildInvocation({ kind: "grok", binary: "grok", model: "m", cwd: "/tmp", reasoningEffort: "off", prompt: "sensitive review content", scratch: scratch() });
+  const pf = args[args.indexOf("--prompt-file") + 1];
+  assert.equal(statSync(pf).mode & 0o777, 0o600, "grok prompt file must be owner-only (0600)");
+});
+
+test("cli: cursor — prompt file is written 0600 (not world-readable)", () => {
+  // The cursor recipe references the prompt file by a "Read <path>" positional.
+  const { args } = buildInvocation({ kind: "cursor", binary: "cursor-agent", model: "m", cwd: "/tmp", reasoningEffort: "off", prompt: "sensitive review content", scratch: scratch() });
+  const m = args[args.length - 1].match(/Read (\S+)/);
+  assert.ok(m, "cursor positional should reference the prompt file");
+  assert.equal(statSync(m[1]).mode & 0o777, 0o600, "cursor prompt file must be owner-only (0600)");
 });
 
 test("cli: an unconfigured model is refused before spawning (opt-in gate)", async () => {

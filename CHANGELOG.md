@@ -12,13 +12,16 @@ All notable changes to this project are documented here.
   it council-eligible. It is **cli-only** (no HTTP API exposed) and authenticates
   via the grok CLI's own OAuth (`grok login`) — no API key env required.
   - **Read-only recipe (verified against `grok 0.2.3`):** headless
-    `--prompt-file <scratch>` (prompt in a file, not argv, so large reviews don't
-    hit the OS `E2BIG` limit) + `--permission-mode plan` (no file writes) +
-    `--output-format plain`, with `--no-subagents` and `--disable-web-search` to
-    keep the run bounded and deterministic over the provided prompt.
-  - **Graded effort:** grok's `--effort` flag is `xhigh`-native
-    (`low|medium|high|xhigh|max`), so it shares Claude's effort class
-    (`ANTHROPIC_EFFORT`); default effort is `xhigh`. `off` omits the flag.
+    `--prompt-file <scratch>` (prompt in a 0600 file, not argv, so large reviews
+    don't hit the OS `E2BIG` limit) + `--permission-mode plan` (no file writes) +
+    `--output-format plain`, with `--no-subagents`, `--disable-web-search`, and
+    `--no-memory` to keep the run bounded, deterministic, and free of operator
+    cross-session memory. grok has no `--strict-mcp-config`/config-home equivalent,
+    so (like the other plan-mode kinds) it may still load operator MCP config.
+  - **Graded effort:** grok's `--effort` flag is `xhigh`-native, so it shares
+    Claude's effort class (`ANTHROPIC_EFFORT`); default effort is `xhigh`, `off`
+    omits the flag. multipoly's scale caps at `xhigh` (→ `--effort xhigh`); grok's
+    native `max` is not exposed.
   - **Aliases:** `xai` and `grok-build` resolve to `grok`. Default model
     `grok-build` (override with `MULTIPOLY_GROK_MODEL`).
 
