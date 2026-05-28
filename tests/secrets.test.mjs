@@ -223,6 +223,32 @@ test("secrets: legit env-var reference in a secret assignment stays clean (no fa
   assert.equal(r.clean, true, "process.env.<NAME> reference must stay clean");
 });
 
+test("secrets: URL with a percent-encoded opaque token in the path must be flagged", () => {
+  // %4d decodes to 'M'; the RAW path breaks the 24-run (abcdEFGH1234ijkl / NOP5678qrst),
+  // but the DECODED path reassembles the 28-char opaque webhook secret. The tail
+  // check must decode before testing so encoding can't be used to evade it.
+  const r = scan('WEBHOOK_TOKEN = "https://hooks.example.com/services/abcdEFGH1234ijkl%4dNOP5678qrst"', "t");
+  assert.equal(r.clean, false, "percent-encoded opaque URL token must be flagged");
+});
+
+test("scanner: KNOWN GAP — code-shaped camouflage with a short/separator-broken tail is not flagged (tier-2 boundary)", () => {
+  // The generic assignment heuristics are a tier-2 best-effort catch-all that
+  // sits BEHIND the dedicated high-precision patterns (sk-, ghp_, AKIA, Slack,
+  // PEM). They suppress code-shaped RHS values to avoid false positives on real
+  // code. A secret that is BOTH short (<24 contiguous alnum) AND hidden behind a
+  // code-shaped prefix is indistinguishable from legitimate code such as
+  // `makeToken(oauth2Client)` or `process.env.SOME_NAME`, so it is an accepted
+  // recall boundary. A FULL-length (24+) opaque secret behind a prefix IS caught
+  // (see the camouflage tests above).
+  const shortTail = 'API_KEY="makeToken(abcdEFGH1234ijkl)"'; // 16-char opaque tail
+  assert.equal(scan(shortTail, "t").clean, true, "short code-wrapped tail: accepted gap");
+
+  // Compensating control: the dedicated patterns still catch KNOWN secret
+  // formats regardless of any code wrapper, because they carry no suppressor.
+  const knownFmt = 'API_KEY="makeToken(sk-abcdEFGH1234ijklMNOP)"';
+  assert.equal(scan(knownFmt, "t").clean, false, "known sk- format caught despite code wrapper");
+});
+
 // --- End scanner-hardening tests ---
 
 // --- End precision tests ---

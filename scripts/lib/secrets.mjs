@@ -22,9 +22,17 @@
  * those are real secrets.
  *
  * Camouflage defence: the template / function-call / member-access suppressors
- * only fire when the value does NOT also embed a high-entropy opaque blob. A
- * code-shaped *prefix* must not be allowed to hide a hard-coded secret in the
- * tail — e.g. `${x}<SECRET>`, `makeToken(<SECRET>)`, `process.env.<SECRET>`.
+ * only fire when the value does NOT also embed a high-entropy opaque blob (a
+ * contiguous 24+ alphanumeric run). A code-shaped *prefix* must not hide a
+ * full-length hard-coded secret in the tail — e.g. `${x}<SECRET>`,
+ * `makeToken(<SECRET>)`, `process.env.<SECRET>`.
+ *
+ * Accepted recall boundary (tier-2): these generic heuristics sit BEHIND the
+ * dedicated high-precision patterns (sk-, ghp_, AKIA, Slack, PEM). A secret that
+ * is BOTH short (<24 contiguous alnum) AND wrapped in a code shape is
+ * indistinguishable from legitimate code (e.g. `makeToken(oauth2Client)`), so it
+ * is intentionally NOT flagged here — the dedicated patterns still catch any
+ * KNOWN format regardless of wrapping, and the scanner is hard-fail by default.
  *
  * @param {string|null|undefined} v — the captured value span (groups.val)
  * @returns {boolean} true ⇒ skip this hit; false ⇒ record it
@@ -60,7 +68,16 @@ function looksLikeNonSecretValue(v) {
       return false; // unparseable URL-ish value — keep flagged (conservative)
     }
     if (u.username || u.password) return false; // embedded credentials are secrets
-    const tail = u.pathname + u.search + u.hash;
+    // Decode the tail first so percent-encoding can't break up an opaque run
+    // (e.g. `abcdEFGH1234ijkl%4dNOP5678qrst` -> `abcd...MNOP...qrst`). Malformed
+    // escapes throw — fall back to the raw tail (conservative) in that case.
+    const rawTail = u.pathname + u.search + u.hash;
+    let tail = rawTail;
+    try {
+      tail = decodeURIComponent(rawTail);
+    } catch {
+      tail = rawTail;
+    }
     // 24 chars ≈ minimum Slack/GitHub webhook secret length in a URL path;
     // a longer opaque tail => treat as a secret-bearing URL, not a plain base URL.
     if (/[A-Za-z0-9_\-]{24,}/.test(tail)) return false; // opaque token — keep flagged
