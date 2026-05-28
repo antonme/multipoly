@@ -8,6 +8,40 @@
  * them to output, logs, or errors. The scanner only reports pattern name + line.
  */
 
+/**
+ * Returns true when the captured RHS value is plainly code or a bare URL rather
+ * than a hard-coded secret — used as the `suppress` predicate on the two broad
+ * assignment patterns so they skip the hit rather than recording it.
+ *
+ * Intentionally conservative: only well-defined syntactic shapes are suppressed.
+ * Anything ambiguous falls through to false (the hit is kept).
+ *
+ * URL suppression has a deliberate carve-out: a URL whose path/query/fragment
+ * contains a 24+ character alphanumeric run (e.g. a Slack/GitHub webhook secret
+ * embedded in the URL) is NOT suppressed — those are real secrets.
+ *
+ * @param {string|null|undefined} v — the captured value span (groups.val)
+ * @returns {boolean} true ⇒ skip this hit; false ⇒ record it
+ */
+function looksLikeNonSecretValue(v) {
+  if (v == null) return false;
+  const s = String(v).trim();
+  // Template literal (bare or interpolated): `...` or contains ${
+  if (s.startsWith("`") || s.includes("${")) return true;
+  // Function call: starts with an identifier followed by (
+  if (/^[A-Za-z_$][\w$]*\s*\(/.test(s)) return true;
+  // Member / index access on well-known runtime objects
+  if (/^(req|res|process\.env|value|this|config|ctx|opts|options)\b[.[]/.test(s)) return true;
+  // URL: suppress plain base URLs (no opaque token in the path/query/fragment),
+  // but keep webhook-style URLs that embed a long opaque token in the path.
+  if (/^https?:\/\//.test(s)) {
+    const afterHost = s.replace(/^https?:\/\/[^/]+/, ""); // path + query + fragment
+    if (!/[A-Za-z0-9_\-]{24,}/.test(afterHost)) return true; // plain URL — not a secret
+    return false; // long opaque tail (e.g. webhook secret) — keep flagged
+  }
+  return false;
+}
+
 const PATTERNS = Object.freeze([
   { name: "aws_access_key_id", re: /\b(AKIA|ASIA)[A-Z0-9]{16}\b/ },
   {
@@ -36,15 +70,27 @@ const PATTERNS = Object.freeze([
   // around the keyword backtrack O(n^2) on a long word-char run (a ReDoS that
   // froze the synchronous scan), whereas a constant bound keeps it linear.
   // 64 chars of prefix/suffix is far beyond any real env-var name.
+  //
+  // Precision note: /i is intentionally DROPPED here. With /i the pattern matched
+  // camelCase identifiers containing keyword substrings (headerToken=, registryKey=).
+  // Unquoted assignments in real env files / shell use SCREAMING_CASE; camelCase
+  // identifiers with code on the RHS are suppressed further by looksLikeNonSecretValue.
+  // Named capture (?<val>...) feeds the suppressor.
   {
     name: "env_style_secret",
-    re: /\b[A-Z0-9_]{0,64}(?:API|SECRET|TOKEN|PASSWORD|PASS|KEY)[A-Z0-9_]{0,64}\s*=\s*[^\s"']{16,}/i,
+    re: /\b[A-Z0-9_]{0,64}(?:API|SECRET|TOKEN|PASSWORD|PASS|KEY)[A-Z0-9_]{0,64}\s*=\s*(?<val>[^\s"']{16,})/,
+    suppress: looksLikeNonSecretValue,
   },
   // Quoted assignment — JSON / YAML / TOML / .env with quotes. Bounded for the
   // same ReDoS reason as env_style_secret above.
+  //
+  // /i is KEPT here so lowercase config keys (apiKey, api_key) with opaque quoted
+  // values are still caught. Named capture (?<val>...) feeds the suppressor which
+  // drops plain base URLs but keeps webhook URLs with long opaque path segments.
   {
     name: "generic_api_secret_assignment",
-    re: /\b[A-Z0-9_]{0,64}(?:API|SECRET|TOKEN|PASSWORD|PASS|KEY)[A-Z0-9_]{0,64}\s*[:=]\s*["'][^"']{16,}["']/i,
+    re: /\b[A-Z0-9_]{0,64}(?:API|SECRET|TOKEN|PASSWORD|PASS|KEY)[A-Z0-9_]{0,64}\s*[:=]\s*["'](?<val>[^"']{16,})["']/i,
+    suppress: looksLikeNonSecretValue,
   },
 ]);
 
@@ -88,11 +134,23 @@ export function scan(text, label) {
   // Built lazily on the first hit so clean payloads (the common case) pay
   // nothing, and a payload with many hits builds it exactly once.
   let newlineOffsets = null;
-  for (const { name, re } of PATTERNS) {
+  for (const { name, re, suppress } of PATTERNS) {
     // Use a global copy to walk all matches without mutating the shared regex.
     const g = new RegExp(re.source, re.flags.includes("g") ? re.flags : re.flags + "g");
     let m;
     while ((m = g.exec(text)) !== null) {
+      // Suppressor: if this pattern has a `suppress` predicate and the captured
+      // value looks like code / a plain URL rather than a hard-coded secret, skip
+      // the hit. Advance lastIndex first (zero-length guard) to avoid an infinite
+      // loop when the match is zero-width (in practice these patterns have a 16+
+      // quantifier so zero-length is impossible, but the guard is cheap insurance).
+      if (suppress !== undefined) {
+        const val = m.groups != null ? m.groups.val : undefined;
+        if (suppress(val)) {
+          if (m.index === g.lastIndex) g.lastIndex++;
+          continue;
+        }
+      }
       if (newlineOffsets === null) newlineOffsets = buildNewlineIndex(text);
       hits.push({ pattern: name, label, line: lineNumberOf(newlineOffsets, m.index) });
       if (m.index === g.lastIndex) g.lastIndex++; // zero-length guard

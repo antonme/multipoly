@@ -105,6 +105,74 @@ test("secrets: scanning a payload with many matches is bounded (no per-hit line-
   assert.ok(ms < 1000, `scan took ${ms.toFixed(0)}ms; expected < 1000ms (per-hit line-number DoS)`);
 });
 
+// --- Precision tests (Task 1 / Plan D3 §3a) ---
+
+test("secrets: false-positives: camelCase identifier RHS should be clean", () => {
+  // headerToken= is a camelCase identifier — the old /i flag made it match KEY.
+  // After dropping /i on the unquoted pattern it should be clean.
+  const r = scan("const headerToken = req.headers.authorization?.split(' ')[1];", "t");
+  assert.equal(r.clean, true, "headerToken= should not be flagged");
+});
+
+test("secrets: false-positives: template-literal RHS should be clean", () => {
+  // registryKey=`${...}` — template literal on the RHS is code, not a secret.
+  const r = scan("const registryKey = `${organizationId}::${kind}`;", "t");
+  assert.equal(r.clean, true, "registryKey=`${...}` should not be flagged");
+});
+
+test("secrets: false-positives: function-call RHS should be clean", () => {
+  // key = stringValue(value.key) — function call on the RHS is code, not a secret.
+  const r = scan("const key = stringValue(value.key);", "t");
+  assert.equal(r.clean, true, "key=functionCall() should not be flagged");
+});
+
+test("secrets: false-positives: plain URL RHS should be clean", () => {
+  // GITHUB_API_BASE = 'https://api.github.com' — plain base URL, no opaque tail.
+  const r = scan("const GITHUB_API_BASE = 'https://api.github.com';", "t");
+  assert.equal(r.clean, true, "plain URL RHS should not be flagged");
+});
+
+test("secrets: false-positives: template-literal URL with token interpolation should be clean", () => {
+  // `${base}?token=${encodeURIComponent(x)}` — the token value is interpolated,
+  // not hard-coded; the raw string has no 16+ char opaque segment.
+  const r = scan("const u = `${base}?token=${encodeURIComponent(x)}`;", "t");
+  assert.equal(r.clean, true, "`${base}?token=${...}` should not be flagged");
+});
+
+test("secrets: true-positives: SCREAMING_CASE unquoted opaque value flagged", () => {
+  // API_KEY=<opaque> — unquoted, SCREAMING_CASE identifier, must be caught.
+  const r = scan("API_KEY=abcdEFGH1234ijklMNOP5678qrst", "t");
+  assert.equal(r.clean, false, "API_KEY=<opaque> must be flagged");
+});
+
+test("secrets: true-positives: quoted opaque value flagged", () => {
+  // FOO_API_KEY = "..." — quoted opaque value, must be caught.
+  const r = scan('FOO_API_KEY = "abcdEFGH1234ijklMNOP5678"', "t");
+  assert.equal(r.clean, false, 'FOO_API_KEY = "<opaque>" must be flagged');
+});
+
+test("secrets: true-positives: lowercase key with quoted opaque value flagged (quoted /i kept)", () => {
+  // apiKey: "..." — lowercase key, but quoted pattern keeps /i, must be caught.
+  const r = scan('apiKey: "abcdEFGH1234ijklMNOP5678qrst"', "t");
+  assert.equal(r.clean, false, 'apiKey: "<opaque>" must be flagged');
+});
+
+test("secrets: true-positives: sk- key detected by dedicated pattern (unchanged)", () => {
+  const r = scan("sk-abcdEFGH1234ijklMNOP5678", "t");
+  assert.equal(r.clean, false, "sk- key must be flagged");
+});
+
+test("secrets: true-positives: webhook URL with long opaque tail must stay flagged", () => {
+  // A URL with a 24+ char opaque path segment is a secret (e.g. Slack/GitHub webhook).
+  // The plain-URL suppressor must NOT drop this because of the long opaque tail.
+  // Variable name contains TOKEN so the quoted pattern fires; then the suppressor
+  // sees afterHost has a 28-char opaque segment and returns false => hit is kept.
+  const r = scan('WEBHOOK_TOKEN = "https://hooks.example.com/services/T00/B00/abcdEFGH1234ijklMNOP5678qrst"', "t");
+  assert.equal(r.clean, false, "webhook URL with opaque tail must be flagged");
+});
+
+// --- End precision tests ---
+
 test("secrets: scanning a long word-char run is bounded (no ReDoS)", () => {
   // A long single-line run of KEY-like tokens used to trigger O(n^2)
   // backtracking in the env/assignment patterns (~17s at 300KB on a dev box),
