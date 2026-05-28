@@ -25,7 +25,11 @@
  * only fire when the value does NOT also embed a high-entropy opaque blob (a
  * contiguous 24+ alphanumeric run). A code-shaped *prefix* must not hide a
  * full-length hard-coded secret in the tail — e.g. `${x}<SECRET>`,
- * `makeToken(<SECRET>)`, `process.env.<SECRET>`.
+ * `makeToken(<SECRET>)`, `process.env.<SECRET>`. This gate is symmetric: any
+ * 24+ contiguous-alnum run forces these three suppressors OFF, so genuine code
+ * carrying such a run (a long base64/hex literal, a 24+ char camelCase arg) will
+ * also surface. That precision-for-recall trade is intentional for a hard-fail
+ * outbound scanner — over-flagging is recoverable via `allow_secrets`.
  *
  * Accepted recall boundary (tier-2): these generic heuristics sit BEHIND the
  * dedicated high-precision patterns (sk-, ghp_, AKIA, Slack, PEM). A secret that
@@ -60,6 +64,9 @@ function looksLikeNonSecretValue(v) {
   if (v == null) return false;
   const s = String(v).trim();
   // A code-shaped prefix must not camouflage a secret embedded in the tail.
+  // NOTE: `opaque` only gates the three code-shape suppressors below; the URL
+  // branch checks its parsed `tail` separately (the host is intentionally not
+  // covered — userinfo credentials are checked explicitly instead).
   const opaque = embedsOpaqueSecret(s);
   // Template literal (bare or interpolated): `...` or contains ${
   if ((s.startsWith("`") || s.includes("${")) && !opaque) return true;
