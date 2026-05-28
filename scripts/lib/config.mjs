@@ -24,6 +24,14 @@ const ENDPOINT_PROFILES = Object.freeze({
 // cap, we omit max_tokens and let that provider's default apply.
 const MODEL_OUTPUT_CEILING = 131072;
 
+// For reasoning-capable models, reasoning tokens share the max_tokens budget
+// with content. On large reviews, reasoning alone can exhaust a small cap →
+// empty BUDGET failures (observed in the field for glm and kimi). Apply a
+// minimum floor to all reasoning capabilities (any cap != NONE), clamped to
+// MODEL_OUTPUT_CEILING. An explicit operator value always wins over the floor.
+const REASONING_REVIEW_FLOOR = Math.min(32768, MODEL_OUTPUT_CEILING);
+const REASONING_CONSULT_FLOOR = Math.min(8192, MODEL_OUTPUT_CEILING);
+
 // Shared bounds for the upstream stream inactivity timeout, applied to both
 // the env-derived timeout and the per-call `timeout_ms` tool argument so they
 // can't disagree. Max stays below Node's setTimeout 32-bit overflow.
@@ -137,12 +145,14 @@ function resolveLegacyGlmBaseUrl(env) {
 // Compute the per-model review/consult max_tokens caps. GLM inherits the
 // output ceiling by default; other models default to undefined unless the
 // server-wide cap was set explicitly. Shared across all transports.
-// For GLM_TOGGLE capability models (glm, and in future mimo), apply a minimum
-// floor of 8192 (review) / 4096 (consult) when neither the per-model env nor
-// the server-wide env was set explicitly. An explicit value (either source)
-// always wins over the floor so the operator's intent is respected.
+// For any reasoning-capable model (cap !== CAPABILITY.NONE), apply a minimum
+// floor of REASONING_REVIEW_FLOOR (review) / REASONING_CONSULT_FLOOR (consult)
+// when neither the per-model env nor the server-wide env was set explicitly.
+// An explicit value (either source) always wins over the floor so the
+// operator's intent is respected.
 function resolveModelMaxTokens(env, key, prefix, serverMaxTokens, info) {
-  const isGlmToggle = info?.reasoning === CAPABILITY.GLM_TOGGLE;
+  const cap = info?.reasoning;
+  const isReasoning = cap !== undefined && cap !== CAPABILITY.NONE;
   // "explicit" = the operator set this value via env; floor must not override it.
   const reviewPerModelExplicit = env[`${prefix}_MAX_TOKENS_REVIEW`] !== undefined && env[`${prefix}_MAX_TOKENS_REVIEW`] !== "";
   const consultPerModelExplicit = env[`${prefix}_MAX_TOKENS_CONSULT`] !== undefined && env[`${prefix}_MAX_TOKENS_CONSULT`] !== "";
@@ -158,11 +168,11 @@ function resolveModelMaxTokens(env, key, prefix, serverMaxTokens, info) {
     key === "glm" || serverMaxTokens.explicit.consult ? serverMaxTokens.values.consult : undefined,
   );
 
-  if (isGlmToggle) {
+  if (isReasoning) {
     // Apply floor only when no explicit value was supplied (neither per-model nor server-wide).
     return Object.freeze({
-      review: reviewAnyExplicit ? review : Math.max(review ?? 0, 8192),
-      consult: consultAnyExplicit ? consult : Math.max(consult ?? 0, 4096),
+      review: reviewAnyExplicit ? review : Math.max(review ?? 0, REASONING_REVIEW_FLOOR),
+      consult: consultAnyExplicit ? consult : Math.max(consult ?? 0, REASONING_CONSULT_FLOOR),
     });
   }
 

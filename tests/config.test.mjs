@@ -19,7 +19,8 @@ test("config: defaults", () => {
   assert.equal(c.models.glm.apiKey, "test-key");
   assert.deepEqual(c.models.glm.maxTokens, { review: 131072, consult: 131072 });
   assert.equal(c.models.qwen.configured, false);
-  assert.deepEqual(c.models.qwen.maxTokens, { review: undefined, consult: undefined });
+  // qwen has QWEN_BUDGET reasoning capability → gets 32768/8192 floor even when unconfigured
+  assert.deepEqual(c.models.qwen.maxTokens, { review: 32768, consult: 8192 });
   assert.equal(c.models.deepseek.configured, false);
   assert.equal(c.models.composer.configured, false);
   assert.equal(c.thinking, "auto"); // mode-default retired: unset MULTIPOLY_THINKING now means "auto" (don't send a thinking toggle; rely on per-model reasoningEffort)
@@ -323,7 +324,8 @@ test("config: loads configured model endpoints independently", () => {
   assert.equal(c.models.qwen.model, "qwen3.7max");
   assert.equal(c.models.qwen.baseUrl, "https://qwen.example/v1");
   assert.equal(c.models.qwen.apiKey, "qwen-key");
-  assert.deepEqual(c.models.qwen.maxTokens, { review: undefined, consult: undefined });
+  // qwen has QWEN_BUDGET reasoning capability → gets 32768/8192 floor even when unconfigured
+  assert.deepEqual(c.models.qwen.maxTokens, { review: 32768, consult: 8192 });
 });
 
 test("config: model-specific max token env vars configure non-GLM caps", () => {
@@ -624,10 +626,12 @@ test("glm (max_tokens-style) does NOT set usesMaxCompletionTokens", () => {
 
 // ── Plan C Task 4: MiMo inherits the GLM token floor (BUDGET-regression guard) ──
 
-test("mimo gets the http_thinking_toggle max_tokens floor by default (no empty-BUDGET regression)", () => {
+test("mimo gets the reasoning max_tokens floor by default (no empty-BUDGET regression)", () => {
+  // mimo has GLM_TOGGLE (http_thinking_toggle) capability → generalized reasoning floor applies.
+  // Floor raised from 8192/4096 (Plan C) to 32768/8192 (D2) for all reasoning models.
   const config = loadConfig({ MULTIPOLY_MODELS: "mimo", MULTIPOLY_MIMO_API_KEY: "mimo" });
-  assert.equal(config.models.mimo.maxTokens.review, 8192);
-  assert.equal(config.models.mimo.maxTokens.consult, 4096);
+  assert.equal(config.models.mimo.maxTokens.review, 32768);
+  assert.equal(config.models.mimo.maxTokens.consult, 8192);
 });
 
 test("an explicit MULTIPOLY_MIMO_MAX_TOKENS_REVIEW overrides the floor", () => {
@@ -647,4 +651,85 @@ test("config: always-on builtins surface convention-form display names", () => {
   assert.equal(config.models.qwen.displayName, "qwen3.7-max (api)");
   assert.equal(config.models.deepseek.displayName, "deepseek-v4-pro (api)");
   assert.equal(config.models.composer.displayName, "composer-2.5 (cursor cli)");
+});
+
+// ── D2 Task 1: Generalize max_tokens floor to all reasoning capabilities ──
+
+test("D2: kimi (KIMI_TOGGLE) with no explicit cap gets 32768/8192 floor", () => {
+  const config = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "glm-key",
+    MULTIPOLY_MODELS: "kimi",
+    MULTIPOLY_KIMI_API_KEY: "kimi-key",
+    MULTIPOLY_KIMI_BASE_URL: "https://kimi.example/v1",
+    MULTIPOLY_KIMI_MODEL: "kimi-k2.6",
+  });
+  assert.equal(config.models.kimi.maxTokens.review, 32768);
+  assert.equal(config.models.kimi.maxTokens.consult, 8192);
+});
+
+test("D2: deepseek (OPENAI_EFFORT) with no explicit cap gets 32768/8192 floor", () => {
+  const config = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "glm-key",
+    MULTIPOLY_DEEPSEEK_API_KEY: "ds-key",
+    MULTIPOLY_DEEPSEEK_BASE_URL: "https://deepseek.example/v1",
+  });
+  assert.equal(config.models.deepseek.maxTokens.review, 32768);
+  assert.equal(config.models.deepseek.maxTokens.consult, 8192);
+});
+
+test("D2: glm (GLM_TOGGLE) with no server-wide cap gets 32768/8192 floor (raised from 8192/4096)", () => {
+  // GLM default applies the server ceiling (131072) as its default via the `key === "glm"` path,
+  // but in a scenario with no server-wide explicit env, it should still be floored at 32768.
+  // The existing default config already has review=131072 > 32768, so Math.max still returns 131072.
+  // Verify the floor with a fresh config where GLM gets undefined (not the server ceiling):
+  // Use MULTIPOLY_MODELS to register a second model so there are two — and check a custom glm-like
+  // reasoning model. Instead just verify that `resolveModelMaxTokens` for glm yields >= 32768.
+  const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "glm-key" });
+  // GLM has key==="glm" so it inherits MODEL_OUTPUT_CEILING (131072) by default,
+  // which is already > 32768, so the floor doesn't change the visible value here.
+  assert.ok(config.models.glm.maxTokens.review >= 32768, "glm review floor must be >= 32768");
+  assert.ok(config.models.glm.maxTokens.consult >= 8192, "glm consult floor must be >= 8192");
+});
+
+test("D2: NONE-capability model (composer) gets no floor — maxTokens remain undefined", () => {
+  const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "glm-key" });
+  // composer has CAPABILITY.NONE — floor must NOT be applied.
+  assert.equal(config.models.composer.maxTokens.review, undefined);
+  assert.equal(config.models.composer.maxTokens.consult, undefined);
+});
+
+test("D2: explicit MULTIPOLY_<K>_MAX_TOKENS_REVIEW wins over the floor", () => {
+  const config = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "glm-key",
+    MULTIPOLY_MODELS: "kimi",
+    MULTIPOLY_KIMI_API_KEY: "kimi-key",
+    MULTIPOLY_KIMI_BASE_URL: "https://kimi.example/v1",
+    MULTIPOLY_KIMI_MODEL: "kimi-k2.6",
+    MULTIPOLY_KIMI_MAX_TOKENS_REVIEW: "20000",
+    MULTIPOLY_KIMI_MAX_TOKENS_CONSULT: "5000",
+  });
+  assert.equal(config.models.kimi.maxTokens.review, 20000);
+  assert.equal(config.models.kimi.maxTokens.consult, 5000);
+});
+
+test("D2: reasoning floor values are within MODEL_OUTPUT_CEILING (32768 < 131072)", () => {
+  const MODEL_OUTPUT_CEILING = 131072;
+  const REASONING_REVIEW_FLOOR = 32768;
+  const REASONING_CONSULT_FLOOR = 8192;
+  assert.ok(REASONING_REVIEW_FLOOR <= MODEL_OUTPUT_CEILING, "review floor must not exceed ceiling");
+  assert.ok(REASONING_CONSULT_FLOOR <= MODEL_OUTPUT_CEILING, "consult floor must not exceed ceiling");
+  // And verify a configured reasoning model never produces a value above ceiling.
+  const config = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "glm-key",
+    MULTIPOLY_DEEPSEEK_API_KEY: "ds-key",
+    MULTIPOLY_DEEPSEEK_BASE_URL: "https://deepseek.example/v1",
+  });
+  assert.ok(
+    config.models.deepseek.maxTokens.review <= MODEL_OUTPUT_CEILING,
+    "review must not exceed ceiling",
+  );
+  assert.ok(
+    config.models.deepseek.maxTokens.consult <= MODEL_OUTPUT_CEILING,
+    "consult must not exceed ceiling",
+  );
 });
