@@ -87,6 +87,16 @@ export function effortToCliReasoningArgs(kind, e) {
   return []; // gemini/cursor/agy/kimi: no graded effort flag verified
 }
 
+/**
+ * Step an effort level one position down in EFFORT_ORDER.
+ * "off" is the floor — it stays "off". Any unrecognised value also returns "off".
+ */
+export function stepEffortDown(effort) {
+  const i = EFFORT_ORDER[effort];
+  if (i === undefined || i <= 0) return "off";
+  return EFFORT_LEVELS[i - 1];
+}
+
 export function resolveReasoningEffort({ perCall, modelEffort, modelThinking, serverEffort, serverThinking, bakedDefault }) {
   const chain = [perCall, modelEffort, modelThinking, serverEffort, serverThinking].map(normalizeEffort);
   for (const lvl of chain) if (lvl !== "inherit") return lvl;

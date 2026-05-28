@@ -1,7 +1,6 @@
 import { MultipolyError } from "./errors.mjs";
 import { gatherReview } from "./gather.mjs";
 import { scanMany, formatHitsForError } from "./secrets.mjs";
-import { runModel } from "./run-model.mjs";
 import {
   REVIEW_SYSTEM_PROMPT,
   REVIEW_JSON_ONLY_PREFIX,
@@ -9,10 +8,10 @@ import {
   stripCodeFence,
 } from "./prompts.mjs";
 import { REVIEW_SCHEMA, validateReview, normalizeFindings } from "./schema.mjs";
-import { assertContentBudget } from "./budget.mjs";
 import { resolveCallTimeoutMs, resolveMaxTokensForModel } from "./config.mjs";
 import { modelSupportsThinking } from "./models.mjs";
-import { normalizeEffort } from "./reasoning.mjs";
+import { normalizeEffort, resolveReasoningEffort } from "./reasoning.mjs";
+import { callWithBudgetRetry } from "./budget-retry.mjs";
 
 export async function prepareReview(input, { config, cwd = process.cwd() } = {}) {
   const gathered = await gatherReview({
@@ -64,25 +63,40 @@ export async function runPreparedReview(modelKey, prepared, { config, fetchImpl,
     },
   };
 
-  const attempt1 = await runModel({
-    config,
-    modelKey,
-    messages: prepared.messages,
-    mode: "review",
-    responseFormat,
-    timeoutMs: prepared.timeoutMs,
-    reasoningEffort: prepared.reasoningEffort,
-    fetchImpl,
-    execFileImpl,
-    cwd,
-  });
-
   const maxTokens = resolveMaxTokensForModel(config, modelKey, "review");
   const budgetContext = {
     modelKey,
     supportsThinking: modelSupportsThinking(config, modelKey),
   };
-  assertContentBudget(attempt1, maxTokens, "review", budgetContext);
+
+  // Compute the effective reasoning effort for this call (mirrors transport resolution):
+  // the per-call override (prepared.reasoningEffort) applied on top of the model
+  // config baseline (modelConfig.reasoningEffort, already a concrete level).
+  const modelConfig = config?.models?.[modelKey];
+  const bakedDefault = modelConfig?.reasoningEffort ?? "off";
+  const effectiveEffort = resolveReasoningEffort({
+    perCall: prepared.reasoningEffort,
+    bakedDefault,
+  });
+
+  const { attempt: attempt1 } = await callWithBudgetRetry({
+    runModelArgs: {
+      config,
+      modelKey,
+      messages: prepared.messages,
+      mode: "review",
+      responseFormat,
+      timeoutMs: prepared.timeoutMs,
+      reasoningEffort: prepared.reasoningEffort,
+      fetchImpl,
+      execFileImpl,
+      cwd,
+    },
+    mode: "review",
+    maxTokens,
+    budgetContext,
+    effectiveEffort,
+  });
 
   let parsed = tryParseJson(attempt1.content);
   let validation = parsed.ok ? validateReview(parsed.value) : { valid: false, reason: parsed.error };
@@ -90,28 +104,33 @@ export async function runPreparedReview(modelKey, prepared, { config, fetchImpl,
   let reasoning = attempt1.reasoning;
   if (!validation.valid) {
     const attempt1Echo = safeTruncate(attempt1.content, 8192);
-    const attempt2 = await runModel({
-      config,
-      modelKey,
-      messages: [
-        ...prepared.messages,
-        { role: "assistant", content: attempt1Echo },
-        {
-          role: "user",
-          content:
-            REVIEW_JSON_ONLY_PREFIX +
-            (validation.reason ? `\n\nValidation error: ${validation.reason}` : ""),
-        },
-      ],
+    const { attempt: attempt2 } = await callWithBudgetRetry({
+      runModelArgs: {
+        config,
+        modelKey,
+        messages: [
+          ...prepared.messages,
+          { role: "assistant", content: attempt1Echo },
+          {
+            role: "user",
+            content:
+              REVIEW_JSON_ONLY_PREFIX +
+              (validation.reason ? `\n\nValidation error: ${validation.reason}` : ""),
+          },
+        ],
+        mode: "review",
+        responseFormat: attempt1.fellBackFromJsonSchema ? { type: "json_object" } : responseFormat,
+        timeoutMs: prepared.timeoutMs,
+        reasoningEffort: prepared.reasoningEffort,
+        fetchImpl,
+        execFileImpl,
+        cwd,
+      },
       mode: "review",
-      responseFormat: attempt1.fellBackFromJsonSchema ? { type: "json_object" } : responseFormat,
-      timeoutMs: prepared.timeoutMs,
-      reasoningEffort: prepared.reasoningEffort,
-      fetchImpl,
-      execFileImpl,
-      cwd,
+      maxTokens,
+      budgetContext,
+      effectiveEffort,
     });
-    assertContentBudget(attempt2, maxTokens, "review", budgetContext);
     if (attempt2.reasoning) reasoning = attempt2.reasoning;
     parsed = tryParseJson(attempt2.content);
     validation = parsed.ok ? validateReview(parsed.value) : { valid: false, reason: parsed.error };

@@ -1,12 +1,11 @@
 import { MultipolyError } from "./errors.mjs";
 import { gatherConsult } from "./gather.mjs";
 import { scanMany, formatHitsForError } from "./secrets.mjs";
-import { runModel } from "./run-model.mjs";
 import { CONSULT_SYSTEM_PROMPT, renderConsultUserMessage } from "./prompts.mjs";
-import { assertContentBudget } from "./budget.mjs";
 import { resolveCallTimeoutMs, resolveMaxTokensForModel } from "./config.mjs";
 import { modelSupportsThinking } from "./models.mjs";
-import { normalizeEffort } from "./reasoning.mjs";
+import { normalizeEffort, resolveReasoningEffort } from "./reasoning.mjs";
+import { callWithBudgetRetry } from "./budget-retry.mjs";
 
 export async function prepareConsult(input, { config, cwd = process.cwd() } = {}) {
   const gathered = await gatherConsult({
@@ -39,22 +38,38 @@ export async function prepareConsult(input, { config, cwd = process.cwd() } = {}
 }
 
 export async function runPreparedConsult(modelKey, prepared, { config, fetchImpl, execFileImpl, cwd } = {}) {
-  const attempt = await runModel({
-    config,
-    modelKey,
-    messages: prepared.messages,
-    mode: "consult",
-    timeoutMs: prepared.timeoutMs,
-    reasoningEffort: prepared.reasoningEffort,
-    fetchImpl,
-    execFileImpl,
-    cwd,
-  });
   const maxTokens = resolveMaxTokensForModel(config, modelKey, "consult");
-  const { truncated } = assertContentBudget(attempt, maxTokens, "consult", {
+  const budgetContext = {
     modelKey,
     supportsThinking: modelSupportsThinking(config, modelKey),
+  };
+
+  // Compute the effective reasoning effort (mirrors transport resolution).
+  const modelConfig = config?.models?.[modelKey];
+  const bakedDefault = modelConfig?.reasoningEffort ?? "off";
+  const effectiveEffort = resolveReasoningEffort({
+    perCall: prepared.reasoningEffort,
+    bakedDefault,
   });
+
+  const { attempt, truncated } = await callWithBudgetRetry({
+    runModelArgs: {
+      config,
+      modelKey,
+      messages: prepared.messages,
+      mode: "consult",
+      timeoutMs: prepared.timeoutMs,
+      reasoningEffort: prepared.reasoningEffort,
+      fetchImpl,
+      execFileImpl,
+      cwd,
+    },
+    mode: "consult",
+    maxTokens,
+    budgetContext,
+    effectiveEffort,
+  });
+
   const result = truncated
     ? `${attempt.content}\n\n> Output truncated at ${maxTokens ?? "provider/default max_tokens"}. Raise MULTIPOLY_MAX_TOKENS_CONSULT or a model-specific cap for a complete answer.`
     : attempt.content;
