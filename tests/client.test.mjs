@@ -673,6 +673,75 @@ test("client[Task8]: reasoning_effort rejection retries once without it and succ
   assert.equal(calls, 2);
 });
 
+// ── Task D2/2: per-call maxTokensOverride ────────────────────────────────────
+
+test("client[D2]: maxTokensOverride supersedes configured cap (max_tokens)", async () => {
+  // Model has configured cap of 8192; override 50000 must win.
+  const fetchImpl = makeFetch({});
+  await streamChatCompletion({
+    config: makeCapConfig({ key: "glm", capability: CAPABILITY.GLM_TOGGLE, reasoningEffort: "high", maxTokens: { review: 8192, consult: 8192 } }),
+    modelKey: "glm",
+    messages: [{ role: "user", content: "x" }],
+    mode: "review",
+    maxTokensOverride: 50000,
+    fetchImpl,
+  });
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.equal(sent.max_tokens, 50000, "maxTokensOverride must replace the configured 8192 cap");
+});
+
+test("client[D2]: maxTokensOverride with mimo uses max_completion_tokens", async () => {
+  // mimo sets usesMaxCompletionTokens; override must still use the right field.
+  const fetchImpl = makeFetch({});
+  await streamChatCompletion({
+    config: {
+      ...baseConfig,
+      models: {
+        mimo: {
+          configured: true,
+          key: "mimo",
+          displayName: "mimo-v2.5-pro (api)",
+          baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+          apiKey: "mimo",
+          model: "mimo-v2.5-pro",
+          supportsThinking: true,
+          reasoning: CAPABILITY.GLM_TOGGLE,
+          reasoningEffort: "high",
+          usesMaxCompletionTokens: true,
+          maxTokens: { review: 8192, consult: 4096 },
+        },
+      },
+    },
+    modelKey: "mimo",
+    messages: [{ role: "user", content: "hi" }],
+    mode: "review",
+    maxTokensOverride: 50000,
+    fetchImpl,
+  });
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.equal(sent.max_completion_tokens, 50000, "maxTokensOverride must use max_completion_tokens for mimo");
+  assert.equal(sent.max_tokens, undefined);
+});
+
+test("client[D2]: maxTokensOverride scales qwen thinking_budget (not the original cap)", async () => {
+  // Qwen (QWEN_BUDGET) with configured cap 8192; override 50000.
+  // thinking_budget must be based on BUDGET_FRACTION * 50000, NOT * 8192.
+  const fetchImpl = makeFetch({});
+  await streamChatCompletion({
+    config: makeCapConfig({ key: "qwen", capability: CAPABILITY.QWEN_BUDGET, reasoningEffort: "high", maxTokens: { review: 8192, consult: 8192 } }),
+    modelKey: "qwen",
+    messages: [{ role: "user", content: "x" }],
+    mode: "review",
+    maxTokensOverride: 50000,
+    fetchImpl,
+  });
+  const sent = JSON.parse(fetchImpl.calls[0].opts.body);
+  assert.equal(sent.max_tokens, 50000, "max_tokens must be the override");
+  // BUDGET_FRACTION.high = 0.6 → 0.6 * 50000 = 30000
+  // BUDGET_FRACTION.high * 8192 = 4915 — assert the value is closer to 50000 scale
+  assert.ok(sent.thinking_budget > 10000, `thinking_budget ${sent.thinking_budget} should scale with 50000, not 8192`);
+});
+
 // ── Task D1/2a: surface HTTP error cause code in network error ───────────────
 
 test("client: network error includes cause code in MultipolyError details and message", async () => {

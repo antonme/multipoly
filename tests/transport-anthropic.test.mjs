@@ -620,3 +620,44 @@ test("regression: ANTHROPIC_EFFORT review mode (output_config fallback path) nev
     );
   }
 });
+
+// ── Task D2/2: per-call maxTokensOverride ────────────────────────────────────
+
+test("anthropic[D2]: maxTokensOverride supersedes configured cap on max_tokens", async () => {
+  // Model has consultMax: 4096; override 50000 must win.
+  const cap = {};
+  await runModel({
+    config: anthropicConfig({ consultMax: 4096 }),
+    modelKey: "m",
+    messages,
+    mode: "consult",
+    maxTokensOverride: 50000,
+    fetchImpl: anthropicFetch(basicEvents, cap),
+  });
+  assert.equal(cap.body.max_tokens, 50000, "maxTokensOverride must replace the configured 4096 cap");
+});
+
+test("anthropic[D2]: maxTokensOverride scales ANTHROPIC_BUDGET budget_tokens", async () => {
+  // With consultMax: 4096, budget_tokens at high would be ~0.6*4096 = 2457.
+  // With override 50000, budget_tokens should be ~0.6*50000 = 30000.
+  const cap = {};
+  const { CAPABILITY: CAP } = await import("../scripts/lib/reasoning.mjs");
+  await runModel({
+    config: anthropicConfig({
+      reasoning: CAP.ANTHROPIC_BUDGET,
+      reasoningEffort: "high",
+      consultMax: 4096,
+    }),
+    modelKey: "m",
+    messages,
+    mode: "consult",
+    maxTokensOverride: 50000,
+    fetchImpl: anthropicFetch(basicEvents, cap),
+  });
+  assert.equal(cap.body.max_tokens, 50000, "max_tokens must be the override");
+  assert.ok(cap.body.thinking, "thinking field should be present with large override");
+  assert.equal(cap.body.thinking.type, "enabled");
+  // BUDGET_FRACTION.high = 0.6 → 0.6 * 50000 = 30000; old cap gave ~2457
+  assert.ok(cap.body.thinking.budget_tokens > 10000,
+    `budget_tokens ${cap.body.thinking.budget_tokens} should scale with override 50000, not configured 4096`);
+});

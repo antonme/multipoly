@@ -32,6 +32,7 @@ export async function streamChatCompletion({
   thinking,
   timeoutMs,
   reasoningEffort,
+  maxTokensOverride,
   fetchImpl = globalThis.fetch,
 }) {
   const correlationId = newCorrelationId();
@@ -56,7 +57,11 @@ export async function streamChatCompletion({
     messages,
     stream: true,
   };
-  const maxTokens = resolveMaxTokensForModel(config, effectiveModelKey, mode);
+  // Per-call maxTokensOverride supersedes the model-configured cap for this one
+  // call (used by the adaptive BUDGET retry to request more room). The same value
+  // flows to BOTH the emitted token-cap field AND the Qwen budget adapter so
+  // thinking_budget scales correctly with the override.
+  const maxTokens = maxTokensOverride ?? resolveMaxTokensForModel(config, effectiveModelKey, mode);
   if (maxTokens !== undefined) {
     // Some OpenAI-compatible providers (e.g. Xiaomi MiMo) reject the legacy `max_tokens`
     // field and require `max_completion_tokens`. The per-model flag is baked in MODEL_INFO

@@ -53,6 +53,7 @@ export async function runAnthropicModel({
   responseFormat,
   thinking,
   reasoningEffort,
+  maxTokensOverride,
   timeoutMs,
   fetchImpl = globalThis.fetch,
 }) {
@@ -68,7 +69,10 @@ export async function runAnthropicModel({
   }
 
   const { system, turns } = splitSystem(messages);
-  const maxTokens = resolveMaxTokensForModel(config, modelKey, mode) ?? DEFAULT_MAX_TOKENS;
+  // Per-call maxTokensOverride supersedes the model-configured cap for this one
+  // call; use it for BOTH max_tokens in the body AND the budget adapter so
+  // thinking_budget scales correctly with the override.
+  const effectiveMax = maxTokensOverride ?? resolveMaxTokensForModel(config, modelKey, mode) ?? DEFAULT_MAX_TOKENS;
 
   // Resolve capability and effective reasoning effort.
   const cap = m.reasoning ?? modelCapability(config, modelKey);
@@ -95,13 +99,13 @@ export async function runAnthropicModel({
     thinkingFields = effortToKimiThinking(effort);
     isThinkingActive = effort !== "off";
   } else if (cap === CAPABILITY.ANTHROPIC_BUDGET) {
-    thinkingFields = effortToAnthropicBudget(effort, { maxTokens });
+    thinkingFields = effortToAnthropicBudget(effort, { maxTokens: effectiveMax });
     if (thinkingFields === null && effort !== "off") {
       process.stderr.write(
         JSON.stringify({
           event: "anthropic_thinking_skipped",
           correlationId,
-          reason: `max_tokens (${maxTokens}) too small to fit a thinking budget; proceeding without extended thinking`,
+          reason: `max_tokens (${effectiveMax}) too small to fit a thinking budget; proceeding without extended thinking`,
         }) + "\n",
       );
     }
@@ -111,7 +115,7 @@ export async function runAnthropicModel({
 
   const baseBody = {
     model: m.model,
-    max_tokens: maxTokens,
+    max_tokens: effectiveMax,
     stream: true,
     messages: turns,
   };

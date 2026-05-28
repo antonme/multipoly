@@ -73,3 +73,69 @@ test("runModel: a model with no transport field defaults to http", async () => {
   });
   assert.equal(out.content, "ok");
 });
+
+// ── Task D2/2: maxTokensOverride forwarding ───────────────────────────────────
+
+test("runModel[D2]: maxTokensOverride is forwarded to http transport", async () => {
+  // The http transport must receive maxTokensOverride in its args so it uses it
+  // instead of the configured cap. Verify by inspecting the sent body.
+  let sentBody = null;
+  const fetchImpl = async (_url, opts) => {
+    sentBody = JSON.parse(opts.body);
+    return new Response(sseStream("hi"), {
+      status: 200,
+      headers: { "content-type": "text/event-stream" },
+    });
+  };
+  const cfg = {
+    ...httpConfig,
+    models: {
+      glm: {
+        ...httpConfig.models.glm,
+        maxTokens: { review: 8192, consult: 8192 },
+      },
+    },
+  };
+  await runModel({
+    config: cfg,
+    modelKey: "glm",
+    messages: [{ role: "user", content: "x" }],
+    mode: "review",
+    maxTokensOverride: 50000,
+    fetchImpl,
+  });
+  assert.equal(sentBody.max_tokens, 50000, "http transport should receive and apply maxTokensOverride");
+});
+
+test("runModel[D2]: cli transport accepts maxTokensOverride without error (ignores it)", async () => {
+  // CLI agents manage their own budget; maxTokensOverride must be silently accepted.
+  const cliConfig = {
+    models: {
+      myagent: {
+        configured: true,
+        key: "myagent",
+        transport: "cli",
+        cliKind: "claude",
+        binary: "claude",
+        model: "claude-opus-4-7",
+        authTokenEnv: "ANTHROPIC_API_KEY",
+      },
+    },
+    timeoutMs: 5000,
+    progress: "off",
+  };
+  const execFileImpl = async () => '{"findings":[]}';
+  // Should NOT throw even though maxTokensOverride is passed.
+  // Provide a fake env with the required auth token so the config check passes.
+  await assert.doesNotReject(async () => {
+    await runModel({
+      config: cliConfig,
+      modelKey: "myagent",
+      messages: [{ role: "user", content: "x" }],
+      mode: "consult",
+      maxTokensOverride: 50000,
+      execFileImpl,
+      env: { ANTHROPIC_API_KEY: "sk-ant-fake-test-value" },
+    });
+  }, "cli transport must accept maxTokensOverride without error");
+});

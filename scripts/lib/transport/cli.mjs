@@ -81,6 +81,8 @@ const MAX_BUFFER = 64 * 1024 * 1024;
  *   - cwd: repo working dir (default process.cwd()); used when cwdMode==="repo".
  */
 export async function runCliModel(args) {
+  // maxTokensOverride is intentionally ignored here: CLI agents manage their own
+  // token budgets internally; the override only applies to http/anthropic transports.
   const { config, modelKey, messages, mode, responseFormat, timeoutMs, reasoningEffort } = args;
   const env = args.env ?? process.env;
   const repoCwd = args.cwd ?? process.cwd();
