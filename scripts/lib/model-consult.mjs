@@ -52,7 +52,7 @@ export async function runPreparedConsult(modelKey, prepared, { config, fetchImpl
     bakedDefault,
   });
 
-  const { attempt, truncated } = await callWithBudgetRetry({
+  const { attempt, truncated, maxTokensUsed } = await callWithBudgetRetry({
     runModelArgs: {
       config,
       modelKey,
@@ -71,7 +71,7 @@ export async function runPreparedConsult(modelKey, prepared, { config, fetchImpl
   });
 
   const result = truncated
-    ? `${attempt.content}\n\n> Output truncated at ${maxTokens ?? "provider/default max_tokens"}. Raise MULTIPOLY_MAX_TOKENS_CONSULT or a model-specific cap for a complete answer.`
+    ? `${attempt.content}\n\n> Output truncated at ${maxTokensUsed ?? "provider/default max_tokens"}. Raise MULTIPOLY_MAX_TOKENS_CONSULT or a model-specific cap for a complete answer.`
     : attempt.content;
   return { result, reasoning: attempt.reasoning };
 }

@@ -113,10 +113,44 @@ test("budget-retry: BUDGET on both calls — throws BUDGET after exactly 2 calls
         effectiveEffort: "high",
         runModelImpl: fake,
       }),
-    (e) => e.code === "BUDGET",
+    (e) => {
+      // Fix A: error must note the adaptive retry already ran
+      if (e.code !== "BUDGET") return false;
+      assert.ok(e.details?.adaptiveRetry === true, "details.adaptiveRetry must be true");
+      assert.match(e.message, /adaptive retry/, "message must mention 'adaptive retry'");
+      return true;
+    },
     "should throw BUDGET after 2 budget failures",
   );
   assert.equal(fake.calls.length, 2, "should attempt exactly 2 calls");
+});
+
+// Fix B: maxTokensUsed returned accurately
+test("budget-retry: maxTokensUsed equals original on first-attempt success", async () => {
+  const fake = makeRecordingRunModel([validReviewAttempt()]);
+  const result = await callWithBudgetRetry({
+    runModelArgs: { model: "glm-5.1" },
+    mode: "review",
+    maxTokens: MAX_TOKENS_REVIEW,
+    budgetContext: reviewCtx,
+    effectiveEffort: "medium",
+    runModelImpl: fake,
+  });
+  assert.equal(result.maxTokensUsed, MAX_TOKENS_REVIEW, "maxTokensUsed must equal original maxTokens on no-retry path");
+});
+
+test("budget-retry: maxTokensUsed equals bumped value on retry path", async () => {
+  const fake = makeRecordingRunModel([budgetFailAttempt(), validReviewAttempt()]);
+  const result = await callWithBudgetRetry({
+    runModelArgs: { model: "glm-5.1" },
+    mode: "review",
+    maxTokens: 8192,
+    budgetContext: reviewCtx,
+    effectiveEffort: "medium",
+    runModelImpl: fake,
+  });
+  assert.equal(result.retried, true);
+  assert.equal(result.maxTokensUsed, 16384, "maxTokensUsed must equal bumped value (8192*2=16384) on retry path");
 });
 
 test("budget-retry: effort=off — retry bumps tokens only, effort stays off", async () => {

@@ -36,6 +36,8 @@ function looksLikeNonSecretValue(v) {
   // but keep webhook-style URLs that embed a long opaque token in the path.
   if (/^https?:\/\//.test(s)) {
     const afterHost = s.replace(/^https?:\/\/[^/]+/, ""); // path + query + fragment
+    // 24 chars ≈ minimum Slack/GitHub webhook secret length in a URL path;
+    // a longer opaque tail => treat as a secret-bearing URL, not a plain base URL.
     if (!/[A-Za-z0-9_\-]{24,}/.test(afterHost)) return true; // plain URL — not a secret
     return false; // long opaque tail (e.g. webhook secret) — keep flagged
   }

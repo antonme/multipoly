@@ -10,6 +10,7 @@
 // Non-BUDGET errors are re-thrown immediately without retrying.
 
 import { assertContentBudget } from "./budget.mjs";
+import { MultipolyError } from "./errors.mjs";
 import { runModel as defaultRunModel } from "./run-model.mjs";
 import { stepEffortDown } from "./reasoning.mjs";
 
@@ -27,7 +28,7 @@ const MODEL_OUTPUT_CEILING = 131072;
  * @param {string}   opts.effectiveEffort - Already-resolved concrete effort level for this call.
  * @param {Function} [opts.runModelImpl]  - Injected runModel implementation (for testing); defaults to runModel.
  *
- * @returns {Promise<{attempt, truncated: boolean, retried: boolean}>}
+ * @returns {Promise<{attempt, truncated: boolean, retried: boolean, maxTokensUsed: number|undefined}>}
  */
 export async function callWithBudgetRetry({
   runModelArgs,
@@ -58,9 +59,22 @@ export async function callWithBudgetRetry({
 
     // Use bumped ?? maxTokens so assertContentBudget uses the correct limit
     // in its error message when bumped is undefined.
-    const budgetResult2 = assertContentBudget(a2, bumped ?? maxTokens, mode, budgetContext);
-    return { attempt: a2, truncated: budgetResult2.truncated, retried: true };
+    let budgetResult2;
+    try {
+      budgetResult2 = assertContentBudget(a2, bumped ?? maxTokens, mode, budgetContext);
+    } catch (e2) {
+      if (e2.code !== "BUDGET") throw e2; // non-BUDGET: propagate unchanged
+      // Fix A: surface that the adaptive retry already ran
+      throw new MultipolyError(
+        "BUDGET",
+        e2.message + " (after one adaptive retry with higher max_tokens and reduced reasoning effort)",
+        { details: { ...(e2.details ?? {}), adaptiveRetry: true } },
+      );
+    }
+    // Fix B: report the bumped cap that was actually used
+    return { attempt: a2, truncated: budgetResult2.truncated, retried: true, maxTokensUsed: bumped ?? maxTokens };
   }
 
-  return { attempt: a1, truncated: budgetResult1.truncated, retried: false };
+  // Fix B: report the original cap on the no-retry path
+  return { attempt: a1, truncated: budgetResult1.truncated, retried: false, maxTokensUsed: maxTokens };
 }

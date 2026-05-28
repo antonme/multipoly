@@ -171,6 +171,19 @@ test("secrets: true-positives: webhook URL with long opaque tail must stay flagg
   assert.equal(r.clean, false, "webhook URL with opaque tail must be flagged");
 });
 
+// Fix D: document the known, spec-accepted recall boundary for unquoted lowercase keys
+test("scanner: KNOWN GAP — unquoted lowercase key is not flagged (SCREAMING_CASE only); quoted form still caught", () => {
+  // The unquoted pattern intentionally drops /i (SCREAMING_CASE only) to avoid
+  // camelCase false-positives. An unquoted lowercase key with an opaque value
+  // is therefore NOT flagged — this is an accepted tradeoff.
+  const unquoted = "apikey=abcdEFGH1234ijklMNOP5678qrst";
+  assert.equal(scan(unquoted, "t").clean, true, "unquoted lowercase key must NOT be flagged (known gap, SCREAMING_CASE only)");
+
+  // The quoted pattern retains /i, so the same secret in quoted form IS caught.
+  const quoted = 'apikey: "abcdEFGH1234ijklMNOP5678qrst"';
+  assert.equal(scan(quoted, "t").clean, false, "quoted lowercase key MUST be flagged (quoted pattern keeps /i)");
+});
+
 // --- End precision tests ---
 
 test("secrets: scanning a long word-char run is bounded (no ReDoS)", () => {
