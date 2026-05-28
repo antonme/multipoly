@@ -9,6 +9,7 @@
  *   node scripts/multipoly-mcp.mjs --health  # validate config and exit
  */
 
+import * as net from "node:net";
 import { pathToFileURL } from "node:url";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -33,6 +34,7 @@ import { handleModelReview } from "./lib/model-review.mjs";
 import { handleModelConsult } from "./lib/model-consult.mjs";
 import { handleCouncilReview, handleCouncilConsult } from "./lib/council.mjs";
 import { scan } from "./lib/secrets.mjs";
+import { enableHappyEyeballs } from "./lib/net-config.mjs";
 
 const TIMEOUT_ARG_SCHEMA = {
   type: "integer",
@@ -284,6 +286,7 @@ export function createServer(config) {
 }
 
 function main() {
+  enableHappyEyeballs(net);
   const args = new Set(process.argv.slice(2));
   if (args.has("--health")) {
     try {
