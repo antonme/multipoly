@@ -16,30 +16,55 @@
  * Intentionally conservative: only well-defined syntactic shapes are suppressed.
  * Anything ambiguous falls through to false (the hit is kept).
  *
- * URL suppression has a deliberate carve-out: a URL whose path/query/fragment
- * contains a 24+ character alphanumeric run (e.g. a Slack/GitHub webhook secret
- * embedded in the URL) is NOT suppressed — those are real secrets.
+ * URL suppression has a deliberate carve-out: a URL whose userinfo holds
+ * credentials, or whose path/query/fragment contains a 24+ character opaque run
+ * (e.g. a Slack/GitHub webhook secret embedded in the URL), is NOT suppressed —
+ * those are real secrets.
+ *
+ * Camouflage defence: the template / function-call / member-access suppressors
+ * only fire when the value does NOT also embed a high-entropy opaque blob. A
+ * code-shaped *prefix* must not be allowed to hide a hard-coded secret in the
+ * tail — e.g. `${x}<SECRET>`, `makeToken(<SECRET>)`, `process.env.<SECRET>`.
  *
  * @param {string|null|undefined} v — the captured value span (groups.val)
  * @returns {boolean} true ⇒ skip this hit; false ⇒ record it
  */
+function embedsOpaqueSecret(s) {
+  // A contiguous run of 24+ alphanumeric characters (NO separators) is the
+  // signature of a high-entropy opaque secret token. Real identifiers, env-var
+  // names (SCREAMING_SNAKE), function names and URL hosts are broken up by
+  // separators (_, -, ., /) into shorter runs, so they don't trip this.
+  return /[A-Za-z0-9]{24,}/.test(s);
+}
+
 function looksLikeNonSecretValue(v) {
   if (v == null) return false;
   const s = String(v).trim();
+  // A code-shaped prefix must not camouflage a secret embedded in the tail.
+  const opaque = embedsOpaqueSecret(s);
   // Template literal (bare or interpolated): `...` or contains ${
-  if (s.startsWith("`") || s.includes("${")) return true;
+  if ((s.startsWith("`") || s.includes("${")) && !opaque) return true;
   // Function call: starts with an identifier followed by (
-  if (/^[A-Za-z_$][\w$]*\s*\(/.test(s)) return true;
+  if (/^[A-Za-z_$][\w$]*\s*\(/.test(s) && !opaque) return true;
   // Member / index access on well-known runtime objects
-  if (/^(req|res|process\.env|value|this|config|ctx|opts|options)\b[.[]/.test(s)) return true;
-  // URL: suppress plain base URLs (no opaque token in the path/query/fragment),
-  // but keep webhook-style URLs that embed a long opaque token in the path.
+  if (/^(req|res|process\.env|value|this|config|ctx|opts|options)\b[.[]/.test(s) && !opaque) return true;
+  // URL: suppress plain base URLs, but keep URLs that carry credentials in the
+  // userinfo or embed a long opaque token in the path/query/fragment. Parse with
+  // the URL API so userinfo (`user:pass@host`) is never mistaken for the host —
+  // a naive `https?://[^/]+` strip swallows the password and misses it.
   if (/^https?:\/\//.test(s)) {
-    const afterHost = s.replace(/^https?:\/\/[^/]+/, ""); // path + query + fragment
+    let u;
+    try {
+      u = new URL(s);
+    } catch {
+      return false; // unparseable URL-ish value — keep flagged (conservative)
+    }
+    if (u.username || u.password) return false; // embedded credentials are secrets
+    const tail = u.pathname + u.search + u.hash;
     // 24 chars ≈ minimum Slack/GitHub webhook secret length in a URL path;
     // a longer opaque tail => treat as a secret-bearing URL, not a plain base URL.
-    if (!/[A-Za-z0-9_\-]{24,}/.test(afterHost)) return true; // plain URL — not a secret
-    return false; // long opaque tail (e.g. webhook secret) — keep flagged
+    if (/[A-Za-z0-9_\-]{24,}/.test(tail)) return false; // opaque token — keep flagged
+    return true; // plain base URL — not a secret
   }
   return false;
 }

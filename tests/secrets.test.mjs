@@ -184,6 +184,47 @@ test("scanner: KNOWN GAP — unquoted lowercase key is not flagged (SCREAMING_CA
   assert.equal(scan(quoted, "t").clean, false, "quoted lowercase key MUST be flagged (quoted pattern keeps /i)");
 });
 
+// --- Scanner hardening: code-shaped camouflage must not hide embedded secrets (codex D3 review) ---
+
+test("secrets: camouflage — template-interpolation prefix in front of an opaque secret must be flagged", () => {
+  // ${prefix} makes the value look like a template literal, but it embeds a
+  // 28-char contiguous opaque blob — a real hard-coded secret. The suppressor
+  // must NOT drop it just because it starts with code-shaped interpolation.
+  const r = scan('API_KEY="${prefix}abcdEFGH1234ijklMNOP5678qrst"', "t");
+  assert.equal(r.clean, false, "template-prefixed opaque secret must be flagged");
+});
+
+test("secrets: camouflage — function-call wrapper around an opaque secret must be flagged", () => {
+  // makeToken(<SECRET>) looks like a function call, but the argument is a real
+  // 28-char opaque secret. Must NOT be suppressed.
+  const r = scan('API_KEY="makeToken(abcdEFGH1234ijklMNOP5678qrst)"', "t");
+  assert.equal(r.clean, false, "func-call-wrapped opaque secret must be flagged");
+});
+
+test("secrets: camouflage — member-access prefix in front of an opaque secret must be flagged", () => {
+  // process.env.<SECRET> looks like a runtime reference, but the tail is a
+  // contiguous opaque blob, not a SCREAMING_SNAKE env-var name. Must be flagged.
+  const r = scan('API_KEY="process.env.abcdEFGH1234ijklMNOP5678qrst"', "t");
+  assert.equal(r.clean, false, "member-ref-prefixed opaque secret must be flagged");
+});
+
+test("secrets: URL userinfo credentials must be flagged (not swallowed as host)", () => {
+  // The opaque password lives in the userinfo, BEFORE the host. The old
+  // [^/]+ host-strip treated `user:pass@host` as the 'host' and missed it.
+  const r = scan('API_URL="https://user:abcdEFGH1234ijklMNOP5678qrst@example.com/path"', "t");
+  assert.equal(r.clean, false, "URL userinfo password must be flagged");
+});
+
+test("secrets: legit env-var reference in a secret assignment stays clean (no false positive)", () => {
+  // process.env.SCREAMING_SNAKE is a legitimate runtime reference, not a
+  // hard-coded secret: underscore-separated names have no 24-char opaque run,
+  // so the member-ref suppressor still drops it.
+  const r = scan("API_KEY = process.env.MY_SERVICE_API_KEY_NAME", "t");
+  assert.equal(r.clean, true, "process.env.<NAME> reference must stay clean");
+});
+
+// --- End scanner-hardening tests ---
+
 // --- End precision tests ---
 
 test("secrets: scanning a long word-char run is bounded (no ReDoS)", () => {
