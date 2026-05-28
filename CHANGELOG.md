@@ -22,16 +22,21 @@ ambiguous errors, payload bloat, and secret-scanner false-positives.
   line when any members fail (e.g. `"3/10 members failed: glm (BUDGET), kimi
   (BUDGET)"`).
 
-- **Council payload de-duplication + `compact` mode (§2).** `council_review`
-  no longer duplicates failed-member details: when `include_individual_results`
-  is set, only failed members appear in `member_results`; successful members are
-  listed in `members`. New `compact: true` parameter drops per-model prose
-  summaries, keeping only structured findings — use it when the harness reports
-  the large-payload `notice` (triggered at ≥80000 chars).
+- **Council payload de-duplication + `compact` mode (§2).** In the default
+  (harness-defer) `council_review` mode, `council_review` no longer duplicates
+  failed-member details: when `include_individual_results` is set, only failed
+  members appear in `member_results` while successful members are listed in
+  `members`. (Under server-side synthesis and in `council_consult` there is no
+  separate `members` block, so `member_results` carries all members.) New
+  `compact: true` parameter drops per-model prose summaries from the default
+  (harness-defer) `council_review` payload, keeping only structured findings —
+  use it when the harness reports the large-payload `notice` (triggered at
+  ≥80000 chars). `compact` is a no-op under server-side synthesis and in
+  `council_consult`.
 
 - **Reasoning max_tokens floors + adaptive BUDGET retry (§1).** All reasoning
   models now get a 32768-token floor for review calls and an 8192-token floor
-  for consult calls (raised from the previous GLM-only 8192/4096 floors). When
+  for consult calls (raised from the previous GLM/MiMo-only 8192/4096 floors). When
   a member returns `BUDGET`, one adaptive retry doubles `max_tokens` and steps
   `reasoning_effort` down one level before giving up. Per-model cap lever:
   `MULTIPOLY_<K>_MAX_TOKENS_REVIEW` / server-wide `MULTIPOLY_MAX_TOKENS_REVIEW`.

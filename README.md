@@ -400,9 +400,9 @@ To merge server-side instead, set a `synthesizer`:
 
 The per-call `synthesizer` argument overrides the `MULTIPOLY_SYNTHESIZER` env default. When server-side synthesis runs, member outputs are re-scanned for secrets before being sent to the synthesizer provider.
 
-**`compact: true`** drops per-model prose summaries from the council payload, keeping only structured findings. Use this when the harness reports a large-payload notice (triggered at ≥80000 chars) to reduce context pressure on the synthesizer.
+**`compact: true`** drops per-model prose summaries (`summary_md`) from the **default (harness-defer) `council_review`** payload, keeping only structured findings. Use this when the harness reports a large-payload notice (triggered at ≥80000 chars) to shrink the payload the calling harness must synthesize. It is a no-op under server-side synthesis (a `synthesizer` is set) and in `council_consult`.
 
-**`failure_summary`** — when one or more council members fail, a `failure_summary` line is included in the result (e.g. `"3/10 members failed: glm (BUDGET), kimi (BUDGET)"`). Failed-member details are included only under `member_results` when `include_individual_results` is set; successful members are listed in `members`.
+**`failure_summary`** — when one or more council members fail, a `failure_summary` line is included in the result (e.g. `"3/10 members failed: glm (BUDGET), kimi (BUDGET)"`). In the **default (harness-defer) `council_review`** mode, successful members are listed under `members` and `member_results` (when `include_individual_results` is set) carries only the failed members, avoiding duplication. Under server-side synthesis and in `council_consult` there is no separate `members` block, so `member_results` carries all members (successful and failed).
 
 #### Interpreting council output
 
@@ -439,7 +439,7 @@ When a member returns a `BUDGET` error (output truncated), multipoly automatical
 
 ### Reducing council payload size
 
-If the harness reports that the council payload is large (≥80000 chars), use `compact: true` on the `council_review` call to drop per-model prose summaries (keeping only structured findings). This is the fastest way to reduce context pressure when a council synthesis is hitting harness limits.
+If the harness reports that the default (harness-defer) `council_review` payload is large (≥80000 chars), use `compact: true` to drop per-model prose summaries (keeping only structured findings). This is the fastest way to shrink the payload the calling harness must synthesize. (`compact` is a no-op once a server-side `synthesizer` is set — there, the member outputs are consumed by the synthesizer model, not returned in full.)
 
 ## Client-Side Timeout
 
