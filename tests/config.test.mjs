@@ -677,6 +677,18 @@ test("D2: deepseek (OPENAI_EFFORT) with no explicit cap gets 32768/8192 floor", 
   assert.equal(config.models.deepseek.maxTokens.consult, 8192);
 });
 
+test("D2: gemini (OPENAI_EFFORT) with no explicit cap gets 32768/8192 floor", () => {
+  // gemini is the provider-ceiling-risk model (OPENAI_EFFORT, reasoningVocab=gemini).
+  // Lock its floor values to guard against accidental regression.
+  const config = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "glm-key",
+    MULTIPOLY_MODELS: "gemini",
+    MULTIPOLY_GEMINI_API_KEY: "gem-key",
+  });
+  assert.equal(config.models.gemini.maxTokens.review, 32768);
+  assert.equal(config.models.gemini.maxTokens.consult, 8192);
+});
+
 test("D2: glm (GLM_TOGGLE) with no server-wide cap gets 32768/8192 floor (raised from 8192/4096)", () => {
   // GLM default applies the server ceiling (131072) as its default via the `key === "glm"` path,
   // but in a scenario with no server-wide explicit env, it should still be floored at 32768.

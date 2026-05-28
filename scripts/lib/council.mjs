@@ -414,9 +414,9 @@ function buildHarnessReviewResult({ input, models, memberResults, prepared }) {
     ...(input.include_individual_results ? { member_results: failedMemberResults } : {}),
   };
 
-  // 3c: surface a hint when the payload is unusually large.
+  // 3c: surface a hint when the payload is unusually large (>= threshold).
   const serialized = JSON.stringify(result);
-  if (serialized.length > COUNCIL_LARGE_PAYLOAD_CHARS) {
+  if (serialized.length >= COUNCIL_LARGE_PAYLOAD_CHARS) {
     result.notice =
       `Large council payload (${serialized.length} chars). Pass \`compact: true\` or a \`synthesizer\` ` +
       `(or set MULTIPOLY_SYNTHESIZER) to shrink/merge server-side.`;
@@ -445,8 +445,8 @@ function buildHarnessConsultResult({ models, memberResults, successful, input })
   const summary = buildFailureSummary(memberResults, models);
   const text = summary ? `${summary}\n\n${body}` : body;
 
-  // 3c: surface a hint when the payload is unusually large.
-  if (text.length > COUNCIL_LARGE_PAYLOAD_CHARS) {
+  // 3c: surface a hint when the payload is unusually large (>= threshold).
+  if (text.length >= COUNCIL_LARGE_PAYLOAD_CHARS) {
     return (
       text +
       `\n\nLarge council payload (${text.length} chars). Pass \`compact: true\` or a \`synthesizer\` ` +
@@ -495,9 +495,12 @@ export async function handleCouncilReview(input, { config, fetchImpl, execFileIm
   }
   const { parsed, reasoning } = synthesis;
 
-  // 3a: only include failed members in member_results (synthesis mode too).
-  const failedMemberResults = input.include_individual_results
-    ? Object.fromEntries(Object.entries(memberResults).filter(([, v]) => !v.ok))
+  // Synthesis mode: include_individual_results returns the FULL memberResults
+  // (all members, ok + failed). Unlike harness-defer mode, synthesis results have
+  // no `members` block carrying ok-member findings, so filtering to failures-only
+  // would silently discard the individual results the caller explicitly requested.
+  const synthMemberResults = input.include_individual_results
+    ? memberResults
     : undefined;
 
   return {
@@ -511,7 +514,7 @@ export async function handleCouncilReview(input, { config, fetchImpl, execFileIm
       truncated: prepared.gathered.truncated,
       member_status: buildMemberStatus(memberResults),
       failure_summary: buildFailureSummary(memberResults, models),
-      ...(input.include_individual_results ? { member_results: failedMemberResults } : {}),
+      ...(input.include_individual_results ? { member_results: synthMemberResults } : {}),
     },
     reasoning,
   };

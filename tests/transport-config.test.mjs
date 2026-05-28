@@ -366,13 +366,14 @@ test("models: env-defined http model with no reasoning hint gets NONE", () => {
 
 // ── Part A-1: GLM floor regression guard ──────────────────────────────────────
 // Guards the original empty-BUDGET bug: when GLM_MAX_TOKENS_REVIEW is not
-// explicitly set, the floor must kick in and yield at least 8192 tokens
-// (MIN_THINKING_BUDGET + MIN_OUTPUT_RESERVE = 1024 + 1024 fits inside that).
+// explicitly set, the floor must kick in and yield at least 32768 tokens
+// (floor raised from 8192 to 32768 in D2; MIN_THINKING_BUDGET + MIN_OUTPUT_RESERVE
+// = 1024 + 1024 comfortably fits inside that).
 
-test("regression: GLM default config yields maxTokens.review >= 8192 (floor guard)", () => {
+test("regression: GLM default config yields maxTokens.review >= 32768 (floor guard)", () => {
   const c = loadConfig({ ...glm });
   assert.ok(
-    c.models.glm.maxTokens.review >= 8192,
-    `Expected GLM maxTokens.review >= 8192 (floor), got ${c.models.glm.maxTokens.review}`,
+    c.models.glm.maxTokens.review >= 32768,
+    `Expected GLM maxTokens.review >= 32768 (floor), got ${c.models.glm.maxTokens.review}`,
   );
 });

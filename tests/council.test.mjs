@@ -1040,7 +1040,10 @@ test("council review (harness-defer): include_individual_results keeps failed me
   }
 });
 
-test("council review (synthesis): include_individual_results also de-duplicates (only fails in member_results)", async () => {
+test("council review (synthesis): include_individual_results returns FULL member_results (all ok+failed) — no dedup", async () => {
+  // Fix A: synthesis mode has no `members` block, so filtering to failures-only
+  // would lose the ok-member data the caller explicitly requested. Synthesis mode
+  // must return ALL members in member_results (including ok ones).
   const repo = await makeCommittedRepo("multipoly-council-dedup-synth-");
   const prev = process.cwd();
   process.chdir(repo);
@@ -1069,9 +1072,12 @@ test("council review (synthesis): include_individual_results also de-duplicates 
       { paths: ["a.txt"], models: ["glm", "qwen"], synthesizer: "qwen", include_individual_results: true },
       { config, fetchImpl },
     );
-    // All members succeeded → member_results should be empty (no failed members)
-    assert.ok("member_results" in out.result);
-    assert.deepEqual(Object.keys(out.result.member_results), []);
+    // All members succeeded → member_results must contain ALL members (synthesis has no `members` block)
+    assert.ok("member_results" in out.result, "member_results must be present");
+    assert.ok("glm" in out.result.member_results, "ok member glm must appear in synthesis member_results");
+    assert.ok("qwen" in out.result.member_results, "ok member qwen must appear in synthesis member_results");
+    assert.equal(out.result.member_results.glm.ok, true, "glm entry must have ok:true");
+    assert.equal(out.result.member_results.qwen.ok, true, "qwen entry must have ok:true");
   } finally {
     process.chdir(prev);
   }
@@ -1152,6 +1158,60 @@ test("council consult (harness-defer): compact:true is a no-op (does not error)"
 });
 
 // ── Task D1/3c: large-payload hint ───────────────────────────────────────────
+
+test("council review (harness-defer): notice field appears at EXACTLY the threshold (>= boundary)", async () => {
+  // Fix B: the hint uses >= so a payload exactly at COUNCIL_LARGE_PAYLOAD_CHARS
+  // must trigger the notice. We find the exact fill needed by first measuring
+  // the base payload with empty summaries, then padding to exactly 80000.
+  const THRESHOLD = 80000;
+  const repo = await makeCommittedRepo("multipoly-council-boundary-review-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    // Pass 1: measure the base payload size with empty summaries.
+    let baseSummary = "";
+    let baseSize = 0;
+    const fetchImplMeasure = async (url) => {
+      const who = url.includes("glm") ? "glm" : "qwen";
+      return new Response(stream(reviewJson(`${who}-${baseSummary}`)), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    {
+      const out = await handleCouncilReview(
+        { paths: ["a.txt"], models: ["glm", "qwen"] },
+        { config, fetchImpl: fetchImplMeasure },
+      );
+      baseSize = JSON.stringify(out.result).length;
+    }
+    // How many extra chars do we need total, split evenly across two members?
+    const needed = THRESHOLD - baseSize;
+    assert.ok(needed > 0, `Base payload (${baseSize}) already >= threshold; adjust test setup`);
+    const perMember = Math.ceil(needed / 2);
+    const fill = "x".repeat(perMember);
+    // Pass 2: pad to exactly the threshold.
+    const fetchImplBoundary = async (url) => {
+      const who = url.includes("glm") ? "glm" : "qwen";
+      return new Response(stream(reviewJson(`${who}-${fill}`)), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    const out = await handleCouncilReview(
+      { paths: ["a.txt"], models: ["glm", "qwen"] },
+      { config, fetchImpl: fetchImplBoundary },
+    );
+    const finalSize = JSON.stringify(out.result).length;
+    assert.ok(
+      finalSize >= THRESHOLD,
+      `Expected serialized payload >= ${THRESHOLD} chars, got ${finalSize}`,
+    );
+    assert.ok("notice" in out.result, `notice must appear at exactly threshold (payload=${finalSize})`);
+  } finally {
+    process.chdir(prev);
+  }
+});
 
 test("council review (harness-defer): notice field appears when payload is large", async () => {
   // Generate a large summary to push the JSON payload over the threshold.
