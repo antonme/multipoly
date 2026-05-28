@@ -1311,3 +1311,154 @@ test("council consult (harness-defer): no hint for small payloads", async () => 
     process.chdir(prev);
   }
 });
+
+// ── Task D3/§3b: per-call allow_secrets for council ──────────────────────────
+
+// Fake AWS-style key the scanner flags (never a real credential).
+const FAKE_COUNCIL_SECRET = "AKIAABCDEFGHIJKLMNOP";
+
+test("council review: allow_secrets:true allows member output with a fake secret through to synthesizer", async () => {
+  // Without allow_secrets:true the assertMemberOutputsClean guard blocks synthesis.
+  // With allow_secrets:true on the input the guard must be bypassed.
+  const repo = await makeCommittedRepo("multipoly-council-allow-secrets-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    let qwenCalls = 0;
+    const fetchImpl = async (url) => {
+      if (url.includes("qwen.test")) {
+        qwenCalls++;
+        if (qwenCalls === 1) {
+          // Member output contains a fake secret in a finding message.
+          return new Response(
+            stream(
+              JSON.stringify({
+                schema_version: "1",
+                findings: [{ severity: "high", path: "a.txt", message: `leaked ${FAKE_COUNCIL_SECRET} here` }],
+                summary_md: "qwen member",
+              }),
+            ),
+            { status: 200, headers: { "content-type": "text/event-stream" } },
+          );
+        }
+        // Second call = synthesizer.
+        return new Response(stream(councilReviewJson()), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }
+      return new Response(stream(reviewJson("glm member")), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+
+    // Must NOT throw — allow_secrets:true bypasses the outbound scan.
+    const out = await handleCouncilReview(
+      { paths: ["a.txt"], models: ["glm", "qwen"], synthesizer: "qwen", allow_secrets: true },
+      { config: { ...config, allowSecrets: false }, fetchImpl },
+    );
+    assert.equal(qwenCalls, 2, "synthesizer must have been called");
+    assert.equal(out.result.summary_md, "synthesis");
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("council review: allow_secrets absent still blocks member output secret before synthesizer", async () => {
+  const repo = await makeCommittedRepo("multipoly-council-allow-secrets-absent-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    let qwenCalls = 0;
+    const fetchImpl = async (url) => {
+      if (url.includes("qwen.test")) {
+        qwenCalls++;
+        if (qwenCalls === 1) {
+          return new Response(
+            stream(
+              JSON.stringify({
+                schema_version: "1",
+                findings: [{ severity: "high", path: "a.txt", message: `leaked ${FAKE_COUNCIL_SECRET} here` }],
+                summary_md: "qwen member",
+              }),
+            ),
+            { status: 200, headers: { "content-type": "text/event-stream" } },
+          );
+        }
+        return new Response(stream(councilReviewJson()), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }
+      return new Response(stream(reviewJson("glm member")), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+
+    await assert.rejects(
+      () =>
+        handleCouncilReview(
+          { paths: ["a.txt"], models: ["glm", "qwen"], synthesizer: "qwen" },
+          { config: { ...config, allowSecrets: false }, fetchImpl },
+        ),
+      (e) => e.code === "SECRET",
+    );
+    assert.equal(qwenCalls, 1, "synthesizer must NOT have been called");
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("council review: allow_secrets:false explicitly still blocks member output secret before synthesizer", async () => {
+  // Regression: the outbound scan gate uses === true, so passing allow_secrets:false
+  // must NOT bypass the scan (only allow_secrets:true or config.allowSecrets=true bypass).
+  // This guards against truthy-coercion bugs where a non-boolean falsy-ish value
+  // or the literal false could accidentally pass the guard.
+  const repo = await makeCommittedRepo("multipoly-council-allow-secrets-false-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    let qwenCalls = 0;
+    const fetchImpl = async (url) => {
+      if (url.includes("qwen.test")) {
+        qwenCalls++;
+        if (qwenCalls === 1) {
+          return new Response(
+            stream(
+              JSON.stringify({
+                schema_version: "1",
+                findings: [{ severity: "high", path: "a.txt", message: `leaked ${FAKE_COUNCIL_SECRET} here` }],
+                summary_md: "qwen member",
+              }),
+            ),
+            { status: 200, headers: { "content-type": "text/event-stream" } },
+          );
+        }
+        // Second call would be the synthesizer — must never be reached.
+        return new Response(stream(councilReviewJson()), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }
+      return new Response(stream(reviewJson("glm member")), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+
+    // allow_secrets explicitly set to false — must still block.
+    await assert.rejects(
+      () =>
+        handleCouncilReview(
+          { paths: ["a.txt"], models: ["glm", "qwen"], synthesizer: "qwen", allow_secrets: false },
+          { config: { ...config, allowSecrets: false }, fetchImpl },
+        ),
+      (e) => e.code === "SECRET",
+    );
+    assert.equal(qwenCalls, 1, "synthesizer must NOT have been called when allow_secrets is false");
+  } finally {
+    process.chdir(prev);
+  }
+});

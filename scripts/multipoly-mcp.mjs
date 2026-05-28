@@ -51,6 +51,12 @@ const REASONING_EFFORT_ARG_SCHEMA = {
     "Omit to inherit the per-model or server-wide default.",
 };
 
+const ALLOW_SECRETS_ARG_SCHEMA = {
+  type: "boolean",
+  description:
+    "Bypass the secret scanner for THIS call only (use when the scanner false-positives on your code). Default false.",
+};
+
 const REVIEW_TOOL_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -60,6 +66,7 @@ const REVIEW_TOOL_SCHEMA = {
     paths: { type: "array", items: { type: "string" }, minItems: 1 },
     focus: { type: "string" },
     timeout_ms: TIMEOUT_ARG_SCHEMA,
+    allow_secrets: ALLOW_SECRETS_ARG_SCHEMA,
   },
 };
 
@@ -71,6 +78,7 @@ const CONSULT_TOOL_SCHEMA = {
     prompt: { type: "string", minLength: 1 },
     paths: { type: "array", items: { type: "string" } },
     timeout_ms: TIMEOUT_ARG_SCHEMA,
+    allow_secrets: ALLOW_SECRETS_ARG_SCHEMA,
   },
 };
 
@@ -343,8 +351,8 @@ function main() {
  * Minimal runtime input validation for the tools. We do this ourselves
  * rather than rely on a heavy JSON-schema lib; the surface is tiny.
  */
-const REVIEW_KEYS = new Set(["diff_base", "paths", "focus", "timeout_ms"]);
-const CONSULT_KEYS = new Set(["prompt", "paths", "timeout_ms"]);
+const REVIEW_KEYS = new Set(["diff_base", "paths", "focus", "timeout_ms", "allow_secrets"]);
+const CONSULT_KEYS = new Set(["prompt", "paths", "timeout_ms", "allow_secrets"]);
 const COUNCIL_EXTRA_KEYS = new Set(["models", "synthesizer", "include_individual_results", "compact"]);
 
 // Curated alias map: each entry registers <alias>_review and <alias>_consult as
@@ -392,6 +400,14 @@ function validateToolInput(name, raw, modelKeys, toolKeySpec) {
         `${name}.reasoning_effort must be a concrete level: ${EFFORT_LEVELS.join("|")}, got ${JSON.stringify(v)}`,
       );
     }
+  }
+  // Validate allow_secrets value when present. Must be a boolean; any other type
+  // is rejected so callers can't accidentally pass a truthy string/number.
+  if ("allow_secrets" in input && typeof input.allow_secrets !== "boolean") {
+    throw new MultipolyError(
+      "INVALID_INPUT",
+      `${name}.allow_secrets must be a boolean, got ${JSON.stringify(input.allow_secrets)}`,
+    );
   }
   if (name.endsWith("_review")) {
     validateReviewInput(name, input, name.startsWith("council_"), modelKeys);

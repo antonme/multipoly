@@ -5,7 +5,8 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { handleModelReview } from "../scripts/lib/model-review.mjs";
+import { handleModelReview, prepareReview } from "../scripts/lib/model-review.mjs";
+import { prepareConsult } from "../scripts/lib/model-consult.mjs";
 
 // These tests cover the single-model review path via the GLM model key.
 const handleReview = (input, ctx) => handleModelReview("glm", input, ctx);
@@ -407,6 +408,125 @@ test("review: prose-wrapped JSON is recovered without reprompt (extractJsonObjec
     assert.equal(out.result.summary_md, "extracted from prose");
     // Only one fetch call — prose extraction succeeded, no reprompt needed
     assert.equal(fetchImpl.calls.length, 1);
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+// ── Task D3/§3b: per-call allow_secrets override ─────────────────────────────
+
+// Shared fake-secret string that the AWS pattern will flag.
+// Deliberately fake: AKIA + 16 uppercase letters (never a real key).
+const FAKE_SECRET_LINE = "const k = AKIAABCDEFGHIJKLMNOP\n";
+
+async function makeRepoWithSecret(prefix = "allow-secrets-review-") {
+  const repo = await realpath(await mkdtemp(path.join(tmpdir(), prefix)));
+  await git(repo, "init", "-q", "-b", "main");
+  await writeFile(path.join(repo, "f.txt"), "clean\n");
+  await git(repo, "add", ".");
+  await git(repo, "commit", "-q", "-m", "base");
+  const baseSha = (await git(repo, "rev-parse", "HEAD")).stdout.trim();
+  await writeFile(path.join(repo, "f.txt"), FAKE_SECRET_LINE);
+  await git(repo, "add", ".");
+  await git(repo, "commit", "-q", "-m", "oops");
+  return { repo, baseSha };
+}
+
+test("prepareReview: allow_secrets:true bypasses the scanner (no SECRET thrown)", async () => {
+  const { repo, baseSha } = await makeRepoWithSecret();
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    // Should NOT throw — allow_secrets:true on the input overrides the scan.
+    const prepared = await prepareReview(
+      { diff_base: baseSha, allow_secrets: true },
+      { config: { ...baseConfig, allowSecrets: false } },
+    );
+    assert.ok(prepared.messages, "prepared should have messages");
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("prepareReview: absent allow_secrets still throws SECRET for a flagged payload", async () => {
+  const { repo, baseSha } = await makeRepoWithSecret();
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    await assert.rejects(
+      () => prepareReview(
+        { diff_base: baseSha },
+        { config: { ...baseConfig, allowSecrets: false } },
+      ),
+      (e) => e.code === "SECRET",
+    );
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("prepareReview: allow_secrets:false still throws SECRET for a flagged payload", async () => {
+  const { repo, baseSha } = await makeRepoWithSecret();
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    await assert.rejects(
+      () => prepareReview(
+        { diff_base: baseSha, allow_secrets: false },
+        { config: { ...baseConfig, allowSecrets: false } },
+      ),
+      (e) => e.code === "SECRET",
+    );
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("prepareConsult: allow_secrets:true bypasses the scanner (no SECRET thrown)", async () => {
+  const repo = await realpath(await mkdtemp(path.join(tmpdir(), "allow-secrets-consult-")));
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    // Should NOT throw — prompt contains a fake secret but allow_secrets:true overrides.
+    const prepared = await prepareConsult(
+      { prompt: `review this: ${FAKE_SECRET_LINE}`, allow_secrets: true },
+      { config: { ...baseConfig, allowSecrets: false } },
+    );
+    assert.ok(prepared.messages, "prepared should have messages");
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("prepareConsult: absent allow_secrets still throws SECRET for a flagged payload", async () => {
+  const repo = await realpath(await mkdtemp(path.join(tmpdir(), "allow-secrets-consult-fail-")));
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    await assert.rejects(
+      () => prepareConsult(
+        { prompt: `review this: ${FAKE_SECRET_LINE}` },
+        { config: { ...baseConfig, allowSecrets: false } },
+      ),
+      (e) => e.code === "SECRET",
+    );
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("prepareConsult: allow_secrets:false still throws SECRET for a flagged payload", async () => {
+  const repo = await realpath(await mkdtemp(path.join(tmpdir(), "allow-secrets-consult-false-")));
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    await assert.rejects(
+      () => prepareConsult(
+        { prompt: `review this: ${FAKE_SECRET_LINE}`, allow_secrets: false },
+        { config: { ...baseConfig, allowSecrets: false } },
+      ),
+      (e) => e.code === "SECRET",
+    );
   } finally {
     process.chdir(prev);
   }

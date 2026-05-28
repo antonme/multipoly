@@ -155,3 +155,37 @@ test("mcp tools: advertised schema keys match the hand-rolled validator key sets
     assert.deepEqual(schemaKeys, allowedKeys, `schema/keySpec drift on ${tool.name}`);
   }
 });
+
+// ── Task D3/§3b: allow_secrets on tool schemas ────────────────────────────────
+
+test("mcp tools: allow_secrets is a boolean property on every *_review and *_consult tool", () => {
+  for (const tool of buildTools()) {
+    if (tool.name.endsWith("_review") || tool.name.endsWith("_consult")) {
+      const prop = tool.inputSchema.properties.allow_secrets;
+      assert.ok(prop, `${tool.name} must have allow_secrets property`);
+      assert.equal(prop.type, "boolean", `${tool.name}.allow_secrets must be type boolean`);
+    }
+  }
+});
+
+test("mcp tools: allow_secrets is in the allowedKeys for every *_review and *_consult tool", () => {
+  const keySpec = buildToolKeySpec(MODEL_KEYS);
+  for (const tool of buildTools()) {
+    if (tool.name.endsWith("_review") || tool.name.endsWith("_consult")) {
+      assert.ok(
+        keySpec[tool.name]?.has("allow_secrets"),
+        `${tool.name} allowedKeys must include allow_secrets`,
+      );
+    }
+  }
+});
+
+test("mcp tools: schema/keySpec anti-drift holds after adding allow_secrets", () => {
+  // Complete anti-drift check: every tool's advertised schema keys must equal its allowedKeys.
+  const keySpec = buildToolKeySpec(MODEL_KEYS);
+  for (const tool of buildTools()) {
+    const schemaKeys = Object.keys(tool.inputSchema.properties).sort();
+    const allowedKeys = [...keySpec[tool.name] ?? []].sort();
+    assert.deepEqual(schemaKeys, allowedKeys, `schema/keySpec drift on ${tool.name}`);
+  }
+});

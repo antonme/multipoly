@@ -18,10 +18,10 @@ export async function prepareConsult(input, { config, cwd = process.cwd() } = {}
   const pieces = [{ text: gathered.prompt, label: "prompt" }];
   for (const f of gathered.files) pieces.push({ text: f.content, label: f.path });
   const secretScan = scanMany(pieces);
-  if (!secretScan.clean && !config.allowSecrets) {
+  if (!secretScan.clean && !(config.allowSecrets || input.allow_secrets === true)) {
     throw new MultipolyError(
       "SECRET",
-      `Potential secrets detected in outbound payload:\n${formatHitsForError(secretScan.hits)}\nSet MULTIPOLY_ALLOW_SECRETS=1 to override.`,
+      `Potential secrets detected in outbound payload:\n${formatHitsForError(secretScan.hits)}\nSet MULTIPOLY_ALLOW_SECRETS=1 or pass allow_secrets:true to override.`,
     );
   }
 

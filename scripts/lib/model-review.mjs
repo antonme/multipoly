@@ -32,10 +32,10 @@ export async function prepareReview(input, { config, cwd = process.cwd() } = {})
     pieces.push({ text: input.focus, label: "focus" });
   }
   const secretScan = scanMany(pieces);
-  if (!secretScan.clean && !config.allowSecrets) {
+  if (!secretScan.clean && !(config.allowSecrets || input.allow_secrets === true)) {
     throw new MultipolyError(
       "SECRET",
-      `Potential secrets detected in outbound payload:\n${formatHitsForError(secretScan.hits)}\nSet MULTIPOLY_ALLOW_SECRETS=1 to override.`,
+      `Potential secrets detected in outbound payload:\n${formatHitsForError(secretScan.hits)}\nSet MULTIPOLY_ALLOW_SECRETS=1 or pass allow_secrets:true to override.`,
     );
   }
 

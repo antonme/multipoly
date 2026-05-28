@@ -194,6 +194,42 @@ test("integration: council_review accepts reasoning_effort:'low' (not an unknown
   }
 });
 
+// ── Task D3/§3b: allow_secrets validator ──────────────────────────────────────
+
+test("integration: glm_review rejects non-boolean allow_secrets (number) with INVALID_INPUT", async () => {
+  const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "dummy" });
+  const conn = await connect(config);
+  try {
+    const res = await conn.client.callTool({
+      name: "glm_review",
+      arguments: { diff_base: "main", allow_secrets: 1 },
+    });
+    assert.equal(res.isError, true);
+    const text = res.content.map((c) => c.text).join("");
+    assert.match(text, /INVALID_INPUT/);
+    assert.match(text, /allow_secrets/i);
+  } finally {
+    await conn.close();
+  }
+});
+
+test("integration: council_consult rejects non-boolean allow_secrets (string) with INVALID_INPUT", async () => {
+  const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "dummy" });
+  const conn = await connect(config);
+  try {
+    const res = await conn.client.callTool({
+      name: "council_consult",
+      arguments: { prompt: "hello", allow_secrets: "yes" },
+    });
+    assert.equal(res.isError, true);
+    const text = res.content.map((c) => c.text).join("");
+    assert.match(text, /INVALID_INPUT/);
+    assert.match(text, /allow_secrets/i);
+  } finally {
+    await conn.close();
+  }
+});
+
 // ── Alias-tool end-to-end seam: loadConfig → registryFromConfig → buildServerSurface ──
 
 test("integration: opus alias tools present with correct handler identity and claude reasoning schema (real config path)", () => {

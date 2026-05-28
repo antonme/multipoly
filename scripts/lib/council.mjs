@@ -179,15 +179,16 @@ async function runCouncilMembers({ models, prepared, runPrepared, config, fetchI
  * Scan council member OUTPUTS before relaying them to a synthesizer model on a
  * (possibly different) provider. Inbound files are already scanned pre-flight;
  * this closes the second hop where a member's output could echo a secret the
- * inbound scan missed. No-op when the operator has allowed secrets.
+ * inbound scan missed. No-op when the operator has allowed secrets globally or
+ * the caller has passed allow_secrets:true for this specific call.
  */
-function assertMemberOutputsClean(pieces, config) {
-  if (config.allowSecrets) return;
+function assertMemberOutputsClean(pieces, config, allowSecretsPerCall) {
+  if (config.allowSecrets || allowSecretsPerCall === true) return;
   const result = scanMany(pieces);
   if (!result.clean) {
     throw new MultipolyError(
       "SECRET",
-      `Potential secrets detected in council member outputs before synthesis:\n${formatHitsForError(result.hits)}\nSet MULTIPOLY_ALLOW_SECRETS=1 to override.`,
+      `Potential secrets detected in council member outputs before synthesis:\n${formatHitsForError(result.hits)}\nSet MULTIPOLY_ALLOW_SECRETS=1 or pass allow_secrets:true to override.`,
     );
   }
 }
@@ -469,7 +470,7 @@ export async function handleCouncilReview(input, { config, fetchImpl, execFileIm
   }
 
   // Server-side synthesis: scan member outputs before sending them upstream.
-  assertMemberOutputsClean(reviewMemberSecretPieces(memberResults), config);
+  assertMemberOutputsClean(reviewMemberSecretPieces(memberResults), config, input.allow_secrets);
 
   let synthesis;
   try {
@@ -532,7 +533,7 @@ export async function handleCouncilConsult(input, { config, fetchImpl, execFileI
     return { result: buildHarnessConsultResult({ models, memberResults, successful, input }) };
   }
 
-  assertMemberOutputsClean(consultMemberSecretPieces(memberResults), config);
+  assertMemberOutputsClean(consultMemberSecretPieces(memberResults), config, input.allow_secrets);
 
   try {
     const attempt = await runModel({
