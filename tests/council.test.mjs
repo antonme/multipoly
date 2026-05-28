@@ -978,3 +978,276 @@ test("council consult (harness-defer): no failure_summary prefix when all succee
     process.chdir(prev);
   }
 });
+
+// ── Task D1/3a: De-duplicate council member_results ───────────────────────────
+
+test("council review (harness-defer): include_individual_results omits ok members from member_results", async () => {
+  // 3a: member_results should only contain FAILED members; ok members are
+  // already represented by `members` + `member_status`.
+  const repo = await makeCommittedRepo("multipoly-council-dedup-ok-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const fetchImpl = async (url) => {
+      const who = url.includes("glm") ? "glm" : "qwen";
+      return new Response(stream(reviewJson(`${who} summary`)), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    const out = await handleCouncilReview(
+      { paths: ["a.txt"], models: ["glm", "qwen"], include_individual_results: true },
+      { config, fetchImpl },
+    );
+    // member_results is present but should be empty (all ok → no failed members)
+    assert.ok("member_results" in out.result, "member_results should be present when include_individual_results is set");
+    assert.deepEqual(Object.keys(out.result.member_results), [], "ok members must not appear in member_results");
+    // The full info is still available in `members`
+    assert.equal(out.result.members.glm.summary_md, "glm summary");
+    assert.equal(out.result.members.qwen.summary_md, "qwen summary");
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("council review (harness-defer): include_individual_results keeps failed member error in member_results", async () => {
+  const repo = await makeCommittedRepo("multipoly-council-dedup-fail-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const fetchImpl = async (url) => {
+      if (url.includes("qwen.test")) {
+        return new Response("bad key", { status: 401 });
+      }
+      // glm and deepseek succeed so we have quorum
+      return new Response(stream(reviewJson("ok")), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    const out = await handleCouncilReview(
+      { paths: ["a.txt"], models: ["glm", "qwen", "deepseek"], include_individual_results: true },
+      { config, fetchImpl },
+    );
+    // failed member IS in member_results
+    assert.ok("qwen" in out.result.member_results, "failed member must appear in member_results");
+    assert.equal(out.result.member_results.qwen.ok, false, "failed member ok must be false");
+    // ok members are NOT in member_results
+    assert.equal("glm" in out.result.member_results, false, "ok member must NOT appear in member_results");
+    assert.equal("deepseek" in out.result.member_results, false, "ok member must NOT appear in member_results");
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("council review (synthesis): include_individual_results also de-duplicates (only fails in member_results)", async () => {
+  const repo = await makeCommittedRepo("multipoly-council-dedup-synth-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    let qwenCalls = 0;
+    const fetchImpl = async (url) => {
+      if (url.includes("qwen.test")) {
+        qwenCalls++;
+        if (qwenCalls === 1) {
+          return new Response(stream(reviewJson("qwen member")), {
+            status: 200,
+            headers: { "content-type": "text/event-stream" },
+          });
+        }
+        return new Response(stream(councilReviewJson()), {
+          status: 200,
+          headers: { "content-type": "text/event-stream" },
+        });
+      }
+      return new Response(stream(reviewJson("glm member")), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    const out = await handleCouncilReview(
+      { paths: ["a.txt"], models: ["glm", "qwen"], synthesizer: "qwen", include_individual_results: true },
+      { config, fetchImpl },
+    );
+    // All members succeeded → member_results should be empty (no failed members)
+    assert.ok("member_results" in out.result);
+    assert.deepEqual(Object.keys(out.result.member_results), []);
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+// ── Task D1/3b: compact mode ──────────────────────────────────────────────────
+
+test("council review (harness-defer): compact:true drops summary_md from members", async () => {
+  const repo = await makeCommittedRepo("multipoly-council-compact-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const fetchImpl = async (url) => {
+      const who = url.includes("glm") ? "glm" : "qwen";
+      return new Response(stream(reviewJson(`${who} summary`)), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    const out = await handleCouncilReview(
+      { paths: ["a.txt"], models: ["glm", "qwen"], compact: true },
+      { config, fetchImpl },
+    );
+    // compact: findings present, summary_md absent
+    assert.ok("findings" in out.result.members.glm, "findings must be present in compact mode");
+    assert.equal("summary_md" in out.result.members.glm, false, "summary_md must be absent in compact mode");
+    assert.ok("findings" in out.result.members.qwen);
+    assert.equal("summary_md" in out.result.members.qwen, false);
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("council review (harness-defer): without compact, summary_md is present", async () => {
+  const repo = await makeCommittedRepo("multipoly-council-nocompact-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const fetchImpl = async (url) => {
+      const who = url.includes("glm") ? "glm" : "qwen";
+      return new Response(stream(reviewJson(`${who} summary`)), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    const out = await handleCouncilReview(
+      { paths: ["a.txt"], models: ["glm", "qwen"] },
+      { config, fetchImpl },
+    );
+    assert.ok("summary_md" in out.result.members.glm, "summary_md must be present when compact is not set");
+    assert.ok("summary_md" in out.result.members.qwen);
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("council consult (harness-defer): compact:true is a no-op (does not error)", async () => {
+  const repo = await makeCommittedRepo("multipoly-council-compact-consult-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const fetchImpl = async (url) => {
+      const who = url.includes("glm") ? "glm" : "qwen";
+      return new Response(stream(`${who} answer`), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    // compact on a consult must not throw
+    const out = await handleCouncilConsult(
+      { prompt: "anything", models: ["glm", "qwen"], compact: true },
+      { config, fetchImpl },
+    );
+    assert.ok(typeof out.result === "string", "result should be a string");
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+// ── Task D1/3c: large-payload hint ───────────────────────────────────────────
+
+test("council review (harness-defer): notice field appears when payload is large", async () => {
+  // Generate a large summary to push the JSON payload over the threshold.
+  const bigSummary = "x".repeat(50000);
+  const repo = await makeCommittedRepo("multipoly-council-large-review-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const fetchImpl = async (url) => {
+      const who = url.includes("glm") ? "glm" : "qwen";
+      return new Response(stream(reviewJson(`${who}-${bigSummary}`)), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    const out = await handleCouncilReview(
+      { paths: ["a.txt"], models: ["glm", "qwen"] },
+      { config, fetchImpl },
+    );
+    // Payload should be over 80000 chars, so notice should be present
+    const serialized = JSON.stringify(out.result);
+    assert.ok(serialized.length > 80000, `Expected payload > 80000 chars, got ${serialized.length}`);
+    assert.ok("notice" in out.result, "notice field must be present for large payloads");
+    assert.match(out.result.notice, /compact|synthesizer/i, "notice must mention compact or synthesizer");
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("council review (harness-defer): no notice field for small payloads", async () => {
+  const repo = await makeCommittedRepo("multipoly-council-small-review-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const fetchImpl = async (url) => {
+      const who = url.includes("glm") ? "glm" : "qwen";
+      return new Response(stream(reviewJson(`${who} ok`)), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    const out = await handleCouncilReview(
+      { paths: ["a.txt"], models: ["glm", "qwen"] },
+      { config, fetchImpl },
+    );
+    assert.equal("notice" in out.result, false, "notice must be absent for small payloads");
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("council consult (harness-defer): hint appended to text when payload is large", async () => {
+  const bigAnswer = "y".repeat(50000);
+  const repo = await makeCommittedRepo("multipoly-council-large-consult-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const fetchImpl = async (url) => {
+      const who = url.includes("glm") ? "glm" : "qwen";
+      return new Response(stream(`${who}-${bigAnswer}`), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    const out = await handleCouncilConsult(
+      { prompt: "what?", models: ["glm", "qwen"] },
+      { config, fetchImpl },
+    );
+    assert.ok(out.result.length > 80000, `Expected result > 80000 chars, got ${out.result.length}`);
+    assert.match(out.result, /compact|synthesizer/i, "hint must mention compact or synthesizer");
+    // Hint should appear near the end of the text
+    const lastChunk = out.result.slice(-500);
+    assert.match(lastChunk, /Large council payload/i, "hint must appear near end");
+  } finally {
+    process.chdir(prev);
+  }
+});
+
+test("council consult (harness-defer): no hint for small payloads", async () => {
+  const repo = await makeCommittedRepo("multipoly-council-small-consult-");
+  const prev = process.cwd();
+  process.chdir(repo);
+  try {
+    const fetchImpl = async (url) => {
+      const who = url.includes("glm") ? "glm" : "qwen";
+      return new Response(stream(`${who} answer`), {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    };
+    const out = await handleCouncilConsult(
+      { prompt: "what?", models: ["glm", "qwen"] },
+      { config, fetchImpl },
+    );
+    assert.doesNotMatch(out.result, /Large council payload/i, "hint must not appear for small payloads");
+  } finally {
+    process.chdir(prev);
+  }
+});

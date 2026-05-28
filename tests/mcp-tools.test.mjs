@@ -123,3 +123,35 @@ test("gpt55_* alias tools appear only when codex is registered, schema matches c
   const allTools = Object.fromEntries(buildTools(registryWithCodex).map((t) => [t.name, t]));
   assert.deepEqual(allTools["gpt55_review"].inputSchema, allTools["codex_review"].inputSchema);
 });
+
+// ── Task D1/3b: compact key on council tools ──────────────────────────────────
+
+test("mcp tools: council_review and council_consult advertise compact boolean property", () => {
+  for (const toolName of ["council_review", "council_consult"]) {
+    const tool = buildTools().find((t) => t.name === toolName);
+    assert.ok(tool, `${toolName} must exist`);
+    const compactProp = tool.inputSchema.properties.compact;
+    assert.ok(compactProp, `${toolName} must have a compact property`);
+    assert.equal(compactProp.type, "boolean", `${toolName}.compact must be boolean`);
+  }
+});
+
+test("mcp tools: compact is in council tool allowedKeys, not in per-model tool allowedKeys", () => {
+  const keySpec = buildToolKeySpec(MODEL_KEYS);
+  // Council tools allow compact
+  assert.ok(keySpec["council_review"].has("compact"), "council_review must allow compact");
+  assert.ok(keySpec["council_consult"].has("compact"), "council_consult must allow compact");
+  // Per-model tools do not allow compact
+  assert.equal(keySpec["glm_review"].has("compact"), false, "glm_review must not allow compact");
+  assert.equal(keySpec["qwen_consult"].has("compact"), false, "qwen_consult must not allow compact");
+});
+
+test("mcp tools: advertised schema keys match the hand-rolled validator key sets after adding compact", () => {
+  // Re-run the anti-drift guard to ensure compact stays in sync.
+  const keySpec = buildToolKeySpec(MODEL_KEYS);
+  for (const tool of buildTools()) {
+    const schemaKeys = Object.keys(tool.inputSchema.properties).sort();
+    const allowedKeys = [...keySpec[tool.name] ?? []].sort();
+    assert.deepEqual(schemaKeys, allowedKeys, `schema/keySpec drift on ${tool.name}`);
+  }
+});

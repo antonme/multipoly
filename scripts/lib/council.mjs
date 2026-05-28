@@ -23,6 +23,9 @@ import {
 } from "./config.mjs";
 import { scanMany, formatHitsForError } from "./secrets.mjs";
 
+// Threshold in chars above which a payload hint is surfaced to the harness.
+const COUNCIL_LARGE_PAYLOAD_CHARS = 80000;
+
 const COUNCIL_REVIEW_JSON_ONLY_PREFIX =
   "Your previous council synthesis was not valid JSON matching the schema. Respond ONLY with valid JSON exactly matching the schema. No prose, no code fences, no leading or trailing text.";
 
@@ -384,10 +387,20 @@ function buildHarnessReviewResult({ input, models, memberResults, prepared }) {
   const members = {};
   for (const [key, value] of Object.entries(memberResults)) {
     if (value.ok) {
-      members[key] = { findings: value.result.findings, summary_md: value.result.summary_md };
+      // 3b: compact mode drops summary_md to shrink large payloads.
+      members[key] = input.compact
+        ? { findings: value.result.findings }
+        : { findings: value.result.findings, summary_md: value.result.summary_md };
     }
   }
-  return {
+  // 3a: member_results carries only failed members — ok members are fully
+  // represented by `members` + `member_status`, so re-embedding them doubles
+  // the payload for no benefit.
+  const failedMemberResults = input.include_individual_results
+    ? Object.fromEntries(Object.entries(memberResults).filter(([, v]) => !v.ok))
+    : undefined;
+
+  const result = {
     schema_version: "1",
     synthesizer: HARNESS_SENTINEL,
     mode: "members",
@@ -398,8 +411,18 @@ function buildHarnessReviewResult({ input, models, memberResults, prepared }) {
     truncated: prepared.gathered.truncated,
     member_status: buildMemberStatus(memberResults),
     failure_summary: buildFailureSummary(memberResults, models),
-    ...(input.include_individual_results ? { member_results: memberResults } : {}),
+    ...(input.include_individual_results ? { member_results: failedMemberResults } : {}),
   };
+
+  // 3c: surface a hint when the payload is unusually large.
+  const serialized = JSON.stringify(result);
+  if (serialized.length > COUNCIL_LARGE_PAYLOAD_CHARS) {
+    result.notice =
+      `Large council payload (${serialized.length} chars). Pass \`compact: true\` or a \`synthesizer\` ` +
+      `(or set MULTIPOLY_SYNTHESIZER) to shrink/merge server-side.`;
+  }
+
+  return result;
 }
 
 function buildHarnessConsultResult({ models, memberResults, successful, input }) {
@@ -420,7 +443,17 @@ function buildHarnessConsultResult({ models, memberResults, successful, input })
     : "";
   const body = parts.join("\n") + individual;
   const summary = buildFailureSummary(memberResults, models);
-  return summary ? `${summary}\n\n${body}` : body;
+  const text = summary ? `${summary}\n\n${body}` : body;
+
+  // 3c: surface a hint when the payload is unusually large.
+  if (text.length > COUNCIL_LARGE_PAYLOAD_CHARS) {
+    return (
+      text +
+      `\n\nLarge council payload (${text.length} chars). Pass \`compact: true\` or a \`synthesizer\` ` +
+      `(or set MULTIPOLY_SYNTHESIZER) to shrink/merge server-side.`
+    );
+  }
+  return text;
 }
 
 export async function handleCouncilReview(input, { config, fetchImpl, execFileImpl } = {}) {
@@ -462,6 +495,11 @@ export async function handleCouncilReview(input, { config, fetchImpl, execFileIm
   }
   const { parsed, reasoning } = synthesis;
 
+  // 3a: only include failed members in member_results (synthesis mode too).
+  const failedMemberResults = input.include_individual_results
+    ? Object.fromEntries(Object.entries(memberResults).filter(([, v]) => !v.ok))
+    : undefined;
+
   return {
     result: {
       schema_version: "1",
@@ -473,7 +511,7 @@ export async function handleCouncilReview(input, { config, fetchImpl, execFileIm
       truncated: prepared.gathered.truncated,
       member_status: buildMemberStatus(memberResults),
       failure_summary: buildFailureSummary(memberResults, models),
-      ...(input.include_individual_results ? { member_results: memberResults } : {}),
+      ...(input.include_individual_results ? { member_results: failedMemberResults } : {}),
     },
     reasoning,
   };

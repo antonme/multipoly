@@ -93,6 +93,11 @@ function councilExtraProperties(modelKeys) {
         "Defaults to MULTIPOLY_SYNTHESIZER, else defers to the harness.",
     },
     include_individual_results: { type: "boolean" },
+    compact: {
+      type: "boolean",
+      description:
+        "Drop per-model prose summaries from members (findings only) to shrink large council payloads.",
+    },
   };
 }
 
@@ -340,7 +345,7 @@ function main() {
  */
 const REVIEW_KEYS = new Set(["diff_base", "paths", "focus", "timeout_ms"]);
 const CONSULT_KEYS = new Set(["prompt", "paths", "timeout_ms"]);
-const COUNCIL_EXTRA_KEYS = new Set(["models", "synthesizer", "include_individual_results"]);
+const COUNCIL_EXTRA_KEYS = new Set(["models", "synthesizer", "include_individual_results", "compact"]);
 
 // Curated alias map: each entry registers <alias>_review and <alias>_consult as
 // thin aliases for the corresponding <canonical>_* tools. Defined at module scope
@@ -418,6 +423,9 @@ function validateCouncilExtras(name, input, modelKeys) {
   }
   if ("include_individual_results" in input && typeof input.include_individual_results !== "boolean") {
     throw new MultipolyError("INVALID_INPUT", `${name}.include_individual_results must be a boolean`);
+  }
+  if ("compact" in input && typeof input.compact !== "boolean") {
+    throw new MultipolyError("INVALID_INPUT", `${name}.compact must be a boolean`);
   }
 }
 
