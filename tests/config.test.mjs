@@ -15,7 +15,7 @@ test("config: defaults", () => {
   const c = loadConfig({ ...base });
   assert.equal(c.models.glm.configured, true);
   assert.equal(c.models.glm.baseUrl, ENDPOINT_PROFILES["zai-coding-plan"]);
-  assert.equal(c.models.glm.model, "glm-5.1");
+  assert.equal(c.models.glm.model, "glm-5.2");
   assert.equal(c.models.glm.apiKey, "test-key");
   assert.deepEqual(c.models.glm.maxTokens, { review: 131072, consult: 131072 });
   assert.equal(c.models.qwen.configured, false);
@@ -674,7 +674,7 @@ test("grok stays unconfigured until MULTIPOLY_GROK_ENABLED=1 (cli opt-in gate)",
 test("config: always-on builtins surface convention-form display names", () => {
   // glm/qwen/deepseek are http → "(api)"; composer is cli/cursor → "(cursor cli)"
   const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "x" });
-  assert.equal(config.models.glm.displayName, "glm-5.1 (api)");
+  assert.equal(config.models.glm.displayName, "glm-5.2 (api)");
   assert.equal(config.models.qwen.displayName, "qwen3.7-max (api)");
   assert.equal(config.models.deepseek.displayName, "deepseek-v4-pro (api)");
   assert.equal(config.models.composer.displayName, "composer-2.5 (cursor cli)");

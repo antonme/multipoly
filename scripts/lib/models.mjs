@@ -74,10 +74,10 @@ export const ANTHROPIC_VERSION = "2023-06-01";
 export const MODEL_INFO = Object.freeze({
   glm: Object.freeze({
     key: "glm",
-    baseName: "glm-5.1",
-    displayName: "GLM 5.1",
+    baseName: "glm-5.2",
+    displayName: "GLM 5.2",
     transport: "http",
-    defaultModel: "glm-5.1",
+    defaultModel: "glm-5.2",
     defaultBaseUrl: "https://api.z.ai/api/coding/paas/v4",
     apiKeyEnv: ["MULTIPOLY_GLM_API_KEY", "GLM_API_KEY", "ZHIPU_API_KEY"],
     supportsThinking: true,

@@ -38,7 +38,7 @@ function chunksToReadableStream(strings) {
 const baseConfig = {
   baseUrl: "https://api.test/v1",
   apiKey: "k",
-  model: "glm-5.1",
+  model: "glm-5.2",
   models: {
     glm: {
       configured: true,
@@ -46,7 +46,7 @@ const baseConfig = {
       displayName: "GLM",
       baseUrl: "https://api.test/v1",
       apiKey: "k",
-      model: "glm-5.1",
+      model: "glm-5.2",
       supportsThinking: true,
       reasoning: CAPABILITY.GLM_TOGGLE,
       reasoningEffort: "high",
@@ -71,7 +71,7 @@ test("client: happy path streams content", async () => {
   assert.equal(out.content, "ok");
   assert.equal(fetchImpl.calls.length, 1);
   const sent = JSON.parse(fetchImpl.calls[0].opts.body);
-  assert.equal(sent.model, "glm-5.1");
+  assert.equal(sent.model, "glm-5.2");
   assert.equal(sent.stream, true);
   // GLM_TOGGLE capability with reasoningEffort="high" → thinking enabled (mode no longer drives effort)
   assert.deepEqual(sent.thinking, { type: "enabled" });

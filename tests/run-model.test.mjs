@@ -26,7 +26,7 @@ const httpConfig = {
       transport: "http",
       baseUrl: "https://api.test/v1",
       apiKey: "k",
-      model: "glm-5.1",
+      model: "glm-5.2",
     },
   },
   thinking: "off",

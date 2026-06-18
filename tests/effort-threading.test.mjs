@@ -137,7 +137,7 @@ function makeMultiModelFetch(handlers) {
 const glmConfig = {
   baseUrl: "https://glm.test/v1",
   apiKey: "k",
-  model: "glm-5.1",
+  model: "glm-5.2",
   models: {
     glm: {
       configured: true,
@@ -145,7 +145,7 @@ const glmConfig = {
       displayName: "GLM",
       baseUrl: "https://glm.test/v1",
       apiKey: "k",
-      model: "glm-5.1",
+      model: "glm-5.2",
       reasoningEffort: "high", // baseline effort set on model config
     },
   },

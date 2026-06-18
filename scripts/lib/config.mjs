@@ -18,7 +18,7 @@ const ENDPOINT_PROFILES = Object.freeze({
   "bigmodel-cn": "https://open.bigmodel.cn/api/paas/v4",
 });
 
-// GLM 5.1's published output limit is 131072 tokens (models.dev / opencode);
+// GLM 5.2's published output limit is 131072 tokens (models.dev / opencode);
 // reasoning tokens share that budget with content. Non-GLM providers do not
 // inherit this default: unless the user sets a server-wide or model-specific
 // cap, we omit max_tokens and let that provider's default apply.
@@ -521,7 +521,7 @@ export function loadConfig(env = process.env) {
     fileCount: parseInteger(env.MULTIPOLY_FILE_COUNT_CAP ?? env.GLM_FILE_COUNT_CAP, 50),
   };
 
-  // Default 600s: GLM 5.1 in thinking mode can stream reasoning for several
+  // Default 600s: GLM 5.2 in thinking mode can stream reasoning for several
   // minutes on a large multi-file review before the first content byte. This
   // is an INACTIVITY timeout (every SSE chunk resets it), so a healthy long
   // review never trips it; 600s only bounds a genuinely stalled upstream.

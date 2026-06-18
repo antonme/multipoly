@@ -67,7 +67,7 @@ function makeFetch(body, { status = 200 } = {}) {
 const baseConfig = {
   baseUrl: "https://api.test/v1",
   apiKey: "k",
-  model: "glm-5.1",
+  model: "glm-5.2",
   models: {
     glm: {
       configured: true,
@@ -75,7 +75,7 @@ const baseConfig = {
       displayName: "GLM",
       baseUrl: "https://api.test/v1",
       apiKey: "k",
-      model: "glm-5.1",
+      model: "glm-5.2",
     },
   },
   thinking: "mode-default",

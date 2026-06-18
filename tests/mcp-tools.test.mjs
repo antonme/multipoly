@@ -24,7 +24,7 @@ test("mcp tools: buildTools exposes tools and enums for env-defined custom model
   const registry = {
     keys: ["glm", "kimi"],
     info: {
-      glm: { key: "glm", displayName: "glm-5.1 (api)" },
+      glm: { key: "glm", displayName: "glm-5.2 (api)" },
       kimi: { key: "kimi", displayName: "Kimi K2" },
     },
   };
@@ -70,14 +70,14 @@ test("mcp tools: review descriptions state diff_base/paths exclusivity", () => {
 test("opus_* alias tools appear only when claude is registered, routed to claude handler", () => {
   const registryWithClaude = {
     keys: ["glm", "claude"],
-    info: { glm: { key: "glm", displayName: "glm-5.1 (api)", reasoning: "http_thinking_toggle" },
+    info: { glm: { key: "glm", displayName: "glm-5.2 (api)", reasoning: "http_thinking_toggle" },
             claude: { key: "claude", displayName: "opus (claude cli)", reasoning: "anthropic_effort" } },
   };
   const tools = buildTools(registryWithClaude).map((t) => t.name);
   assert.ok(tools.includes("opus_review"));
   assert.ok(tools.includes("opus_consult"));
 
-  const noClaude = { keys: ["glm"], info: { glm: { key: "glm", displayName: "glm-5.1 (api)", reasoning: "http_thinking_toggle" } } };
+  const noClaude = { keys: ["glm"], info: { glm: { key: "glm", displayName: "glm-5.2 (api)", reasoning: "http_thinking_toggle" } } };
   const tools2 = buildTools(noClaude).map((t) => t.name);
   assert.ok(!tools2.includes("opus_review"));
 });
@@ -107,7 +107,7 @@ test("gpt55_* alias tools appear only when codex is registered, schema matches c
   const registryWithCodex = {
     keys: ["glm", "codex"],
     info: {
-      glm: { key: "glm", displayName: "glm-5.1 (api)", reasoning: "http_thinking_toggle" },
+      glm: { key: "glm", displayName: "glm-5.2 (api)", reasoning: "http_thinking_toggle" },
       codex: { key: "codex", displayName: "gpt5.5 (codex cli)", reasoning: "openai_effort" },
     },
   };
@@ -115,7 +115,7 @@ test("gpt55_* alias tools appear only when codex is registered, schema matches c
   assert.ok(tools.includes("gpt55_review"));
   assert.ok(tools.includes("gpt55_consult"));
 
-  const noCodex = { keys: ["glm"], info: { glm: { key: "glm", displayName: "glm-5.1 (api)", reasoning: "http_thinking_toggle" } } };
+  const noCodex = { keys: ["glm"], info: { glm: { key: "glm", displayName: "glm-5.2 (api)", reasoning: "http_thinking_toggle" } } };
   const tools2 = buildTools(noCodex).map((t) => t.name);
   assert.ok(!tools2.includes("gpt55_review"));
 

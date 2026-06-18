@@ -38,7 +38,7 @@ environment variable by the client that launches it. A good starting council
 
 ```sh
 # ── API models (HTTP) ──
-MULTIPOLY_GLM_API_KEY=<glm-key>              # GLM 5.1 — always on
+MULTIPOLY_GLM_API_KEY=<glm-key>              # GLM 5.2 — always on
 MULTIPOLY_DEEPSEEK_API_KEY=<deepseek-key>    # DeepSeek
 MULTIPOLY_DEEPSEEK_BASE_URL=https://api.deepseek.com
 
@@ -395,7 +395,7 @@ Allowed entry fields: `transport`, `displayName`, `model`, `baseUrl`,
 Every registered model surfaces a human-readable display name in the form `<base> (<transport>)`:
 
 - CLI models: `<base> (<kind> cli)` — e.g. `opus (claude cli)`, `gpt5.5 (codex cli)`, `composer-2.5 (cursor cli)`
-- API models (http or anthropic transport): `<base> (api)` — e.g. `opus (api)`, `gemini-3.5-flash (api)`, `glm-5.1 (api)`
+- API models (http or anthropic transport): `<base> (api)` — e.g. `opus (api)`, `gemini-3.5-flash (api)`, `glm-5.2 (api)`
 
 The display name is shown in descriptions and logs. Override it per-model with `MULTIPOLY_<K>_DISPLAY_NAME`.
 

@@ -63,7 +63,7 @@ const CEILING = 131072;
 test("budget-retry: single call succeeds — no retry", async () => {
   const fake = makeRecordingRunModel([validReviewAttempt()]);
   const result = await callWithBudgetRetry({
-    runModelArgs: { model: "glm-5.1" },
+    runModelArgs: { model: "glm-5.2" },
     mode: "review",
     maxTokens: MAX_TOKENS_REVIEW,
     budgetContext: reviewCtx,
@@ -79,7 +79,7 @@ test("budget-retry: single call succeeds — no retry", async () => {
 test("budget-retry: BUDGET on call 1, success on call 2 — retry happens", async () => {
   const fake = makeRecordingRunModel([budgetFailAttempt(), validReviewAttempt()]);
   const result = await callWithBudgetRetry({
-    runModelArgs: { model: "glm-5.1" },
+    runModelArgs: { model: "glm-5.2" },
     mode: "review",
     maxTokens: MAX_TOKENS_REVIEW,
     budgetContext: reviewCtx,
@@ -106,7 +106,7 @@ test("budget-retry: BUDGET on both calls — throws BUDGET after exactly 2 calls
   await assert.rejects(
     () =>
       callWithBudgetRetry({
-        runModelArgs: { model: "glm-5.1" },
+        runModelArgs: { model: "glm-5.2" },
         mode: "review",
         maxTokens: MAX_TOKENS_REVIEW,
         budgetContext: reviewCtx,
@@ -129,7 +129,7 @@ test("budget-retry: BUDGET on both calls — throws BUDGET after exactly 2 calls
 test("budget-retry: maxTokensUsed equals original on first-attempt success", async () => {
   const fake = makeRecordingRunModel([validReviewAttempt()]);
   const result = await callWithBudgetRetry({
-    runModelArgs: { model: "glm-5.1" },
+    runModelArgs: { model: "glm-5.2" },
     mode: "review",
     maxTokens: MAX_TOKENS_REVIEW,
     budgetContext: reviewCtx,
@@ -142,7 +142,7 @@ test("budget-retry: maxTokensUsed equals original on first-attempt success", asy
 test("budget-retry: maxTokensUsed equals bumped value on retry path", async () => {
   const fake = makeRecordingRunModel([budgetFailAttempt(), validReviewAttempt()]);
   const result = await callWithBudgetRetry({
-    runModelArgs: { model: "glm-5.1" },
+    runModelArgs: { model: "glm-5.2" },
     mode: "review",
     maxTokens: 8192,
     budgetContext: reviewCtx,
@@ -156,7 +156,7 @@ test("budget-retry: maxTokensUsed equals bumped value on retry path", async () =
 test("budget-retry: effort=off — retry bumps tokens only, effort stays off", async () => {
   const fake = makeRecordingRunModel([budgetFailAttempt(), validReviewAttempt()]);
   const result = await callWithBudgetRetry({
-    runModelArgs: { model: "glm-5.1" },
+    runModelArgs: { model: "glm-5.2" },
     mode: "review",
     maxTokens: MAX_TOKENS_REVIEW,
     budgetContext: reviewCtx,
@@ -204,7 +204,7 @@ test("budget-retry: non-BUDGET error is re-thrown immediately (no retry)", async
   await assert.rejects(
     () =>
       callWithBudgetRetry({
-        runModelArgs: { model: "glm-5.1" },
+        runModelArgs: { model: "glm-5.2" },
         mode: "review",
         maxTokens: MAX_TOKENS_REVIEW,
         budgetContext: reviewCtx,
@@ -220,7 +220,7 @@ test("budget-retry: non-BUDGET error is re-thrown immediately (no retry)", async
 test("budget-retry: max_tokens at ceiling — retry clamped to ceiling (no overflow)", async () => {
   const fake = makeRecordingRunModel([budgetFailAttempt(), validReviewAttempt()]);
   await callWithBudgetRetry({
-    runModelArgs: { model: "glm-5.1" },
+    runModelArgs: { model: "glm-5.2" },
     mode: "review",
     maxTokens: CEILING, // already at the ceiling
     budgetContext: reviewCtx,
@@ -235,7 +235,7 @@ test("budget-retry: max_tokens at ceiling — retry clamped to ceiling (no overf
 test("budget-retry: xhigh effort steps down to high", async () => {
   const fake = makeRecordingRunModel([budgetFailAttempt(), validReviewAttempt()]);
   await callWithBudgetRetry({
-    runModelArgs: { model: "glm-5.1" },
+    runModelArgs: { model: "glm-5.2" },
     mode: "review",
     maxTokens: MAX_TOKENS_REVIEW,
     budgetContext: reviewCtx,

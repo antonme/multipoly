@@ -1,7 +1,7 @@
 import { MultipolyError } from "./errors.mjs";
 
 /**
- * GLM 5.1 is a thinking model: reasoning tokens share the `max_tokens` budget
+ * GLM 5.2 is a thinking model: reasoning tokens share the `max_tokens` budget
  * with response content. When that budget is exhausted during reasoning, the
  * server returns `finish_reason: "length"` with empty content. Without this
  * check the empty body propagates as a confusing SCHEMA error (for review) or
