@@ -669,6 +669,65 @@ test("grok stays unconfigured until MULTIPOLY_GROK_ENABLED=1 (cli opt-in gate)",
   assert.equal(on.models.grok.model, "grok-build"); // baked default
 });
 
+// ── fable baked builtin (Anthropic-family sibling of claude; opt-in) ──
+
+test("MULTIPOLY_MODELS=fable merges baked base: cli default, claude kind, convention name", () => {
+  const { keys, info } = loadModelRegistry({ MULTIPOLY_MODELS: "fable" });
+  assert.ok(keys.includes("fable"));
+  assert.equal(info.fable.transport, "cli");
+  assert.equal(info.fable.cliKind, "claude"); // reuses the Claude Code recipe
+  assert.equal(info.fable.reasoning, "anthropic_effort"); // baked graded effort
+  assert.equal(info.fable.defaultModel, "claude-fable-5");
+  assert.equal(info.fable.displayName, "fable (claude cli)");
+});
+
+test("fable defaults to anthropic transport when an Anthropic key is present and transport is unset", () => {
+  const { info } = loadModelRegistry({ MULTIPOLY_MODELS: "fable", ANTHROPIC_API_KEY: "sk-ant-xxx" });
+  assert.equal(info.fable.transport, "anthropic");
+  assert.equal(info.fable.displayName, "fable (api)");
+});
+
+test("fable honors MULTIPOLY_FABLE_TRANSPORT=cli even with an Anthropic key present (escape hatch)", () => {
+  const { info } = loadModelRegistry({
+    MULTIPOLY_MODELS: "fable",
+    ANTHROPIC_API_KEY: "sk-ant-xxx",
+    MULTIPOLY_FABLE_TRANSPORT: "cli",
+  });
+  assert.equal(info.fable.transport, "cli");
+});
+
+test("fable with no key and unset transport keeps baked cli", () => {
+  const { info } = loadModelRegistry({ MULTIPOLY_MODELS: "fable" });
+  assert.equal(info.fable.transport, "cli");
+});
+
+test("fable (cli) stays unconfigured until MULTIPOLY_FABLE_ENABLED=1 (cli opt-in gate)", () => {
+  const off = loadConfig({ MULTIPOLY_GLM_API_KEY: "g", MULTIPOLY_MODELS: "fable" });
+  assert.equal(off.models.fable.configured, false);
+  assert.ok(off.models.fable.missing.some((m) => /MULTIPOLY_FABLE_ENABLED=1/.test(m)));
+
+  const on = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "fable",
+    MULTIPOLY_FABLE_ENABLED: "1",
+  });
+  assert.equal(on.models.fable.configured, true);
+  assert.equal(on.models.fable.cliKind, "claude");
+  assert.equal(on.models.fable.binary, "claude");
+  assert.equal(on.models.fable.model, "claude-fable-5"); // baked default
+});
+
+test("fable (anthropic) is configured by an Anthropic key without needing the ENABLED gate", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "fable",
+    ANTHROPIC_API_KEY: "sk-ant-xxx",
+  });
+  assert.equal(c.models.fable.transport, "anthropic");
+  assert.equal(c.models.fable.configured, true);
+  assert.equal(c.models.fable.model, "claude-fable-5"); // baked default flows to the anthropic body
+});
+
 // ── Display-name convention: always-on builtins surface "<base> (<transport>)" ──
 
 test("config: always-on builtins surface convention-form display names", () => {

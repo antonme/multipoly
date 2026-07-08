@@ -13,6 +13,7 @@ function norm(raw) {
 const RAW_ALIASES = {
   gpt: "codex", gpt5: "codex", "gpt5.5": "codex", openai: "codex",
   opus: "claude", "claude-opus": "claude", "opus-4.7": "claude",
+  "fable-5": "fable", "claude-fable": "fable", "claude-fable-5": "fable",
   flash: "gemini", "gemini-flash": "gemini", "gemini-3.5": "gemini",
   zhipu: "glm", "glm5.1": "glm",
   k2: "kimi", moonshot: "kimi",

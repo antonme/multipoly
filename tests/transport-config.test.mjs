@@ -250,6 +250,19 @@ test("models: grok is a cli baked builtin with graded effort (ANTHROPIC_EFFORT, 
   assert.equal(MODEL_INFO.grok.defaultEffort, "xhigh");
 });
 
+test("models: fable is an Anthropic-family baked builtin (cli default via claude kind, ANTHROPIC_EFFORT, xhigh)", () => {
+  assert.ok(MODEL_INFO.fable, "fable should be in MODEL_INFO");
+  assert.equal(MODEL_INFO.fable.transport, "cli");
+  assert.equal(MODEL_INFO.fable.cliKind, "claude"); // reuses the Claude Code recipe
+  assert.equal(MODEL_INFO.fable.baseName, "fable");
+  assert.equal(MODEL_INFO.fable.defaultModel, "claude-fable-5");
+  assert.equal(MODEL_INFO.fable.reasoning, CAPABILITY.ANTHROPIC_EFFORT);
+  assert.equal(MODEL_INFO.fable.defaultEffort, "xhigh");
+  // Shares ANTHROPIC_API_KEY with claude (distinct model ids, same key).
+  assert.ok(MODEL_INFO.fable.apiKeyEnv.includes("ANTHROPIC_API_KEY"));
+  assert.ok(MODEL_INFO.fable.apiKeyEnv.includes("MULTIPOLY_FABLE_API_KEY"));
+});
+
 test("models: modelSupportsThinking stays true only for GLM_TOGGLE/KIMI_TOGGLE/ANTHROPIC_BUDGET", () => {
   const c = { models: { glm: MODEL_INFO.glm, deepseek: MODEL_INFO.deepseek } };
   assert.equal(modelSupportsThinking(c, "glm"), true);

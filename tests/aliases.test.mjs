@@ -24,6 +24,22 @@ test("grok aliases resolve to grok when configured", () => {
   assert.equal(resolveModelAlias("grok-build", keys), "grok"); // punctuation stripped
 });
 
+test("fable aliases resolve to fable when configured", () => {
+  const keys = [...KEYS, "fable"];
+  assert.equal(resolveModelAlias("fable", keys), "fable"); // exact key
+  assert.equal(resolveModelAlias("fable-5", keys), "fable");
+  assert.equal(resolveModelAlias("claude-fable", keys), "fable");
+  assert.equal(resolveModelAlias("claude-fable-5", keys), "fable"); // punctuation stripped
+});
+
+test("fable aliases do not resolve to fable (or misroute to claude) when fable is unconfigured", () => {
+  // KEYS includes claude but not fable → fable's aliases resolve to nothing,
+  // and must NOT fall through to claude.
+  assert.equal(resolveModelAlias("fable-5", KEYS), null);
+  assert.equal(resolveModelAlias("claude-fable", KEYS), null);
+  assert.equal(resolveModelAlias("claude-fable-5", KEYS), null);
+});
+
 test("alias to an UNCONFIGURED canonical key does not resolve", () => {
   // claude not in the configured set → its alias must not resolve to it
   assert.equal(resolveModelAlias("opus", ["glm", "qwen"]), null);

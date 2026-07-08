@@ -260,7 +260,7 @@ export function createServer(config) {
   const modelKeys = config.modelKeys;
 
   const server = new Server(
-    { name: "multipoly", version: "0.2.0" },
+    { name: "multipoly", version: "0.3.0" },
     { capabilities: { tools: {} } },
   );
 

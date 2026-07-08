@@ -150,7 +150,7 @@ Compatibility aliases are accepted for API keys: GLM also accepts `GLM_API_KEY` 
 
 ### Baked builtins (opt-in)
 
-`claude`, `codex`, `gemini`, `kimi`, `mimo`, and `grok` are **baked builtins** — they carry pre-configured capability metadata (transport, reasoning capability, default effort, base URL) but are **not registered by default**. Add them to `MULTIPOLY_MODELS` to enable their tools:
+`claude`, `codex`, `gemini`, `kimi`, `mimo`, `grok`, and `fable` are **baked builtins** — they carry pre-configured capability metadata (transport, reasoning capability, default effort, base URL) but are **not registered by default**. Add them to `MULTIPOLY_MODELS` to enable their tools:
 
 | Key | Default transport | Baked display name | Env override |
 |---|---|---|---|
@@ -160,12 +160,20 @@ Compatibility aliases are accepted for API keys: GLM also accepts `GLM_API_KEY` 
 | `kimi` | `anthropic` | `kimi-k2.6 (api)` | `MULTIPOLY_KIMI_API_KEY`, `MOONSHOT_API_KEY` |
 | `mimo` | `http` | `mimo-v2.5-pro (api)` | `MULTIPOLY_MIMO_API_KEY`, `XIAOMIMIMO_API_KEY` |
 | `grok` | `cli` | `grok-build (grok cli)` | `MULTIPOLY_GROK_API_KEY`, `XAI_API_KEY` |
+| `fable` | `cli` (flips to `anthropic` when an Anthropic key is present; same rule as `claude`) | `fable (claude cli)` / `fable (api)` | `MULTIPOLY_FABLE_API_KEY`, `ANTHROPIC_API_KEY` |
 
 All env overrides from the custom-model table apply (`MULTIPOLY_<K>_TRANSPORT`, `_MODEL`, `_DISPLAY_NAME`, etc.). You no longer need to supply `MULTIPOLY_CLAUDE_DISPLAY_NAME` or `MULTIPOLY_CLAUDE_REASONING` — they are baked; env still overrides.
 
 `mimo` (Xiaomi MiMo V2.5 Pro) uses the same reasoning capability class as GLM: a top-level `thinking:{type}` toggle with no graded effort — `off` disables thinking, any other effort value enables it (default `high`). It gets a minimum token floor of 8192 (review) / 4096 (consult) when no explicit cap is set, preventing empty-response failures. On the wire it sends `max_completion_tokens` instead of `max_tokens` (the MiMo API rejects the legacy field). To enable mimo, add it to `MULTIPOLY_MODELS` and supply a key — `XIAOMIMIMO_API_KEY` is recognized so existing deployments need no rename. The per-deployment `MULTIPOLY_MIMO_DISPLAY_NAME`, `_REASONING`, `_BASE_URL`, and `_MODEL` env vars are no longer needed (baked); keep only `MULTIPOLY_MIMO_MAX_TOKENS_*` if you tuned the token cap.
 
 `grok` (xAI **Grok Build**) is a local coding-agent CLI, driven read-only like Claude Code/Codex. It is **cli-only** (no HTTP API is exposed here) and authenticates with the grok CLI's own OAuth — run `grok login` once; no API key env is required. Its `--effort` flag is graded and `xhigh`-native, so it shares Claude's effort class (default `xhigh`). multipoly's effort scale tops out at `xhigh` (which maps to `--effort xhigh`); grok's CLI also accepts a native `max`, but that level is not exposed through multipoly. To enable it: install the grok CLI, then add `grok` to `MULTIPOLY_MODELS` and set `MULTIPOLY_GROK_ENABLED=1` (cli models are off by default). The default model is `grok-build`; override with `MULTIPOLY_GROK_MODEL`.
+
+`fable` (**Claude Fable 5**, model `claude-fable-5`) is a sibling of the `claude` (Opus) builtin — same shape, pointed at Fable — so both can run side by side in the council. It shares Claude's graded effort class (default `xhigh`) and reaches Fable two ways, chosen by the same transport-flip rule as `claude`:
+
+- **Anthropic API (native Messages):** set `ANTHROPIC_API_KEY` (or `MULTIPOLY_FABLE_API_KEY`) and, with `MULTIPOLY_FABLE_TRANSPORT` unset, `fable` auto-selects the `anthropic` transport. Override the endpoint with `ANTHROPIC_BASE_URL`. Because both `claude` and `fable` recognize `ANTHROPIC_API_KEY`, a single key flips **both** to the API (distinct model ids, same key) — intended.
+- **Claude Code CLI (`claude --model claude-fable-5`):** with no Anthropic key present, or with `MULTIPOLY_FABLE_TRANSPORT=cli` set explicitly (the escape hatch when you have `ANTHROPIC_API_KEY` exported but want CLI/OAuth billing), `fable` runs read-only through the local `claude` binary. Like every cli model it is **off until `MULTIPOLY_FABLE_ENABLED=1`**.
+
+The default model is `claude-fable-5`; override with `MULTIPOLY_FABLE_MODEL`. Fable's thinking is always-on (`{type:"disabled"}` and `budget_tokens` both 400 on the wire); multipoly never sends either — at effort `off` it omits `thinking` (adaptive runs), and at graded effort it sends `{type:"adaptive"}` + `output_config.effort`, so no Fable-specific handling is required. Two Fable behaviors are surfaced but not specially handled: a safety-classifier decline arrives as a `refusal` stop reason (surfaced as `finishReason:"refusal"`, same as `claude`), and Fable requires 30-day data retention on the org (a `400` on every request otherwise) — both are account/org concerns, not multipoly config.
 
 > **Migration from `MULTIPOLY_OPUS_*`.** The standalone `opus` model is removed. Use `MULTIPOLY_MODELS=claude` instead, and rename `MULTIPOLY_OPUS_*` env vars to `MULTIPOLY_CLAUDE_*`. At startup the server emits a structured stderr warning naming any `MULTIPOLY_OPUS_*` or `MULTIPOLY_GPT55_*` vars it finds — their values are no longer used to configure a model and are ignored as credentials (use `MULTIPOLY_CLAUDE_*` / `MULTIPOLY_CODEX_*` instead). Note: the mere presence of `MULTIPOLY_OPUS_API_KEY` is still honored as a legacy Anthropic-key signal for the claude transport-flip default (see below).
 
@@ -231,6 +239,7 @@ Every model that supports graded reasoning exposes a `reasoning_effort` argument
 | `kimi` | `high` | `thinking: {type: "enabled"\|"disabled"}` toggle |
 | `mimo` | `high` | `thinking: {type: "enabled"\|"disabled"}` toggle (same class as GLM; no graded effort) |
 | `grok` | `xhigh` | `--effort` cli flag (graded `low`–`xhigh`, `xhigh`-native; same class as claude) |
+| `fable` | `xhigh` | `output_config.effort` + `thinking: {type: "adaptive"}` (api) / `--effort` cli flag (same class as claude) |
 | `composer` | `off` | no reasoning control (cursor-agent) |
 
 **Precedence order (highest to lowest):**

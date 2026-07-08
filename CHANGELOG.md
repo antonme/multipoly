@@ -2,6 +2,34 @@
 
 All notable changes to this project are documented here.
 
+## 0.3.0 (2026-07-08)
+
+### Claude Fable 5 support (2026-07-08)
+
+- **New baked builtin `fable`** (**Claude Fable 5**, model `claude-fable-5`) — a
+  sibling of the `claude` (Opus) builtin, pointed at Fable, so both can run
+  side by side in the council. Add `fable` to `MULTIPOLY_MODELS` to expose
+  `fable_review` / `fable_consult` and make it council-eligible.
+  - **Two transports, one flip rule (same as `claude`):** with an Anthropic key
+    present (`ANTHROPIC_API_KEY` or `MULTIPOLY_FABLE_API_KEY`) and
+    `MULTIPOLY_FABLE_TRANSPORT` unset, `fable` auto-selects the native
+    `anthropic` Messages transport; otherwise it runs read-only through the local
+    `claude` CLI (`claude --model claude-fable-5`), which is **off until
+    `MULTIPOLY_FABLE_ENABLED=1`** like every cli model. Set
+    `MULTIPOLY_FABLE_TRANSPORT=cli` to force CLI even with a key exported.
+    A single `ANTHROPIC_API_KEY` flips both `claude` and `fable` to the API
+    (distinct model ids, same key) — intended.
+  - **Graded effort:** shares Claude's effort class (`ANTHROPIC_EFFORT`); default
+    `xhigh`. Fable's thinking is always-on and rejects `{type:"disabled"}` /
+    `budget_tokens` — the ANTHROPIC_EFFORT path already never sends either (omits
+    `thinking` at `off`; sends `{type:"adaptive"}` + `output_config.effort` at
+    graded effort), so no Fable-specific transport handling was needed.
+  - **Aliases:** `fable-5`, `claude-fable`, `claude-fable-5` resolve to `fable`.
+    Default model `claude-fable-5` (override with `MULTIPOLY_FABLE_MODEL`).
+  - **Not specially handled (documented behaviors):** a safety-classifier decline
+    surfaces as `finishReason:"refusal"` (same as `claude`), and Fable requires
+    30-day org data retention — both are account/org concerns, not multipoly config.
+
 ## 0.2.0 (2026-05-28)
 
 ### Grok Build CLI support (2026-05-28)

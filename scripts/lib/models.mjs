@@ -43,7 +43,7 @@ export const MODEL_KEYS = Object.freeze(["glm", "qwen", "deepseek", "composer"])
 // Promotable builtins: present in MODEL_INFO but NOT in MODEL_KEYS (opt-in via
 // MULTIPOLY_MODELS). When listed, the registry loader merges the baked MODEL_INFO
 // base under env overrides instead of building from scratch.
-const PROMOTABLE_BUILTINS = new Set(["claude", "codex", "gemini", "kimi", "mimo", "grok"]);
+const PROMOTABLE_BUILTINS = new Set(["claude", "codex", "gemini", "kimi", "mimo", "grok", "fable"]);
 
 // The three transports a model can be reached over. `http` is the default
 // OpenAI-compatible streaming client; `anthropic` is the native Messages API;
@@ -205,6 +205,26 @@ export const MODEL_INFO = Object.freeze({
     apiKeyEnv: ["MULTIPOLY_GROK_API_KEY", "XAI_API_KEY"],
     supportsThinking: false,
     reasoning: CAPABILITY.ANTHROPIC_EFFORT, // graded effort, xhigh-native (matches grok --effort)
+    defaultEffort: "xhigh",
+  }),
+  // Claude Fable 5 — Anthropic's most capable widely released model. A sibling of
+  // the `claude` (Opus) builtin: same cli-default/anthropic-flip shape and
+  // ANTHROPIC_EFFORT capability, pointed at claude-fable-5 and reusing the verified
+  // Claude Code cli recipe (cliKind "claude"). Fable's wire constraints — thinking is
+  // always-on; `{type:"disabled"}` and `budget_tokens` both 400 — are already satisfied
+  // by the ANTHROPIC_EFFORT path: at effort "off" it OMITS `thinking` (adaptive runs),
+  // and at graded effort it sends `{type:"adaptive"}` + output_config.effort, never
+  // `disabled`/`budget_tokens`. So no transport/reasoning changes are needed.
+  fable: Object.freeze({
+    key: "fable",
+    baseName: "fable",               // versionless display base, mirroring claude's "opus"
+    transport: "cli",
+    cliKind: "claude",               // reuses the Claude Code read-only CLI recipe
+    defaultModel: "claude-fable-5",
+    defaultBaseUrl: null,            // anthropic transport falls back to ANTHROPIC_DEFAULT_BASE_URL in config
+    apiKeyEnv: ["MULTIPOLY_FABLE_API_KEY", "ANTHROPIC_API_KEY"],
+    supportsThinking: true,
+    reasoning: CAPABILITY.ANTHROPIC_EFFORT, // graded effort via output_config.effort (adaptive thinking)
     defaultEffort: "xhigh",
   }),
 });
@@ -442,16 +462,18 @@ function warnLegacyMigration(env) {
 
 /**
  * Resolve the effective transport for a promotable builtin (claude/codex/etc.)
- * applying the transport-flip guard for claude:
+ * applying the transport-flip guard for the Anthropic-family builtins:
  *   - explicit MULTIPOLY_<K>_TRANSPORT always wins
- *   - claude: if transport unset AND an Anthropic key is present, default to
- *     "anthropic" (overrides the baked "cli" default). Strictly safer: avoids
+ *   - claude / fable: if transport unset AND an Anthropic key is present, default
+ *     to "anthropic" (overrides the baked "cli" default). Strictly safer: avoids
  *     silently routing API keys through the local CLI. Operator who wants CLI
- *     with an Anthropic key in env sets MULTIPOLY_CLAUDE_TRANSPORT=cli explicitly.
+ *     with an Anthropic key in env sets MULTIPOLY_<K>_TRANSPORT=cli explicitly.
  *     NOTE: we do not detect CLI auth; unset transport + anthropic key ⇒ anthropic.
+ *     (claude additionally honors the legacy MULTIPOLY_OPUS_API_KEY signal; fable
+ *     does not — that shim is claude-only.)
  *   - codex: keeps baked cli (no prior API deployment to protect), just logs
  *   - all other builtins: fall back to baked transport default
- * Always emits a structured stderr transport_default log for claude/codex.
+ * Always emits a structured stderr transport_default log for claude/fable/codex.
  *
  * @param {string} key - model key (e.g. "claude", "codex")
  * @param {object} env - process.env or test env
@@ -474,6 +496,27 @@ function resolveBuiltinTransport(key, env, prefix, baked) {
       JSON.stringify({
         event: "transport_default",
         model: "claude",
+        chosen,
+        reason: anthropicKeyPresent
+          ? "anthropic key present, transport unset"
+          : "no anthropic key; baked default",
+      }) + "\n",
+    );
+    return chosen;
+  }
+
+  if (key === "fable") {
+    // Mirrors claude's flip, minus the legacy MULTIPOLY_OPUS_API_KEY signal
+    // (that shim is claude-only). An Anthropic key ⇒ anthropic transport.
+    const anthropicKeyPresent = firstNonEmpty(env, [
+      "ANTHROPIC_API_KEY",
+      "MULTIPOLY_FABLE_API_KEY",
+    ]);
+    const chosen = anthropicKeyPresent ? "anthropic" : (baked?.transport ?? "cli");
+    process.stderr.write(
+      JSON.stringify({
+        event: "transport_default",
+        model: "fable",
         chosen,
         reason: anthropicKeyPresent
           ? "anthropic key present, transport unset"

@@ -446,6 +446,15 @@ test("cli: claude + xhigh effort → --effort xhigh in argv (no clamping for cla
   assert.equal(args[args.indexOf("--effort") + 1], "xhigh");
 });
 
+// fable runs through cliKind "claude" — pin the baked defaultModel → argv flow.
+test("cli: fable via cliKind claude → --model claude-fable-5 + --effort xhigh in argv", () => {
+  const { args } = buildInvocation({ kind: "claude", binary: "claude", model: "claude-fable-5", cwd: "/tmp", reasoningEffort: "xhigh", prompt: "p", scratch: scratch() });
+  const mi = args.indexOf("--model");
+  assert.ok(mi >= 0 && args[mi + 1] === "claude-fable-5", `expected --model claude-fable-5: ${args.join(" ")}`);
+  const ei = args.indexOf("--effort");
+  assert.ok(ei >= 0 && args[ei + 1] === "xhigh", `expected --effort xhigh: ${args.join(" ")}`);
+});
+
 test("cli: claude + off effort → no --effort flag in argv", () => {
   const { args } = buildInvocation({ kind: "claude", binary: "claude", model: "m", cwd: "/tmp", reasoningEffort: "off", prompt: "p", scratch: scratch() });
   assert.ok(!args.includes("--effort"), `off must produce no --effort flag: ${args.join(" ")}`);
