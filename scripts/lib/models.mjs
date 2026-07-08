@@ -460,6 +460,27 @@ function warnLegacyMigration(env) {
   }
 }
 
+// Shared transport-flip for the Anthropic-family cli builtins (claude, fable):
+// with MULTIPOLY_<K>_TRANSPORT unset, any Anthropic key in `keyEnvs` present ⇒
+// "anthropic"; otherwise the baked default. Always emits the structured
+// transport_default stderr log. The caller passes the per-key env list, so the
+// claude-only legacy MULTIPOLY_OPUS_API_KEY signal stays out of fable's.
+function anthropicFlipDefault(key, env, keyEnvs, baked) {
+  const anthropicKeyPresent = firstNonEmpty(env, keyEnvs);
+  const chosen = anthropicKeyPresent ? "anthropic" : (baked?.transport ?? "cli");
+  process.stderr.write(
+    JSON.stringify({
+      event: "transport_default",
+      model: key,
+      chosen,
+      reason: anthropicKeyPresent
+        ? "anthropic key present, transport unset"
+        : "no anthropic key; baked default",
+    }) + "\n",
+  );
+  return chosen;
+}
+
 /**
  * Resolve the effective transport for a promotable builtin (claude/codex/etc.)
  * applying the transport-flip guard for the Anthropic-family builtins:
@@ -485,45 +506,22 @@ function resolveBuiltinTransport(key, env, prefix, baked) {
   const explicit = (env[`${prefix}_TRANSPORT`] || "").trim();
   if (explicit) return parseTransport(explicit, `${prefix}_TRANSPORT`);
 
+  // claude and fable share the same anthropic-flip; they differ only in the key
+  // list (claude additionally honors the legacy MULTIPOLY_OPUS_API_KEY signal —
+  // that shim is claude-only). Note the key namespaces are distinct on purpose:
+  // MULTIPOLY_CLAUDE_API_KEY does not flip fable, and MULTIPOLY_FABLE_API_KEY
+  // does not flip claude.
   if (key === "claude") {
-    const anthropicKeyPresent = firstNonEmpty(env, [
-      "ANTHROPIC_API_KEY",
-      "MULTIPOLY_CLAUDE_API_KEY",
-      "MULTIPOLY_OPUS_API_KEY",
-    ]);
-    const chosen = anthropicKeyPresent ? "anthropic" : (baked?.transport ?? "cli");
-    process.stderr.write(
-      JSON.stringify({
-        event: "transport_default",
-        model: "claude",
-        chosen,
-        reason: anthropicKeyPresent
-          ? "anthropic key present, transport unset"
-          : "no anthropic key; baked default",
-      }) + "\n",
+    return anthropicFlipDefault(
+      "claude",
+      env,
+      ["ANTHROPIC_API_KEY", "MULTIPOLY_CLAUDE_API_KEY", "MULTIPOLY_OPUS_API_KEY"],
+      baked,
     );
-    return chosen;
   }
 
   if (key === "fable") {
-    // Mirrors claude's flip, minus the legacy MULTIPOLY_OPUS_API_KEY signal
-    // (that shim is claude-only). An Anthropic key ⇒ anthropic transport.
-    const anthropicKeyPresent = firstNonEmpty(env, [
-      "ANTHROPIC_API_KEY",
-      "MULTIPOLY_FABLE_API_KEY",
-    ]);
-    const chosen = anthropicKeyPresent ? "anthropic" : (baked?.transport ?? "cli");
-    process.stderr.write(
-      JSON.stringify({
-        event: "transport_default",
-        model: "fable",
-        chosen,
-        reason: anthropicKeyPresent
-          ? "anthropic key present, transport unset"
-          : "no anthropic key; baked default",
-      }) + "\n",
-    );
-    return chosen;
+    return anthropicFlipDefault("fable", env, ["ANTHROPIC_API_KEY", "MULTIPOLY_FABLE_API_KEY"], baked);
   }
 
   if (key === "codex") {

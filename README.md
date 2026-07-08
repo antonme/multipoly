@@ -423,6 +423,8 @@ Lenient name resolution applies wherever a model name is accepted as input: the 
 | `deepseek-v4` | `deepseek` |
 | `qwen-max` | `qwen` |
 | `xiaomi`, `mi-mo` | `mimo` |
+| `xai`, `grok-build` | `grok` |
+| `fable-5`, `claude-fable`, `claude-fable-5` | `fable` |
 
 Aliases resolve only when the **canonical key is configured**. For example, `opus` resolves to `claude` only if `claude` is in the registry; otherwise it returns an error.
 

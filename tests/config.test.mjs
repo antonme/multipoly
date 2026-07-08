@@ -728,6 +728,29 @@ test("fable (anthropic) is configured by an Anthropic key without needing the EN
   assert.equal(c.models.fable.model, "claude-fable-5"); // baked default flows to the anthropic body
 });
 
+test("fable flips to anthropic on MULTIPOLY_FABLE_API_KEY alone (no ANTHROPIC_API_KEY)", () => {
+  const { info } = loadModelRegistry({ MULTIPOLY_MODELS: "fable", MULTIPOLY_FABLE_API_KEY: "k" });
+  assert.equal(info.fable.transport, "anthropic");
+});
+
+test("key namespaces are distinct: MULTIPOLY_CLAUDE_API_KEY does NOT flip fable (stays cli)", () => {
+  // The claude-only per-model key must not leak into fable's flip signal — an
+  // operator with claude on the API and fable on the CLI must not have fable
+  // silently flipped by claude's key.
+  const { info } = loadModelRegistry({ MULTIPOLY_MODELS: "fable", MULTIPOLY_CLAUDE_API_KEY: "k" });
+  assert.equal(info.fable.transport, "cli");
+});
+
+test("MULTIPOLY_FABLE_MODEL overrides the baked default model (documented escape for future Fable ids)", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "fable",
+    MULTIPOLY_FABLE_ENABLED: "1",
+    MULTIPOLY_FABLE_MODEL: "claude-fable-5-custom",
+  });
+  assert.equal(c.models.fable.model, "claude-fable-5-custom");
+});
+
 // ── Display-name convention: always-on builtins surface "<base> (<transport>)" ──
 
 test("config: always-on builtins surface convention-form display names", () => {
