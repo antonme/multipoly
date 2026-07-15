@@ -167,7 +167,9 @@ All env overrides from the custom-model table apply (`MULTIPOLY_<K>_TRANSPORT`, 
 `kimi` defaults to **Kimi K3** using the exact first-party Kimi Code model ID
 `kimi-k.3.0`. The stable tools remain `kimi_review` / `kimi_consult`. To keep
 the previous upstream model temporarily, set
-`MULTIPOLY_KIMI_MODEL=kimi-k2.6`.
+`MULTIPOLY_KIMI_MODEL=kimi-k2.6`; optionally set
+`MULTIPOLY_KIMI_DISPLAY_NAME='kimi-k2.6 (api)'` as well so health output, tool
+descriptions, and logs reflect the pinned model.
 
 `mimo` (Xiaomi MiMo V2.5 Pro) uses the same reasoning capability class as GLM: a top-level `thinking:{type}` toggle with no graded effort — `off` disables thinking, any other effort value enables it (default `high`). It gets a minimum token floor of 8192 (review) / 4096 (consult) when no explicit cap is set, preventing empty-response failures. On the wire it sends `max_completion_tokens` instead of `max_tokens` (the MiMo API rejects the legacy field). To enable mimo, add it to `MULTIPOLY_MODELS` and supply a key — `XIAOMIMIMO_API_KEY` is recognized so existing deployments need no rename. The per-deployment `MULTIPOLY_MIMO_DISPLAY_NAME`, `_REASONING`, `_BASE_URL`, and `_MODEL` env vars are no longer needed (baked); keep only `MULTIPOLY_MIMO_MAX_TOKENS_*` if you tuned the token cap.
 
@@ -432,6 +434,8 @@ Lenient name resolution applies wherever a model name is accepted as input: the 
 | `fable-5`, `claude-fable`, `claude-fable-5` | `fable` |
 
 Aliases resolve only when the **canonical key is configured**. For example, `opus` resolves to `claude` only if `claude` is in the registry; otherwise it returns an error.
+Aliases select that configured key; they do not override a pinned upstream
+model such as `MULTIPOLY_KIMI_MODEL=kimi-k2.6`.
 
 ### Alias tools (`opus_*`, `gpt55_*`)
 

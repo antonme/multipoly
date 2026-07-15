@@ -232,20 +232,21 @@ Expected: the Kimi row reports display `kimi-k3 (api)`, transport `anthropic`, m
 
 - [ ] **Step 3: Run minimal live K3 high/off probes without printing credentials**
 
-Run this one-off ESM probe. It reads the already-configured Kimi credential from the local Codex MCP config, never prints it, caps each response to 256 tokens, and invokes Multipoly's real consult/Anthropic path:
+Run this one-off ESM probe with `MULTIPOLY_KIMI_API_KEY` (or
+`MOONSHOT_API_KEY`) supplied from the operator's credential manager. It never
+prints the key, caps each response to 256 tokens, and invokes Multipoly's real
+consult/Anthropic path:
 
 ```bash
 node --input-type=module -e '
-import { readFileSync } from "node:fs";
 import { loadConfig } from "./scripts/lib/config.mjs";
 import { handleModelConsult } from "./scripts/lib/model-consult.mjs";
-const source = readFileSync(`${process.env.HOME}/.codex/config.toml`, "utf8");
-const match = source.match(/(?:MULTIPOLY_KIMI_API_KEY|MOONSHOT_API_KEY)\s*=\s*"([^"]+)"/);
-if (!match) throw new Error("Kimi key not found in ~/.codex/config.toml");
+const key = process.env.MULTIPOLY_KIMI_API_KEY ?? process.env.MOONSHOT_API_KEY;
+if (!key) throw new Error("Set MULTIPOLY_KIMI_API_KEY or MOONSHOT_API_KEY");
 const config = loadConfig({
   MULTIPOLY_GLM_API_KEY: "unused",
   MULTIPOLY_MODELS: "kimi",
-  MULTIPOLY_KIMI_API_KEY: match[1],
+  MULTIPOLY_KIMI_API_KEY: key,
   MULTIPOLY_KIMI_MAX_TOKENS_CONSULT: "256",
 });
 for (const effort of ["high", "off"]) {
