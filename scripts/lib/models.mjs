@@ -166,9 +166,9 @@ export const MODEL_INFO = Object.freeze({
   }),
   kimi: Object.freeze({
     key: "kimi",
-    baseName: "kimi-k2.6",
+    baseName: "kimi-k3",
     transport: "anthropic",
-    defaultModel: "kimi-k2.6",
+    defaultModel: "kimi-k.3.0",
     defaultBaseUrl: "https://api.kimi.com/coding",
     apiKeyEnv: ["MULTIPOLY_KIMI_API_KEY", "MOONSHOT_API_KEY"],
     supportsThinking: true,

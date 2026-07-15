@@ -16,7 +16,7 @@ const RAW_ALIASES = {
   "fable-5": "fable", "claude-fable": "fable", "claude-fable-5": "fable",
   flash: "gemini", "gemini-flash": "gemini", "gemini-3.5": "gemini",
   zhipu: "glm", "glm5.1": "glm",
-  k2: "kimi", moonshot: "kimi",
+  k2: "kimi", k3: "kimi", "kimi-k3": "kimi", "kimi-k.3.0": "kimi", moonshot: "kimi",
   cursor: "composer",
   "deepseek-v4": "deepseek",
   "qwen-max": "qwen",

@@ -468,6 +468,30 @@ test("claude/codex/gemini/kimi are baked MODEL_INFO entries with capability + ba
   }
 });
 
+test("kimi baked builtin defaults to K3 while explicit model overrides still win", () => {
+  assert.equal(MODEL_INFO.kimi.baseName, "kimi-k3");
+  assert.equal(MODEL_INFO.kimi.defaultModel, "kimi-k.3.0");
+  assert.equal(MODEL_INFO.kimi.defaultBaseUrl, "https://api.kimi.com/coding");
+  assert.equal(MODEL_INFO.kimi.reasoning, "kimi_toggle");
+  assert.equal(MODEL_INFO.kimi.defaultEffort, "high");
+
+  const baked = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "kimi",
+    MULTIPOLY_KIMI_API_KEY: "k",
+  });
+  assert.equal(baked.models.kimi.model, "kimi-k.3.0");
+  assert.equal(baked.models.kimi.displayName, "kimi-k3 (api)");
+
+  const pinned = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "kimi",
+    MULTIPOLY_KIMI_API_KEY: "k",
+    MULTIPOLY_KIMI_MODEL: "kimi-k2.6",
+  });
+  assert.equal(pinned.models.kimi.model, "kimi-k2.6");
+});
+
 test("OPUS_INFO is no longer exported (folded into claude)", async () => {
   const mod = await import("../scripts/lib/models.mjs");
   assert.equal(mod.OPUS_INFO, undefined);

@@ -40,6 +40,15 @@ test("fable aliases do not resolve to fable (or misroute to claude) when fable i
   assert.equal(resolveModelAlias("claude-fable-5", KEYS), null);
 });
 
+test("Kimi K3 aliases resolve to kimi only when kimi is configured", () => {
+  for (const alias of ["k3", "kimi-k3", "kimi-k.3.0"]) {
+    assert.equal(resolveModelAlias(alias, KEYS), "kimi");
+    assert.equal(resolveModelAlias(alias, KEYS.filter((key) => key !== "kimi")), null);
+  }
+  assert.equal(resolveModelAlias("k2", KEYS), "kimi");
+  assert.equal(resolveModelAlias("moonshot", KEYS), "kimi");
+});
+
 test("alias to an UNCONFIGURED canonical key does not resolve", () => {
   // claude not in the configured set → its alias must not resolve to it
   assert.equal(resolveModelAlias("opus", ["glm", "qwen"]), null);
