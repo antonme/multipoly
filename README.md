@@ -157,12 +157,17 @@ Compatibility aliases are accepted for API keys: GLM also accepts `GLM_API_KEY` 
 | `claude` | `cli` (flips to `anthropic` when an Anthropic key is present; see [claude transport-flip rule](#model-names--aliases)) | `opus (claude cli)` / `opus (api)` | `MULTIPOLY_CLAUDE_API_KEY`, `ANTHROPIC_API_KEY` |
 | `codex` | `cli` | `gpt5.5 (codex cli)` | `MULTIPOLY_CODEX_API_KEY`, `OPENAI_API_KEY` |
 | `gemini` | `http` | `gemini-3.5-flash (api)` | `MULTIPOLY_GEMINI_API_KEY`, `GEMINI_API_KEY` |
-| `kimi` | `anthropic` | `kimi-k2.6 (api)` | `MULTIPOLY_KIMI_API_KEY`, `MOONSHOT_API_KEY` |
+| `kimi` | `anthropic` | `kimi-k3 (api)` | `MULTIPOLY_KIMI_API_KEY`, `MOONSHOT_API_KEY` |
 | `mimo` | `http` | `mimo-v2.5-pro (api)` | `MULTIPOLY_MIMO_API_KEY`, `XIAOMIMIMO_API_KEY` |
 | `grok` | `cli` | `grok-build (grok cli)` | `MULTIPOLY_GROK_API_KEY`, `XAI_API_KEY` |
 | `fable` | `cli` (flips to `anthropic` when an Anthropic key is present; same rule as `claude`) | `fable (claude cli)` / `fable (api)` | `MULTIPOLY_FABLE_API_KEY`, `ANTHROPIC_API_KEY` |
 
 All env overrides from the custom-model table apply (`MULTIPOLY_<K>_TRANSPORT`, `_MODEL`, `_DISPLAY_NAME`, etc.). You no longer need to supply `MULTIPOLY_CLAUDE_DISPLAY_NAME` or `MULTIPOLY_CLAUDE_REASONING` — they are baked; env still overrides.
+
+`kimi` defaults to **Kimi K3** using the exact first-party Kimi Code model ID
+`kimi-k.3.0`. The stable tools remain `kimi_review` / `kimi_consult`. To keep
+the previous upstream model temporarily, set
+`MULTIPOLY_KIMI_MODEL=kimi-k2.6`.
 
 `mimo` (Xiaomi MiMo V2.5 Pro) uses the same reasoning capability class as GLM: a top-level `thinking:{type}` toggle with no graded effort — `off` disables thinking, any other effort value enables it (default `high`). It gets a minimum token floor of 8192 (review) / 4096 (consult) when no explicit cap is set, preventing empty-response failures. On the wire it sends `max_completion_tokens` instead of `max_tokens` (the MiMo API rejects the legacy field). To enable mimo, add it to `MULTIPOLY_MODELS` and supply a key — `XIAOMIMIMO_API_KEY` is recognized so existing deployments need no rename. The per-deployment `MULTIPOLY_MIMO_DISPLAY_NAME`, `_REASONING`, `_BASE_URL`, and `_MODEL` env vars are no longer needed (baked); keep only `MULTIPOLY_MIMO_MAX_TOKENS_*` if you tuned the token cap.
 
@@ -418,7 +423,7 @@ Lenient name resolution applies wherever a model name is accepted as input: the 
 | `opus`, `claude-opus`, `opus-4.7` | `claude` |
 | `flash`, `gemini-flash`, `gemini-3.5` | `gemini` |
 | `zhipu`, `glm5.1` | `glm` |
-| `k2`, `moonshot` | `kimi` |
+| `k3`, `kimi-k3`, `kimi-k.3.0`, `k2`, `moonshot` | `kimi` |
 | `cursor` | `composer` |
 | `deepseek-v4` | `deepseek` |
 | `qwen-max` | `qwen` |

@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+### Kimi K3 default
+
+- The opt-in canonical `kimi` builtin now defaults to first-party Kimi K3:
+  display `kimi-k3 (api)`, exact wire model `kimi-k.3.0`. Existing
+  `kimi_review` / `kimi_consult`, provider routing, credentials, reasoning
+  controls, and explicit `MULTIPOLY_KIMI_MODEL` overrides are unchanged.
+- New aliases `k3`, `kimi-k3`, and `kimi-k.3.0` resolve to `kimi`; legacy `k2`
+  and `moonshot` aliases remain. Set `MULTIPOLY_KIMI_MODEL=kimi-k2.6` to pin
+  the previous model.
+
 ## 0.3.0 (2026-07-08)
 
 ### Claude Fable 5 support (2026-07-08)
