@@ -40,6 +40,17 @@ test("fable aliases do not resolve to fable (or misroute to claude) when fable i
   assert.equal(resolveModelAlias("claude-fable-5", KEYS), null);
 });
 
+test("qwen38 aliases resolve to qwen38 only when qwen38 is configured (and never misroute to qwen)", () => {
+  const keys = [...KEYS, "qwen38"];
+  for (const alias of ["qwen3.8", "qwen3.8-max", "qwen-3.8-max", "qwen3.8-max-preview", "qwen38-max"]) {
+    assert.equal(resolveModelAlias(alias, keys), "qwen38");
+    // Unconfigured qwen38 → no resolution, and must NOT fall through to qwen.
+    assert.equal(resolveModelAlias(alias, KEYS), null);
+  }
+  // The plain 3.7 alias still targets qwen, not qwen38.
+  assert.equal(resolveModelAlias("qwen-max", keys), "qwen");
+});
+
 test("Kimi K3 aliases resolve to kimi only when kimi is configured", () => {
   for (const alias of ["k3", "kimi-k3", "kimi-k.3.0"]) {
     assert.equal(resolveModelAlias(alias, KEYS), "kimi");

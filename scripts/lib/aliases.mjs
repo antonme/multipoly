@@ -20,6 +20,8 @@ const RAW_ALIASES = {
   cursor: "composer",
   "deepseek-v4": "deepseek",
   "qwen-max": "qwen",
+  "qwen3.8": "qwen38", "qwen3.8-max": "qwen38", "qwen-3.8-max": "qwen38",
+  "qwen3.8-max-preview": "qwen38", "qwen38-max": "qwen38",
   xiaomi: "mimo", "mi-mo": "mimo",
   xai: "grok", "grok-build": "grok",
 };

@@ -43,7 +43,7 @@ export const MODEL_KEYS = Object.freeze(["glm", "qwen", "deepseek", "composer"])
 // Promotable builtins: present in MODEL_INFO but NOT in MODEL_KEYS (opt-in via
 // MULTIPOLY_MODELS). When listed, the registry loader merges the baked MODEL_INFO
 // base under env overrides instead of building from scratch.
-const PROMOTABLE_BUILTINS = new Set(["claude", "codex", "gemini", "kimi", "mimo", "grok", "fable"]);
+const PROMOTABLE_BUILTINS = new Set(["claude", "codex", "gemini", "kimi", "mimo", "grok", "fable", "qwen38"]);
 
 // The three transports a model can be reached over. `http` is the default
 // OpenAI-compatible streaming client; `anthropic` is the native Messages API;
@@ -164,15 +164,27 @@ export const MODEL_INFO = Object.freeze({
     reasoningVocab: "gemini",
     defaultEffort: "high",
   }),
+  // Kimi K3 on the standard Moonshot open platform (OpenAI-compatible),
+  // launched 2026-07-16: model `kimi-k3` at https://api.moonshot.ai/v1
+  // (https://api.moonshot.cn/v1 for the China platform). Keys are
+  // endpoint-specific — a Kimi Code subscription key (api.kimi.com/coding)
+  // does NOT work here; use an open-platform key (MOONSHOT_API_KEY).
+  // K3 thinking is always-on: the top-level `reasoning_effort` field replaces
+  // the K2-era `thinking` toggle and currently accepts only "max" (mapped in
+  // effortToOpenAiFields, vocab "kimi"). To keep the Kimi Code preview route
+  // instead, set MULTIPOLY_KIMI_TRANSPORT=anthropic,
+  // MULTIPOLY_KIMI_BASE_URL=https://api.kimi.com/coding,
+  // MULTIPOLY_KIMI_MODEL=kimi-k.3.0, MULTIPOLY_KIMI_REASONING=kimi_toggle.
   kimi: Object.freeze({
     key: "kimi",
     baseName: "kimi-k3",
-    transport: "anthropic",
-    defaultModel: "kimi-k.3.0",
-    defaultBaseUrl: "https://api.kimi.com/coding",
+    transport: "http",
+    defaultModel: "kimi-k3",
+    defaultBaseUrl: "https://api.moonshot.ai/v1",
     apiKeyEnv: ["MULTIPOLY_KIMI_API_KEY", "MOONSHOT_API_KEY"],
-    supportsThinking: true,
-    reasoning: CAPABILITY.KIMI_TOGGLE,
+    supportsThinking: false,
+    reasoning: CAPABILITY.OPENAI_EFFORT,
+    reasoningVocab: "kimi",
     defaultEffort: "high",
   }),
   mimo: Object.freeze({
@@ -188,6 +200,26 @@ export const MODEL_INFO = Object.freeze({
     reasoning: CAPABILITY.GLM_TOGGLE, // "http_thinking_toggle"
     defaultEffort: "high",
     usesMaxCompletionTokens: true,    // MiMo expects max_completion_tokens, not max_tokens
+  }),
+  // Qwen 3.8 Max — Alibaba's newest flagship, shipped 2026-07-19 as a 2.4T-param
+  // PREVIEW (model handle `qwen3.8-max-preview`). It is Token-Plan-only: neither
+  // the eu-central DashScope workspace (the always-on `qwen` builtin's home) nor
+  // the CN Beijing workspace carries any 3.8 model, so this entry pins the
+  // ap-southeast-1 Token Plan compatible-mode endpoint and its dedicated key
+  // (ALIBABA_CODE_PLAN_API_KEY). A sibling of the always-on `qwen` (3.7) builtin:
+  // same OpenAI-compatible http shape and QWEN_BUDGET reasoning (separate
+  // `reasoning_content`, `enable_thinking`/`thinking_budget`), so no transport or
+  // reasoning changes are needed. 1M-token input class; max output 131072.
+  qwen38: Object.freeze({
+    key: "qwen38",
+    baseName: "qwen3.8-max",
+    transport: "http",
+    defaultModel: "qwen3.8-max-preview",
+    defaultBaseUrl: "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+    apiKeyEnv: ["MULTIPOLY_QWEN38_API_KEY", "ALIBABA_CODE_PLAN_API_KEY"],
+    supportsThinking: false,
+    reasoning: CAPABILITY.QWEN_BUDGET,
+    defaultEffort: "high",
   }),
   // xAI Grok Build — local coding-agent CLI (cli-only; no http API exposed here).
   // Auth is the grok CLI's own OAuth (grok login), so no authTokenEnv is required;
@@ -273,7 +305,7 @@ export function loadModelRegistry(env = process.env) {
     if (RESERVED_MODEL_KEYS.has(key)) {
       throw new MultipolyError("CONFIG", `MULTIPOLY_MODELS entry ${JSON.stringify(key)} is a reserved word.`);
     }
-    // Promotable builtins (claude/codex/gemini/kimi/mimo) live in MODEL_INFO but NOT in
+    // Promotable builtins (claude/codex/gemini/kimi/mimo/grok/fable/qwen38) live in MODEL_INFO but NOT in
     // MODEL_KEYS, so they are not in `seen` yet. Allow them once; error on double-list.
     const baked = PROMOTABLE_BUILTINS.has(key) ? MODEL_INFO[key] : undefined;
     if (seen.has(key) && baked) {
@@ -341,8 +373,9 @@ export function loadModelRegistry(env = process.env) {
         }
         base.reasoning = explicitReasoning;
       // Baked capability wins over transport inference and is carried as-is even across a
-      // transport flip — an operator flipping kimi anthropic→http should also set
-      // MULTIPOLY_KIMI_REASONING. (All current baked entries declare reasoning explicitly,
+      // transport flip — an operator flipping kimi http→anthropic (the Kimi Code
+      // preview route) should also set MULTIPOLY_KIMI_REASONING=kimi_toggle.
+      // (All current baked entries declare reasoning explicitly,
       // so the transport-inference arms below are unreached for them but kept defensively.)
       } else if (baked.reasoning) {
         base.reasoning = baked.reasoning;

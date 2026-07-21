@@ -4,15 +4,55 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
-### Kimi K3 default
+### Qwen 3.8 Max support (opt-in `qwen38` builtin)
 
-- The opt-in canonical `kimi` builtin now defaults to first-party Kimi K3:
-  display `kimi-k3 (api)`, exact wire model `kimi-k.3.0`. Existing
-  `kimi_review` / `kimi_consult`, provider routing, credentials, reasoning
-  controls, and explicit `MULTIPOLY_KIMI_MODEL` overrides are unchanged.
-- New aliases `k3`, `kimi-k3`, and `kimi-k.3.0` resolve to `kimi`; legacy `k2`
-  and `moonshot` aliases remain. Set `MULTIPOLY_KIMI_MODEL=kimi-k2.6` to pin
-  the previous model.
+- **New baked builtin `qwen38`** (**Qwen 3.8 Max**, wire model
+  `qwen3.8-max-preview`) — a sibling of the always-on `qwen` (3.7) builtin, so
+  both can run side by side in the council. Same OpenAI-compatible `http` shape
+  and `qwen_budget` reasoning capability (separate `reasoning_content`,
+  `enable_thinking`/`thinking_budget`), default effort `high`. Opt in with
+  `MULTIPOLY_MODELS=...,qwen38`; tools are `qwen38_review` / `qwen38_consult`.
+- **Endpoint:** Qwen 3.8 is a Token-Plan-only preview — neither the eu-central
+  DashScope workspace (the `qwen` builtin's home) nor the CN Beijing workspace
+  carries any 3.8 model — so the entry pins the ap-southeast-1 Token Plan
+  compatible-mode endpoint
+  (`https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`).
+  1M-token input class, max output 131072.
+- **Credentials:** `MULTIPOLY_QWEN38_API_KEY`, with `ALIBABA_CODE_PLAN_API_KEY`
+  recognized as an alias so existing deployments need no rename. Override the
+  model/endpoint with `MULTIPOLY_QWEN38_MODEL` / `MULTIPOLY_QWEN38_BASE_URL`,
+  and the label with `MULTIPOLY_QWEN38_DISPLAY_NAME` (e.g. `Qwen 3.8 Max`).
+- Aliases `qwen3.8`, `qwen3.8-max`, `qwen-3.8-max`, `qwen3.8-max-preview`, and
+  `qwen38-max` resolve to `qwen38`; the plain `qwen-max` alias still targets
+  `qwen` (3.7).
+
+### Kimi K3 default, now on the standard Moonshot platform
+
+- The opt-in canonical `kimi` builtin now defaults to first-party Kimi K3
+  (display `kimi-k3 (api)`) reached the **standard** way: the OpenAI-compatible
+  Moonshot open platform at `https://api.moonshot.ai/v1` with wire model
+  `kimi-k3` (`http` transport). This replaces the Kimi Code preview route
+  (`https://api.kimi.com/coding`, Anthropic transport, model `kimi-k.3.0`).
+  Existing `kimi_review` / `kimi_consult` tool names, council selection by
+  `kimi`, and all `MULTIPOLY_KIMI_*` overrides are unchanged.
+- **Credentials:** use an open-platform key (`MOONSHOT_API_KEY` or
+  `MULTIPOLY_KIMI_API_KEY`). Keys are endpoint-specific — a Kimi Code
+  subscription key is not valid on the open platform. For the China platform
+  set `MULTIPOLY_KIMI_BASE_URL=https://api.moonshot.cn/v1`.
+- **Reasoning:** K3 thinking is always-on and replaces the K2-era `thinking`
+  toggle with a top-level `reasoning_effort` that currently accepts only
+  `"max"`. Multipoly maps every graded effort to `"max"`; `off` sends nothing
+  and does not disable thinking upstream. The capability is now
+  `openai_effort` with vocab `kimi` (token-cap field stays `max_tokens`, per
+  the platform's supported parameters).
+- **Escape hatch:** to keep the Kimi Code preview/subscription route, set
+  `MULTIPOLY_KIMI_TRANSPORT=anthropic`,
+  `MULTIPOLY_KIMI_BASE_URL=https://api.kimi.com/coding`,
+  `MULTIPOLY_KIMI_MODEL=kimi-k.3.0`, and `MULTIPOLY_KIMI_REASONING=kimi_toggle`.
+  Set `MULTIPOLY_KIMI_MODEL=kimi-k2.6` to pin the previous-generation
+  open-platform model.
+- Aliases `k3`, `kimi-k3`, and `kimi-k.3.0` resolve to `kimi`; legacy `k2`
+  and `moonshot` aliases remain.
 
 ## 0.3.0 (2026-07-08)
 

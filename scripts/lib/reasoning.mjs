@@ -42,6 +42,11 @@ export function effortToKimiThinking(e) { assertConcreteEffort(e); return { thin
 
 export function effortToOpenAiFields(e, { vocab }) {
   assertConcreteEffort(e);
+  // Kimi K3 (standard Moonshot platform): thinking is always-on — there is no
+  // disable switch — and the top-level reasoning_effort field currently accepts
+  // only "max". Every graded effort maps to "max"; "off" sends nothing (K3
+  // still reasons at max upstream — it cannot be turned off).
+  if (vocab === "kimi") return e === "off" ? {} : { reasoning_effort: "max" };
   if (e === "off") {
     if (vocab === "deepseek") return { thinking: { type: "disabled" } }; // top-level (raw fetch)
     return { reasoning_effort: "minimal" }; // gemini etc. cannot fully disable

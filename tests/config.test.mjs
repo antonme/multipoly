@@ -468,11 +468,13 @@ test("claude/codex/gemini/kimi are baked MODEL_INFO entries with capability + ba
   }
 });
 
-test("kimi baked builtin defaults to K3 while explicit model overrides still win", () => {
+test("kimi baked builtin defaults to K3 on the standard Moonshot platform, explicit overrides still win", () => {
   assert.equal(MODEL_INFO.kimi.baseName, "kimi-k3");
-  assert.equal(MODEL_INFO.kimi.defaultModel, "kimi-k.3.0");
-  assert.equal(MODEL_INFO.kimi.defaultBaseUrl, "https://api.kimi.com/coding");
-  assert.equal(MODEL_INFO.kimi.reasoning, "kimi_toggle");
+  assert.equal(MODEL_INFO.kimi.transport, "http");
+  assert.equal(MODEL_INFO.kimi.defaultModel, "kimi-k3");
+  assert.equal(MODEL_INFO.kimi.defaultBaseUrl, "https://api.moonshot.ai/v1");
+  assert.equal(MODEL_INFO.kimi.reasoning, "openai_effort");
+  assert.equal(MODEL_INFO.kimi.reasoningVocab, "kimi");
   assert.equal(MODEL_INFO.kimi.defaultEffort, "high");
 
   const baked = loadConfig({
@@ -480,7 +482,9 @@ test("kimi baked builtin defaults to K3 while explicit model overrides still win
     MULTIPOLY_MODELS: "kimi",
     MULTIPOLY_KIMI_API_KEY: "k",
   });
-  assert.equal(baked.models.kimi.model, "kimi-k.3.0");
+  assert.equal(baked.models.kimi.transport, "http");
+  assert.equal(baked.models.kimi.model, "kimi-k3");
+  assert.equal(baked.models.kimi.baseUrl, "https://api.moonshot.ai/v1");
   assert.equal(baked.models.kimi.displayName, "kimi-k3 (api)");
 
   const pinned = loadConfig({
@@ -490,6 +494,62 @@ test("kimi baked builtin defaults to K3 while explicit model overrides still win
     MULTIPOLY_KIMI_MODEL: "kimi-k2.6",
   });
   assert.equal(pinned.models.kimi.model, "kimi-k2.6");
+
+  // Escape hatch: keep the Kimi Code preview route via explicit env overrides.
+  const preview = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "kimi",
+    MULTIPOLY_KIMI_API_KEY: "k",
+    MULTIPOLY_KIMI_TRANSPORT: "anthropic",
+    MULTIPOLY_KIMI_BASE_URL: "https://api.kimi.com/coding",
+    MULTIPOLY_KIMI_MODEL: "kimi-k.3.0",
+    MULTIPOLY_KIMI_REASONING: "kimi_toggle",
+  });
+  assert.equal(preview.models.kimi.transport, "anthropic");
+  assert.equal(preview.models.kimi.model, "kimi-k.3.0");
+  assert.equal(preview.models.kimi.baseUrl, "https://api.kimi.com/coding");
+  assert.equal(preview.models.kimi.reasoning, "kimi_toggle");
+});
+
+test("qwen38 baked builtin defaults to the 3.8 preview on the Token Plan endpoint, explicit overrides still win", () => {
+  assert.equal(MODEL_INFO.qwen38.baseName, "qwen3.8-max");
+  assert.equal(MODEL_INFO.qwen38.transport, "http");
+  assert.equal(MODEL_INFO.qwen38.defaultModel, "qwen3.8-max-preview");
+  assert.equal(MODEL_INFO.qwen38.defaultBaseUrl, "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1");
+  assert.equal(MODEL_INFO.qwen38.reasoning, "qwen_budget");
+  assert.equal(MODEL_INFO.qwen38.defaultEffort, "high");
+  // Recognizes the dedicated key plus the librenew ALIBABA_CODE_PLAN_API_KEY alias.
+  assert.deepEqual([...MODEL_INFO.qwen38.apiKeyEnv], ["MULTIPOLY_QWEN38_API_KEY", "ALIBABA_CODE_PLAN_API_KEY"]);
+
+  const baked = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "qwen38",
+    MULTIPOLY_QWEN38_API_KEY: "k",
+  });
+  assert.equal(baked.models.qwen38.transport, "http");
+  assert.equal(baked.models.qwen38.configured, true);
+  assert.equal(baked.models.qwen38.model, "qwen3.8-max-preview");
+  assert.equal(baked.models.qwen38.baseUrl, "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1");
+  assert.equal(baked.models.qwen38.reasoning, "qwen_budget");
+
+  // The ALIBABA_CODE_PLAN_API_KEY alias alone configures the model.
+  const aliased = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "qwen38",
+    ALIBABA_CODE_PLAN_API_KEY: "plan-key",
+  });
+  assert.equal(aliased.models.qwen38.configured, true);
+
+  // Explicit overrides still win.
+  const pinned = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "qwen38",
+    MULTIPOLY_QWEN38_API_KEY: "k",
+    MULTIPOLY_QWEN38_MODEL: "qwen3.8-max",
+    MULTIPOLY_QWEN38_DISPLAY_NAME: "Qwen 3.8 Max",
+  });
+  assert.equal(pinned.models.qwen38.model, "qwen3.8-max");
+  assert.equal(pinned.models.qwen38.displayName, "Qwen 3.8 Max");
 });
 
 test("OPUS_INFO is no longer exported (folded into claude)", async () => {
@@ -788,7 +848,7 @@ test("config: always-on builtins surface convention-form display names", () => {
 
 // ── D2 Task 1: Generalize max_tokens floor to all reasoning capabilities ──
 
-test("D2: kimi (KIMI_TOGGLE) with no explicit cap gets 32768/8192 floor", () => {
+test("D2: kimi (openai_effort) with no explicit cap gets 32768/8192 floor", () => {
   const config = loadConfig({
     MULTIPOLY_GLM_API_KEY: "glm-key",
     MULTIPOLY_MODELS: "kimi",

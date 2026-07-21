@@ -51,6 +51,12 @@ test("openai fields: deepseek high/max, gemini none..high, off varies", () => {
   assert.equal(effortToOpenAiFields("xhigh", { vocab: "gemini" }).reasoning_effort, "high");
   assert.equal(effortToOpenAiFields("off", { vocab: "gemini" }).reasoning_effort, "minimal"); // Gemini-3 can't fully disable (spec §2)
 });
+test("openai fields: kimi vocab — always-on K3, max only, off sends nothing", () => {
+  assert.equal(effortToOpenAiFields("low", { vocab: "kimi" }).reasoning_effort, "max");
+  assert.equal(effortToOpenAiFields("high", { vocab: "kimi" }).reasoning_effort, "max");
+  assert.equal(effortToOpenAiFields("xhigh", { vocab: "kimi" }).reasoning_effort, "max");
+  assert.deepEqual(effortToOpenAiFields("off", { vocab: "kimi" }), {}); // K3 thinking cannot be disabled upstream
+});
 test("qwen fields: enable_thinking always true (thinking-only), budget scales", () => {
   const off = effortToQwenFields("off", { maxTokens: 20000 });
   assert.equal(off.enable_thinking, true);
