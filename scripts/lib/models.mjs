@@ -133,7 +133,7 @@ export const MODEL_INFO = Object.freeze({
     baseName: "opus",                // display base; full name computed by transport
     transport: "cli",
     cliKind: "claude",
-    defaultModel: "claude-opus-4-7",
+    defaultModel: "claude-opus-5",
     defaultBaseUrl: null,            // anthropic transport falls back to ANTHROPIC_DEFAULT_BASE_URL in config
     apiKeyEnv: ["MULTIPOLY_CLAUDE_API_KEY", "ANTHROPIC_API_KEY"],
     supportsThinking: true,
@@ -142,21 +142,23 @@ export const MODEL_INFO = Object.freeze({
   }),
   codex: Object.freeze({
     key: "codex",
-    baseName: "gpt5.5",
+    baseName: "gpt5.6-sol",
     transport: "cli",
     cliKind: "codex",
-    defaultModel: "gpt-5.5",
+    // GPT-5.6 family: Sol (flagship, default), Terra (balanced), Luna (cheap/fast).
+    // Pin another tier with MULTIPOLY_CODEX_MODEL=gpt-5.6-terra|gpt-5.6-luna.
+    defaultModel: "gpt-5.6-sol",
     defaultBaseUrl: null,
     apiKeyEnv: ["MULTIPOLY_CODEX_API_KEY", "OPENAI_API_KEY"],
     supportsThinking: false,
     reasoning: CAPABILITY.OPENAI_EFFORT, // api flavor maps to openai_effort; cli flavor uses -c model_reasoning_effort
-    defaultEffort: "xhigh",
+    defaultEffort: "high",
   }),
   gemini: Object.freeze({
     key: "gemini",
-    baseName: "gemini-3.5-flash",
+    baseName: "gemini-3.6-flash",
     transport: "http",
-    defaultModel: "gemini-3.5-flash",
+    defaultModel: "gemini-3.6-flash",
     defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
     apiKeyEnv: ["MULTIPOLY_GEMINI_API_KEY", "GEMINI_API_KEY"],
     supportsThinking: false,

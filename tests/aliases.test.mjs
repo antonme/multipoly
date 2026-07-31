@@ -12,9 +12,18 @@ test("exact configured key resolves to itself", () => {
 
 test("alias maps to canonical key when configured", () => {
   assert.equal(resolveModelAlias("gpt", KEYS), "codex");
-  assert.equal(resolveModelAlias("gpt5.5", KEYS), "codex"); // punctuation stripped
+  assert.equal(resolveModelAlias("gpt5.6", KEYS), "codex");
+  assert.equal(resolveModelAlias("gpt5.6-sol", KEYS), "codex");
+  assert.equal(resolveModelAlias("gpt5.6-terra", KEYS), "codex");
+  assert.equal(resolveModelAlias("gpt5.6-luna", KEYS), "codex");
   assert.equal(resolveModelAlias("opus", KEYS), "claude");
+  assert.equal(resolveModelAlias("opus-5", KEYS), "claude");
+  assert.equal(resolveModelAlias("claude-opus-5", KEYS), "claude");
+  assert.equal(resolveModelAlias("opus-4.7", KEYS), "claude"); // legacy
   assert.equal(resolveModelAlias("flash", KEYS), "gemini");
+  assert.equal(resolveModelAlias("gemini-3.6", KEYS), "gemini");
+  assert.equal(resolveModelAlias("gemini-3.6-flash", KEYS), "gemini");
+  assert.equal(resolveModelAlias("gemini-3.5", KEYS), "gemini"); // legacy
 });
 
 test("grok aliases resolve to grok when configured", () => {

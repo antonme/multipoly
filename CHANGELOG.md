@@ -4,6 +4,23 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Model defaults: Opus 5, GPT-5.6 Sol, Gemini 3.6 Flash
+
+- **`claude`** → **Claude Opus 5** (wire `claude-opus-5`, was `claude-opus-4-7`).
+  Display stays versionless `opus (claude cli)` / `opus (api)`; tools
+  `claude_*` / `opus_*`. Aliases: `opus-5`, `claude-opus-5` (plus legacy
+  `opus-4.7`). Override with `MULTIPOLY_CLAUDE_MODEL`.
+- **`codex`** → **GPT-5.6 Sol** at effort **`high`** (wire `gpt-5.6-sol`, was
+  `gpt-5.5` / effort `xhigh`). Display `gpt5.6-sol (codex cli)`. Alias tools
+  renamed **`gpt56_*`** (replacing `gpt55_*`); GPT-5.5 name aliases are gone.
+  Other GPT-5.6 tiers: `MULTIPOLY_CODEX_MODEL=gpt-5.6-terra` or
+  `gpt-5.6-luna`. Name aliases `gpt5.6`, `gpt5.6-sol`, `gpt5.6-terra`,
+  `gpt5.6-luna` resolve to the `codex` key.
+- **`gemini`** → **Gemini 3.6 Flash** (wire `gemini-3.6-flash`, was
+  `gemini-3.5-flash`). Display `gemini-3.6-flash (api)`. Aliases:
+  `gemini-3.6`, `gemini-3.6-flash` (plus legacy `gemini-3.5`). Override with
+  `MULTIPOLY_GEMINI_MODEL`.
+
 ### Qwen 3.8 Max support (opt-in `qwen38` builtin)
 
 - **New baked builtin `qwen38`** (**Qwen 3.8 Max**, wire model

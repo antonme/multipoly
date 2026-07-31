@@ -18,6 +18,6 @@ test("transportSuffix maps api transports to 'api'", () => {
 test("computeDisplayName follows '<base> (<suffix>)'", () => {
   assert.equal(computeDisplayName("opus", "cli", "claude"), "opus (claude cli)");
   assert.equal(computeDisplayName("opus", "anthropic"), "opus (api)");
-  assert.equal(computeDisplayName("gpt5.5", "cli", "codex"), "gpt5.5 (codex cli)");
-  assert.equal(computeDisplayName("gpt5.5", "http"), "gpt5.5 (api)");
+  assert.equal(computeDisplayName("gpt5.6-sol", "cli", "codex"), "gpt5.6-sol (codex cli)");
+  assert.equal(computeDisplayName("gpt5.6-sol", "http"), "gpt5.6-sol (api)");
 });

@@ -360,7 +360,7 @@ const COUNCIL_EXTRA_KEYS = new Set(["models", "synthesizer", "include_individual
 // so the array is not re-allocated on every buildToolDefs call.
 const ALIAS_TOOLS = [
   { alias: "opus", canonical: "claude" },
-  { alias: "gpt55", canonical: "codex" },
+  { alias: "gpt56", canonical: "codex" },
 ];
 
 /**

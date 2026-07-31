@@ -9,7 +9,7 @@ Multipoly exposes multiple coding models through one MCP server. It supports dir
 | `<model>_review` (`glm`, `qwen`, `deepseek`, `composer`, `claude`, `codex`, …) | Structured code review from one model |
 | `<model>_consult` | Design/implementation consultation from one model |
 | `opus_review`, `opus_consult` | Alias tools routed to `claude` (registered when `claude` is configured) |
-| `gpt55_review`, `gpt55_consult` | Alias tools routed to `codex` (registered when `codex` is configured) |
+| `gpt56_review`, `gpt56_consult` | Alias tools routed to `codex` (registered when `codex` is configured) |
 | `council_review`, `council_consult` | Parallel member calls; harness-side synthesis by default, or server-side with a configured synthesizer |
 
 Tools are generated per configured model — builtins, baked models opted-in via `MULTIPOLY_MODELS` (see below), CLI agents, and any custom/registry-file models all expose `<key>_review` / `<key>_consult`. See [Transports](#transports).
@@ -155,8 +155,8 @@ Compatibility aliases are accepted for API keys: GLM also accepts `GLM_API_KEY` 
 | Key | Default transport | Baked display name | Env override |
 |---|---|---|---|
 | `claude` | `cli` (flips to `anthropic` when an Anthropic key is present; see [claude transport-flip rule](#model-names--aliases)) | `opus (claude cli)` / `opus (api)` | `MULTIPOLY_CLAUDE_API_KEY`, `ANTHROPIC_API_KEY` |
-| `codex` | `cli` | `gpt5.5 (codex cli)` | `MULTIPOLY_CODEX_API_KEY`, `OPENAI_API_KEY` |
-| `gemini` | `http` | `gemini-3.5-flash (api)` | `MULTIPOLY_GEMINI_API_KEY`, `GEMINI_API_KEY` |
+| `codex` | `cli` | `gpt5.6-sol (codex cli)` | `MULTIPOLY_CODEX_API_KEY`, `OPENAI_API_KEY` |
+| `gemini` | `http` | `gemini-3.6-flash (api)` | `MULTIPOLY_GEMINI_API_KEY`, `GEMINI_API_KEY` |
 | `kimi` | `http` | `kimi-k3 (api)` | `MULTIPOLY_KIMI_API_KEY`, `MOONSHOT_API_KEY` |
 | `mimo` | `http` | `mimo-v2.5-pro (api)` | `MULTIPOLY_MIMO_API_KEY`, `XIAOMIMIMO_API_KEY` |
 | `grok` | `cli` | `grok-build (grok cli)` | `MULTIPOLY_GROK_API_KEY`, `XAI_API_KEY` |
@@ -164,6 +164,18 @@ Compatibility aliases are accepted for API keys: GLM also accepts `GLM_API_KEY` 
 | `qwen38` | `http` | `qwen3.8-max (api)` | `MULTIPOLY_QWEN38_API_KEY`, `ALIBABA_CODE_PLAN_API_KEY` |
 
 All env overrides from the custom-model table apply (`MULTIPOLY_<K>_TRANSPORT`, `_MODEL`, `_DISPLAY_NAME`, etc.). You no longer need to supply `MULTIPOLY_CLAUDE_DISPLAY_NAME` or `MULTIPOLY_CLAUDE_REASONING` — they are baked; env still overrides.
+
+`claude` defaults to **Claude Opus 5** (wire model `claude-opus-5`; display stays versionless `opus (…)`). Override with `MULTIPOLY_CLAUDE_MODEL` if needed.
+
+`codex` defaults to **GPT-5.6 Sol** at effort `high` (wire model `gpt-5.6-sol`, display `gpt5.6-sol (codex cli)`). The GPT-5.6 family also offers **Terra** (balanced) and **Luna** (cheap/fast) — pin another tier with `MULTIPOLY_CODEX_MODEL`:
+
+```sh
+MULTIPOLY_CODEX_MODEL=gpt-5.6-terra   # or gpt-5.6-luna
+```
+
+Alias names `gpt5.6-sol` / `gpt5.6-terra` / `gpt5.6-luna` all resolve to the `codex` key for council selection; the wire model is still whatever `MULTIPOLY_CODEX_MODEL` (or the Sol default) sets. Tools are `codex_*` and `gpt56_*`.
+
+`gemini` defaults to **Gemini 3.6 Flash** (wire model `gemini-3.6-flash`). Override with `MULTIPOLY_GEMINI_MODEL` (e.g. `gemini-3.5-flash` if you want the previous generation).
 
 `kimi` defaults to **Kimi K3** on the **standard Moonshot open platform** —
 the OpenAI-compatible `https://api.moonshot.ai/v1` endpoint with model ID
@@ -262,7 +274,7 @@ Every model that supports graded reasoning exposes a `reasoning_effort` argument
 | `qwen38` | `high` | `enable_thinking` + `thinking_budget` (same class as `qwen`) |
 | `deepseek` | `high` | `reasoning_effort` (`high`/`max`) |
 | `claude` | `xhigh` | `output_config.effort` + `thinking: {type: "adaptive"}` |
-| `codex` | `xhigh` | `reasoning_effort` (OpenAI effort) |
+| `codex` | `high` | `reasoning_effort` (OpenAI effort; Sol default) |
 | `gemini` | `high` | `reasoning_effort` (OpenAI effort) |
 | `kimi` | `high` | `reasoning_effort` (`"max"` only today; thinking is always-on — `off` sends nothing and does not disable it) |
 | `mimo` | `high` | `thinking: {type: "enabled"\|"disabled"}` toggle (same class as GLM; no graded effort) |
@@ -296,7 +308,7 @@ contract — review, consult, and council work the same regardless of transport.
 
 ### Anthropic (`claude` + custom)
 
-To use Claude Opus 4.7 over the Anthropic API, add `claude` to `MULTIPOLY_MODELS` and set `ANTHROPIC_API_KEY` (or `MULTIPOLY_CLAUDE_API_KEY`). The `claude` transport-flip rule automatically selects the `anthropic` transport when an Anthropic key is present and `MULTIPOLY_CLAUDE_TRANSPORT` is unset. Override the endpoint with `ANTHROPIC_BASE_URL`. Review JSON uses Anthropic's native structured outputs; if the endpoint rejects the schema, it transparently falls back to prompt-instructed JSON. Anthropic requires `max_tokens`; when no model-specific cap is set it defaults to 16384 — raise `MULTIPOLY_CLAUDE_MAX_TOKENS_REVIEW` (or the server-wide cap) for large reviews.
+To use Claude Opus 5 over the Anthropic API, add `claude` to `MULTIPOLY_MODELS` and set `ANTHROPIC_API_KEY` (or `MULTIPOLY_CLAUDE_API_KEY`). The `claude` transport-flip rule automatically selects the `anthropic` transport when an Anthropic key is present and `MULTIPOLY_CLAUDE_TRANSPORT` is unset. Override the endpoint with `ANTHROPIC_BASE_URL`. Review JSON uses Anthropic's native structured outputs; if the endpoint rejects the schema, it transparently falls back to prompt-instructed JSON. Anthropic requires `max_tokens`; when no model-specific cap is set it defaults to 16384 — raise `MULTIPOLY_CLAUDE_MAX_TOKENS_REVIEW` (or the server-wide cap) for large reviews.
 
 Claude uses Anthropic's `output_config.effort` + `thinking: {type: "adaptive"}` mechanism (no `budget_tokens`). Effort defaults to `xhigh`; override per-call or via `MULTIPOLY_CLAUDE_REASONING_EFFORT`. Review mode attempts to send the JSON schema alongside the effort in `output_config`; if the endpoint rejects the format field, it falls back to prompt-instructed JSON while keeping the effort setting. If reasoning is set to `off`, the thinking field is omitted entirely.
 
@@ -312,7 +324,7 @@ MULTIPOLY_HAIKU_MODEL=claude-haiku-4-5
 > **Non-Claude Anthropic-compatible models (e.g. Kimi):** The default reasoning
 > capability for an `anthropic`-transport custom model is `ANTHROPIC_EFFORT` —
 > the `output_config.effort` + `thinking: {type: "adaptive"}` shape used by
-> Claude Opus 4.7. Models that do **not** speak that protocol (Kimi uses a bare
+> Claude Opus 5. Models that do **not** speak that protocol (Kimi uses a bare
 > `thinking: {type: "enabled"|"disabled"}` toggle instead) must declare their
 > capability explicitly:
 >
@@ -399,7 +411,7 @@ MULTIPOLY_MODELS=cdx
 MULTIPOLY_CDX_TRANSPORT=cli
 MULTIPOLY_CDX_CLI_KIND=codex
 MULTIPOLY_CDX_ENABLED=1
-MULTIPOLY_CDX_MODEL=gpt-5.5
+MULTIPOLY_CDX_MODEL=gpt-5.6-sol
 ```
 
 ### JSON registry file
@@ -413,7 +425,7 @@ there is no `argv` field (argv is built from the controlled `cliKind` recipe).
 ```jsonc
 {
   "models": {
-    "myopus": { "transport": "anthropic", "model": "claude-opus-4-7", "apiKeyEnv": "ANTHROPIC_API_KEY" },
+    "myopus": { "transport": "anthropic", "model": "claude-opus-5", "apiKeyEnv": "ANTHROPIC_API_KEY" },
     "mygem":  { "transport": "cli", "cliKind": "gemini", "model": "gemini-3-pro",
                 "authTokenEnv": "GEMINI_API_KEY", "cwd": "temp", "enabled": true }
   }
@@ -431,8 +443,8 @@ Allowed entry fields: `transport`, `displayName`, `model`, `baseUrl`,
 
 Every registered model surfaces a human-readable display name in the form `<base> (<transport>)`:
 
-- CLI models: `<base> (<kind> cli)` — e.g. `opus (claude cli)`, `gpt5.5 (codex cli)`, `composer-2.5 (cursor cli)`
-- API models (http or anthropic transport): `<base> (api)` — e.g. `opus (api)`, `gemini-3.5-flash (api)`, `glm-5.2 (api)`
+- CLI models: `<base> (<kind> cli)` — e.g. `opus (claude cli)`, `gpt5.6-sol (codex cli)`, `composer-2.5 (cursor cli)`
+- API models (http or anthropic transport): `<base> (api)` — e.g. `opus (api)`, `gemini-3.6-flash (api)`, `glm-5.2 (api)`
 
 The display name is shown in descriptions and logs. Override it per-model with `MULTIPOLY_<K>_DISPLAY_NAME`.
 
@@ -442,9 +454,9 @@ Lenient name resolution applies wherever a model name is accepted as input: the 
 
 | Alias(es) | Resolves to |
 |---|---|
-| `gpt`, `gpt5`, `gpt5.5`, `openai` | `codex` |
-| `opus`, `claude-opus`, `opus-4.7` | `claude` |
-| `flash`, `gemini-flash`, `gemini-3.5` | `gemini` |
+| `gpt`, `gpt5`, `gpt5.6`, `gpt5.6-sol`, `gpt5.6-terra`, `gpt5.6-luna`, `openai` | `codex` |
+| `opus`, `claude-opus`, `opus-5`, `claude-opus-5`, `opus-4.7` | `claude` |
+| `flash`, `gemini-flash`, `gemini-3.6`, `gemini-3.6-flash`, `gemini-3.5` | `gemini` |
 | `zhipu`, `glm5.1` | `glm` |
 | `k3`, `kimi-k3`, `kimi-k.3.0`, `k2`, `moonshot` | `kimi` |
 | `cursor` | `composer` |
@@ -459,9 +471,9 @@ Aliases resolve only when the **canonical key is configured**. For example, `opu
 Aliases select that configured key; they do not override a pinned upstream
 model such as `MULTIPOLY_KIMI_MODEL=kimi-k2.6`.
 
-### Alias tools (`opus_*`, `gpt55_*`)
+### Alias tools (`opus_*`, `gpt56_*`)
 
-When `claude` is configured, `opus_review` and `opus_consult` tools are registered as curated aliases that route to the `claude` handler with the same schema. When `codex` is configured, `gpt55_review` and `gpt55_consult` are similarly registered. These tools exist so existing slash commands and harness prompts that reference `opus_*` or `gpt55_*` by name continue to work without changes.
+When `claude` is configured, `opus_review` and `opus_consult` tools are registered as curated aliases that route to the `claude` handler with the same schema. When `codex` is configured, `gpt56_review` and `gpt56_consult` are similarly registered (same schema as `codex_*`).
 
 ### Claude transport-flip rule
 
@@ -537,7 +549,7 @@ Council tools accept the same review/consult arguments plus:
 
 To merge server-side instead, set a `synthesizer`:
 
-- A model key (`glm`, `qwen`, `deepseek`, `composer`, `claude`, `codex`, or a custom key) runs that model as the synthesizer. Lenient name resolution applies: `opus` resolves to `claude`, `gpt`/`gpt5.5` to `codex`, etc. (see [Model names & aliases](#model-names--aliases)). If the named model isn't configured, resolution falls through the chain `chosen → qwen → deepseek → glm → composer → any other configured model` and uses the first configured model.
+- A model key (`glm`, `qwen`, `deepseek`, `composer`, `claude`, `codex`, or a custom key) runs that model as the synthesizer. Lenient name resolution applies: `opus` resolves to `claude`, `gpt`/`gpt5.6`/`gpt5.6-sol` to `codex`, etc. (see [Model names & aliases](#model-names--aliases)). If the named model isn't configured, resolution falls through the chain `chosen → qwen → deepseek → glm → composer → any other configured model` and uses the first configured model.
 - `harness` / `none` / `caller` forces the default defer-to-harness behavior even when `MULTIPOLY_SYNTHESIZER` names a model.
 
 The per-call `synthesizer` argument overrides the `MULTIPOLY_SYNTHESIZER` env default. When server-side synthesis runs, member outputs are re-scanned for secrets before being sent to the synthesizer provider.

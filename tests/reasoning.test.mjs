@@ -62,7 +62,7 @@ test("qwen fields: enable_thinking always true (thinking-only), budget scales", 
   assert.equal(off.enable_thinking, true);
   assert.ok(effortToQwenFields("high", { maxTokens: 20000 }).thinking_budget > off.thinking_budget);
 });
-test("anthropic effort (Opus 4.7)", () => {
+test("anthropic effort (Opus 5)", () => {
   assert.equal(effortToAnthropicEffort("off"), null);
   assert.deepEqual(effortToAnthropicEffort("xhigh"), { thinking: { type: "adaptive" }, output_config: { effort: "xhigh" } });
 });

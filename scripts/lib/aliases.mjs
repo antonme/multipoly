@@ -11,10 +11,13 @@ function norm(raw) {
 // Seed alias table (extensible). Keys are NORMALIZED alias forms; values are
 // canonical model keys. Must never target a synthesizer sentinel.
 const RAW_ALIASES = {
-  gpt: "codex", gpt5: "codex", "gpt5.5": "codex", openai: "codex",
-  opus: "claude", "claude-opus": "claude", "opus-4.7": "claude",
+  gpt: "codex", gpt5: "codex", "gpt5.6": "codex", openai: "codex",
+  "gpt5.6-sol": "codex", "gpt5.6-terra": "codex", "gpt5.6-luna": "codex",
+  opus: "claude", "claude-opus": "claude", "opus-5": "claude", "claude-opus-5": "claude",
+  "opus-4.7": "claude", // legacy alias; default wire model is now claude-opus-5
   "fable-5": "fable", "claude-fable": "fable", "claude-fable-5": "fable",
-  flash: "gemini", "gemini-flash": "gemini", "gemini-3.5": "gemini",
+  flash: "gemini", "gemini-flash": "gemini", "gemini-3.6": "gemini", "gemini-3.6-flash": "gemini",
+  "gemini-3.5": "gemini", // legacy; default wire model is now gemini-3.6-flash
   zhipu: "glm", "glm5.1": "glm",
   k2: "kimi", k3: "kimi", "kimi-k3": "kimi", "kimi-k.3.0": "kimi", moonshot: "kimi",
   cursor: "composer",

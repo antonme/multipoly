@@ -466,7 +466,7 @@ function anthropicTransportConfig(overrides = {}) {
         displayName: "Claude",
         transport: "anthropic",
         configured: true,
-        model: "claude-opus-4-7",
+        model: "claude-opus-5",
         baseUrl: "https://api.anthropic.test",
         apiKey: "sk-ant-test",
         anthropicVersion: "2023-06-01",

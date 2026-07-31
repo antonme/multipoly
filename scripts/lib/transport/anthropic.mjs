@@ -16,9 +16,9 @@ import {
 const DEFAULT_MAX_TOKENS = 16384;
 
 // Sampling parameters that Anthropic/Kimi lock when thinking is active.
-// Opus 4.7 returns 400 on non-default temperature/top_p/top_k when adaptive
-// thinking is on; Kimi K2.6 also locks temperature. Strip them defensively
-// for any anthropic-family capability whenever effort is not "off".
+// Opus-class models return 400 on non-default temperature/top_p/top_k when
+// adaptive thinking is on; Kimi K2.6 also locks temperature. Strip them
+// defensively for any anthropic-family capability whenever effort is not "off".
 const LOCKED_SAMPLING_PARAMS = Object.freeze(["temperature", "top_p", "top_k"]);
 
 /**
@@ -33,12 +33,11 @@ const LOCKED_SAMPLING_PARAMS = Object.freeze(["temperature", "top_p", "top_k"]);
  * it and set fellBackFromJsonSchema=true, leaving the caller's prompt-JSON
  * validate/reprompt loop as the safety net.
  *
- * WIRE-FORMAT NOTE (unverified against a live endpoint). The exact request
- * shapes used here — `output_config.format = { type:"json_schema", schema }`
- * and `thinking = { type:"enabled", budget_tokens }` — target a future Anthropic
- * model (claude-opus-4-7) and have NOT been exercised against the live API in
- * this codebase. They are best-effort and should be re-verified when a real
- * endpoint is available. The two fields degrade differently on rejection:
+ * WIRE-FORMAT NOTE. The request shapes used here —
+ * `output_config.format = { type:"json_schema", schema }` and adaptive
+ * thinking via `output_config.effort` — target current Anthropic Opus-class
+ * models (default wire model: claude-opus-5). The two fields degrade
+ * differently on rejection:
  *   - output_config: a rejection is detected (isStructuredOutputUnsupported) and
  *     transparently retried without it (prompt-JSON), so a wrong shape self-heals.
  *   - thinking: there is NO auto-fallback — if the endpoint rejects the thinking

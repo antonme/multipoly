@@ -117,7 +117,7 @@ test("runModel[D2]: cli transport accepts maxTokensOverride without error (ignor
         transport: "cli",
         cliKind: "claude",
         binary: "claude",
-        model: "claude-opus-4-7",
+        model: "claude-opus-5",
         authTokenEnv: "ANTHROPIC_API_KEY",
       },
     },

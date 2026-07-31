@@ -88,40 +88,40 @@ test("alias tool schema matches its canonical tool's schema", () => {
   assert.deepEqual(tools["opus_review"].inputSchema, tools["claude_review"].inputSchema);
 });
 
-test("opus_*/gpt55_* alias handlers are the SAME function as their canonical handlers", () => {
+test("opus_*/gpt56_* alias handlers are the SAME function as their canonical handlers", () => {
   const reg = {
     keys: ["claude", "codex"],
     info: {
       claude: { key: "claude", displayName: "opus (claude cli)", reasoning: "anthropic_effort" },
-      codex: { key: "codex", displayName: "gpt5.5 (codex cli)", reasoning: "openai_effort" },
+      codex: { key: "codex", displayName: "gpt5.6-sol (codex cli)", reasoning: "openai_effort" },
     },
   };
   const surf = buildServerSurface(reg);
   assert.strictEqual(surf.handlers["opus_review"], surf.handlers["claude_review"]);
   assert.strictEqual(surf.handlers["opus_consult"], surf.handlers["claude_consult"]);
-  assert.strictEqual(surf.handlers["gpt55_review"], surf.handlers["codex_review"]);
-  assert.strictEqual(surf.handlers["gpt55_consult"], surf.handlers["codex_consult"]);
+  assert.strictEqual(surf.handlers["gpt56_review"], surf.handlers["codex_review"]);
+  assert.strictEqual(surf.handlers["gpt56_consult"], surf.handlers["codex_consult"]);
 });
 
-test("gpt55_* alias tools appear only when codex is registered, schema matches codex schema", () => {
+test("gpt56_* alias tools appear only when codex is registered, schema matches codex schema", () => {
   const registryWithCodex = {
     keys: ["glm", "codex"],
     info: {
       glm: { key: "glm", displayName: "glm-5.2 (api)", reasoning: "http_thinking_toggle" },
-      codex: { key: "codex", displayName: "gpt5.5 (codex cli)", reasoning: "openai_effort" },
+      codex: { key: "codex", displayName: "gpt5.6-sol (codex cli)", reasoning: "openai_effort" },
     },
   };
   const tools = buildTools(registryWithCodex).map((t) => t.name);
-  assert.ok(tools.includes("gpt55_review"));
-  assert.ok(tools.includes("gpt55_consult"));
+  assert.ok(tools.includes("gpt56_review"));
+  assert.ok(tools.includes("gpt56_consult"));
 
   const noCodex = { keys: ["glm"], info: { glm: { key: "glm", displayName: "glm-5.2 (api)", reasoning: "http_thinking_toggle" } } };
   const tools2 = buildTools(noCodex).map((t) => t.name);
-  assert.ok(!tools2.includes("gpt55_review"));
+  assert.ok(!tools2.includes("gpt56_review"));
 
   // Schema parity: alias inputSchema deepEquals canonical inputSchema.
   const allTools = Object.fromEntries(buildTools(registryWithCodex).map((t) => [t.name, t]));
-  assert.deepEqual(allTools["gpt55_review"].inputSchema, allTools["codex_review"].inputSchema);
+  assert.deepEqual(allTools["gpt56_review"].inputSchema, allTools["codex_review"].inputSchema);
 });
 
 // ── Task D1/3b: compact key on council tools ──────────────────────────────────

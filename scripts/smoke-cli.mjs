@@ -7,9 +7,9 @@ const PROMPT = "Reply with exactly this token and nothing else: SMOKE-OK";
 
 const KINDS = [
   { kind: "claude", model: "haiku" },
-  { kind: "codex", model: "gpt-5.5" },
+  { kind: "codex", model: "gpt-5.6-sol" },
   { kind: "cursor", model: "composer-2.5", authTokenEnv: "CURSOR_API_KEY" },
-  { kind: "gemini", model: "gemini-2.5-flash" },
+  { kind: "gemini", model: "gemini-3.6-flash" },
   { kind: "kimi", model: "kimi-code/kimi-for-coding" },
   { kind: "agy", model: null, unsafe: true },
   { kind: "grok", model: "grok-build" },

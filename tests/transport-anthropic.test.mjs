@@ -36,7 +36,7 @@ function anthropicConfig(overrides = {}) {
     displayName: "Opus",
     transport: "anthropic",
     configured: true,
-    model: "claude-opus-4-7",
+    model: "claude-opus-5",
     baseUrl: overrides.baseUrl ?? "https://api.anthropic.com",
     apiKey: "sk-ant-test",
     apiKeyEnv: "ANTHROPIC_API_KEY",
@@ -549,7 +549,7 @@ test("anthropic Task9: ANTHROPIC_EFFORT review mode falls back and KEEPS output_
 });
 
 // ── Part A-2: Opus latent-400 regression guard ────────────────────────────────
-// ANTHROPIC_EFFORT models (Opus 4.7) must NEVER include budget_tokens in the
+// ANTHROPIC_EFFORT models (Opus 5+) must NEVER include budget_tokens in the
 // request body at any effort level. budget_tokens causes a 400 from the API.
 // This guard covers: xhigh, high, medium, low (off → no thinking at all).
 
