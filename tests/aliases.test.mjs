@@ -60,6 +60,17 @@ test("qwen38 aliases resolve to qwen38 only when qwen38 is configured (and never
   assert.equal(resolveModelAlias("qwen-max", keys), "qwen");
 });
 
+test("deepseekflash aliases resolve to deepseekflash only when configured (and never misroute to deepseek)", () => {
+  const keys = [...KEYS, "deepseekflash"];
+  for (const alias of ["deepseek-v4-flash", "deepseek-flash", "deepseek-v4-flash-0731", "deepseek-flash-0731"]) {
+    assert.equal(resolveModelAlias(alias, keys), "deepseekflash");
+    // Unconfigured deepseekflash → no resolution, and must NOT fall through to deepseek.
+    assert.equal(resolveModelAlias(alias, KEYS), null);
+  }
+  // The plain v4 alias still targets deepseek (V4 Pro), not deepseekflash.
+  assert.equal(resolveModelAlias("deepseek-v4", keys), "deepseek");
+});
+
 test("Kimi K3 aliases resolve to kimi only when kimi is configured", () => {
   for (const alias of ["k3", "kimi-k3", "kimi-k.3.0"]) {
     assert.equal(resolveModelAlias(alias, KEYS), "kimi");

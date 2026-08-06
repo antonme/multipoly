@@ -43,6 +43,30 @@ All notable changes to this project are documented here.
   `qwen38-max` resolve to `qwen38`; the plain `qwen-max` alias still targets
   `qwen` (3.7).
 
+### DeepSeek V4 Flash support (opt-in `deepseekflash` builtin)
+
+- **New baked builtin `deepseekflash`** (**DeepSeek V4 Flash**, wire model
+  `deepseek-v4-flash`) — the fast/cheap sibling of the always-on `deepseek`
+  (V4 Pro) builtin, so both can run side by side in the council. Same
+  OpenAI-compatible `http` shape at the official endpoint
+  (`https://api.deepseek.com`) and the same `deepseek` reasoning vocab
+  (top-level `reasoning_effort` `high`/`max`; `off` sends
+  `thinking:{type:"disabled"}`), default effort `high`. Opt in with
+  `MULTIPOLY_MODELS=...,deepseekflash`; tools are `deepseekflash_review` /
+  `deepseekflash_consult`.
+- **Credentials:** `MULTIPOLY_DEEPSEEKFLASH_API_KEY`, or the existing
+  `MULTIPOLY_DEEPSEEK_API_KEY` / `DEEPSEEK_API_KEY` shared with the `deepseek`
+  builtin — no new key or base URL needed for deployments that already run
+  deepseek. Override the model/endpoint with `MULTIPOLY_DEEPSEEKFLASH_MODEL` /
+  `MULTIPOLY_DEEPSEEKFLASH_BASE_URL`.
+- **Naming:** DeepSeek updates the `deepseek-v4-flash` handle in place — since
+  2026-07-31 it serves DeepSeek-V4-Flash-0731, and the callable model id stays
+  `deepseek-v4-flash` (the "0731" is a release stamp, not part of the id).
+  1M-token context, 384K max output.
+- Aliases `deepseek-v4-flash`, `deepseek-flash`, `deepseek-v4-flash-0731`, and
+  `deepseek-flash-0731` resolve to `deepseekflash`; the plain `deepseek-v4`
+  alias still targets `deepseek` (V4 Pro).
+
 ### Kimi K3 default, now on the standard Moonshot platform
 
 - The opt-in canonical `kimi` builtin now defaults to first-party Kimi K3

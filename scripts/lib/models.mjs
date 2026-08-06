@@ -43,7 +43,7 @@ export const MODEL_KEYS = Object.freeze(["glm", "qwen", "deepseek", "composer"])
 // Promotable builtins: present in MODEL_INFO but NOT in MODEL_KEYS (opt-in via
 // MULTIPOLY_MODELS). When listed, the registry loader merges the baked MODEL_INFO
 // base under env overrides instead of building from scratch.
-const PROMOTABLE_BUILTINS = new Set(["claude", "codex", "gemini", "kimi", "mimo", "grok", "fable", "qwen38"]);
+const PROMOTABLE_BUILTINS = new Set(["claude", "codex", "gemini", "kimi", "mimo", "grok", "fable", "qwen38", "deepseekflash"]);
 
 // The three transports a model can be reached over. `http` is the default
 // OpenAI-compatible streaming client; `anthropic` is the native Messages API;
@@ -223,6 +223,31 @@ export const MODEL_INFO = Object.freeze({
     reasoning: CAPABILITY.QWEN_BUDGET,
     defaultEffort: "high",
   }),
+  // DeepSeek V4 Flash — the fast/cheap sibling of the always-on `deepseek`
+  // (V4 Pro) builtin: same OpenAI-compatible `http` shape at the official
+  // https://api.deepseek.com endpoint and the same `deepseek` reasoning vocab
+  // (top-level `reasoning_effort` high/max; `off` → `thinking:{type:"disabled"}`),
+  // so no transport or reasoning changes are needed and both can run side by
+  // side in the council. DeepSeek updates this handle in place — since
+  // 2026-07-31 it serves DeepSeek-V4-Flash-0731, and the callable model id
+  // stays `deepseek-v4-flash` (the "0731" is a release stamp, not part of the
+  // id). 1M-token context, 384K max output. Credentials are the standard
+  // DeepSeek keys: `MULTIPOLY_DEEPSEEKFLASH_API_KEY` or the existing
+  // `MULTIPOLY_DEEPSEEK_API_KEY` / `DEEPSEEK_API_KEY` shared with the `deepseek`
+  // builtin — a configured deepseek deployment enables flash by just adding
+  // `deepseekflash` to MULTIPOLY_MODELS.
+  deepseekflash: Object.freeze({
+    key: "deepseekflash",
+    baseName: "deepseek-v4-flash",
+    transport: "http",
+    defaultModel: "deepseek-v4-flash",
+    defaultBaseUrl: "https://api.deepseek.com",
+    apiKeyEnv: ["MULTIPOLY_DEEPSEEKFLASH_API_KEY", "MULTIPOLY_DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY"],
+    supportsThinking: false,
+    reasoning: CAPABILITY.OPENAI_EFFORT,
+    reasoningVocab: "deepseek",
+    defaultEffort: "high",
+  }),
   // xAI Grok Build — local coding-agent CLI (cli-only; no http API exposed here).
   // Auth is the grok CLI's own OAuth (grok login), so no authTokenEnv is required;
   // apiKeyEnv is named for symmetry/future use. grok's `--effort` is graded and
@@ -307,7 +332,7 @@ export function loadModelRegistry(env = process.env) {
     if (RESERVED_MODEL_KEYS.has(key)) {
       throw new MultipolyError("CONFIG", `MULTIPOLY_MODELS entry ${JSON.stringify(key)} is a reserved word.`);
     }
-    // Promotable builtins (claude/codex/gemini/kimi/mimo/grok/fable/qwen38) live in MODEL_INFO but NOT in
+    // Promotable builtins (claude/codex/gemini/kimi/mimo/grok/fable/qwen38/deepseekflash) live in MODEL_INFO but NOT in
     // MODEL_KEYS, so they are not in `seen` yet. Allow them once; error on double-list.
     const baked = PROMOTABLE_BUILTINS.has(key) ? MODEL_INFO[key] : undefined;
     if (seen.has(key) && baked) {

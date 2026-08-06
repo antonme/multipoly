@@ -150,7 +150,7 @@ Compatibility aliases are accepted for API keys: GLM also accepts `GLM_API_KEY` 
 
 ### Baked builtins (opt-in)
 
-`claude`, `codex`, `gemini`, `kimi`, `mimo`, `grok`, `fable`, and `qwen38` are **baked builtins** — they carry pre-configured capability metadata (transport, reasoning capability, default effort, base URL) but are **not registered by default**. Add them to `MULTIPOLY_MODELS` to enable their tools:
+`claude`, `codex`, `gemini`, `kimi`, `mimo`, `grok`, `fable`, `qwen38`, and `deepseekflash` are **baked builtins** — they carry pre-configured capability metadata (transport, reasoning capability, default effort, base URL) but are **not registered by default**. Add them to `MULTIPOLY_MODELS` to enable their tools:
 
 | Key | Default transport | Baked display name | Env override |
 |---|---|---|---|
@@ -162,6 +162,7 @@ Compatibility aliases are accepted for API keys: GLM also accepts `GLM_API_KEY` 
 | `grok` | `cli` | `grok-build (grok cli)` | `MULTIPOLY_GROK_API_KEY`, `XAI_API_KEY` |
 | `fable` | `cli` (flips to `anthropic` when an Anthropic key is present; same rule as `claude`) | `fable (claude cli)` / `fable (api)` | `MULTIPOLY_FABLE_API_KEY`, `ANTHROPIC_API_KEY` |
 | `qwen38` | `http` | `qwen3.8-max (api)` | `MULTIPOLY_QWEN38_API_KEY`, `ALIBABA_CODE_PLAN_API_KEY` |
+| `deepseekflash` | `http` | `deepseek-v4-flash (api)` | `MULTIPOLY_DEEPSEEKFLASH_API_KEY`, `MULTIPOLY_DEEPSEEK_API_KEY`, `DEEPSEEK_API_KEY` |
 
 All env overrides from the custom-model table apply (`MULTIPOLY_<K>_TRANSPORT`, `_MODEL`, `_DISPLAY_NAME`, etc.). You no longer need to supply `MULTIPOLY_CLAUDE_DISPLAY_NAME` or `MULTIPOLY_CLAUDE_REASONING` — they are baked; env still overrides.
 
@@ -213,6 +214,8 @@ descriptions, and logs reflect the pinned model.
 The default model is `claude-fable-5`; override with `MULTIPOLY_FABLE_MODEL`. Fable's thinking is always-on (`{type:"disabled"}` and `budget_tokens` both 400 on the wire); multipoly never sends either — at effort `off` it omits `thinking` (adaptive runs), and at graded effort it sends `{type:"adaptive"}` + `output_config.effort`, so no Fable-specific handling is required. Two Fable behaviors are surfaced but not specially handled: a safety-classifier decline arrives as a `refusal` stop reason (surfaced as `finishReason:"refusal"`, same as `claude`), and Fable requires 30-day data retention on the org (a `400` on every request otherwise) — both are account/org concerns, not multipoly config.
 
 `qwen38` (**Qwen 3.8 Max**, model `qwen3.8-max-preview`) is a sibling of the always-on `qwen` (3.7) builtin — same OpenAI-compatible `http` shape and `qwen_budget` reasoning (separate `reasoning_content`, `enable_thinking`/`thinking_budget`), so both can run side by side in the council. Qwen 3.8 is a Token-Plan-only preview: neither the eu-central DashScope workspace (the `qwen` builtin's home) nor the CN Beijing workspace carries any 3.8 model, so this entry pins the ap-southeast-1 Token Plan compatible-mode endpoint (`https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`) and its dedicated key. `ALIBABA_CODE_PLAN_API_KEY` is recognized as an alias so existing deployments need no rename. To enable it, add `qwen38` to `MULTIPOLY_MODELS` and supply a key; set `MULTIPOLY_QWEN38_DISPLAY_NAME='Qwen 3.8 Max'` for a cleaner tool/health label. Override the model or endpoint with `MULTIPOLY_QWEN38_MODEL` / `MULTIPOLY_QWEN38_BASE_URL`.
+
+`deepseekflash` (**DeepSeek V4 Flash**, wire model `deepseek-v4-flash`) is the fast/cheap sibling of the always-on `deepseek` (V4 Pro) builtin — same OpenAI-compatible `http` shape and `deepseek` reasoning vocab (top-level `reasoning_effort` `high`/`max`; `off` sends `thinking:{type:"disabled"}`), so no transport or reasoning changes are needed and both can run side by side in the council. It is reached at the official endpoint (`https://api.deepseek.com`) and shares the standard DeepSeek credentials, so an existing deepseek deployment enables it by just adding `deepseekflash` to `MULTIPOLY_MODELS` — no new key or base URL required (override with `MULTIPOLY_DEEPSEEKFLASH_MODEL` / `MULTIPOLY_DEEPSEEKFLASH_BASE_URL`). Note on naming: DeepSeek updates the `deepseek-v4-flash` handle in place — since 2026-07-31 it serves **DeepSeek-V4-Flash-0731**, and the callable model id stays `deepseek-v4-flash` (the "0731" is a release stamp, not part of the id). 1M-token context, 384K max output. Tools are `deepseekflash_review` / `deepseekflash_consult`; aliases `deepseek-v4-flash`, `deepseek-flash`, `deepseek-v4-flash-0731`, and `deepseek-flash-0731` all resolve to the `deepseekflash` key.
 
 > **Migration from `MULTIPOLY_OPUS_*`.** The standalone `opus` model is removed. Use `MULTIPOLY_MODELS=claude` instead, and rename `MULTIPOLY_OPUS_*` env vars to `MULTIPOLY_CLAUDE_*`. At startup the server emits a structured stderr warning naming any `MULTIPOLY_OPUS_*` or `MULTIPOLY_GPT55_*` vars it finds — their values are no longer used to configure a model and are ignored as credentials (use `MULTIPOLY_CLAUDE_*` / `MULTIPOLY_CODEX_*` instead). Note: the mere presence of `MULTIPOLY_OPUS_API_KEY` is still honored as a legacy Anthropic-key signal for the claude transport-flip default (see below).
 
@@ -273,6 +276,7 @@ Every model that supports graded reasoning exposes a `reasoning_effort` argument
 | `qwen` | `high` | `enable_thinking` + `thinking_budget` |
 | `qwen38` | `high` | `enable_thinking` + `thinking_budget` (same class as `qwen`) |
 | `deepseek` | `high` | `reasoning_effort` (`high`/`max`) |
+| `deepseekflash` | `high` | `reasoning_effort` (`high`/`max`, same class as `deepseek`) |
 | `claude` | `xhigh` | `output_config.effort` + `thinking: {type: "adaptive"}` |
 | `codex` | `high` | `reasoning_effort` (OpenAI effort; Sol default) |
 | `gemini` | `high` | `reasoning_effort` (OpenAI effort) |
@@ -461,6 +465,7 @@ Lenient name resolution applies wherever a model name is accepted as input: the 
 | `k3`, `kimi-k3`, `kimi-k.3.0`, `k2`, `moonshot` | `kimi` |
 | `cursor` | `composer` |
 | `deepseek-v4` | `deepseek` |
+| `deepseek-v4-flash`, `deepseek-flash`, `deepseek-v4-flash-0731`, `deepseek-flash-0731` | `deepseekflash` |
 | `qwen-max` | `qwen` |
 | `qwen3.8`, `qwen3.8-max`, `qwen-3.8-max`, `qwen3.8-max-preview`, `qwen38-max` | `qwen38` |
 | `xiaomi`, `mi-mo` | `mimo` |

@@ -552,6 +552,76 @@ test("qwen38 baked builtin defaults to the 3.8 preview on the Token Plan endpoin
   assert.equal(pinned.models.qwen38.displayName, "Qwen 3.8 Max");
 });
 
+test("deepseekflash baked builtin defaults to V4 Flash on the official endpoint, explicit overrides still win", () => {
+  assert.equal(MODEL_INFO.deepseekflash.baseName, "deepseek-v4-flash");
+  assert.equal(MODEL_INFO.deepseekflash.transport, "http");
+  assert.equal(MODEL_INFO.deepseekflash.defaultModel, "deepseek-v4-flash");
+  assert.equal(MODEL_INFO.deepseekflash.defaultBaseUrl, "https://api.deepseek.com");
+  assert.equal(MODEL_INFO.deepseekflash.reasoning, "openai_effort");
+  assert.equal(MODEL_INFO.deepseekflash.reasoningVocab, "deepseek");
+  assert.equal(MODEL_INFO.deepseekflash.defaultEffort, "high");
+  // Own key first, then the keys shared with the `deepseek` (V4 Pro) sibling.
+  assert.deepEqual(
+    [...MODEL_INFO.deepseekflash.apiKeyEnv],
+    ["MULTIPOLY_DEEPSEEKFLASH_API_KEY", "MULTIPOLY_DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY"],
+  );
+
+  const baked = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "deepseekflash",
+    MULTIPOLY_DEEPSEEKFLASH_API_KEY: "k",
+  });
+  assert.equal(baked.models.deepseekflash.transport, "http");
+  assert.equal(baked.models.deepseekflash.configured, true);
+  assert.equal(baked.models.deepseekflash.model, "deepseek-v4-flash");
+  assert.equal(baked.models.deepseekflash.baseUrl, "https://api.deepseek.com");
+  assert.equal(baked.models.deepseekflash.reasoning, "openai_effort");
+  assert.equal(baked.models.deepseekflash.reasoningVocab, "deepseek");
+  assert.equal(baked.models.deepseekflash.displayName, "deepseek-v4-flash (api)");
+
+  // The shared deepseek keys alone configure the model — no new key or base URL needed.
+  const shared = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "deepseekflash",
+    MULTIPOLY_DEEPSEEK_API_KEY: "ds-key",
+  });
+  assert.equal(shared.models.deepseekflash.configured, true);
+  assert.equal(shared.models.deepseekflash.apiKeyEnv, "MULTIPOLY_DEEPSEEK_API_KEY");
+
+  // Coexistence: `deepseek` (V4 Pro) and `deepseekflash` configure side by side
+  // from the same key env — the whole point of the sibling-builtin design.
+  const both = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "deepseekflash",
+    MULTIPOLY_DEEPSEEK_API_KEY: "ds-key",
+    MULTIPOLY_DEEPSEEK_BASE_URL: "https://api.deepseek.com",
+  });
+  assert.equal(both.models.deepseek.configured, true);
+  assert.equal(both.models.deepseek.model, "deepseek-v4-pro");
+  assert.equal(both.models.deepseekflash.configured, true);
+  assert.equal(both.models.deepseekflash.model, "deepseek-v4-flash");
+
+  // The unprefixed legacy DEEPSEEK_API_KEY also configures deepseekflash.
+  const legacy = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "deepseekflash",
+    DEEPSEEK_API_KEY: "legacy-key",
+  });
+  assert.equal(legacy.models.deepseekflash.configured, true);
+  assert.equal(legacy.models.deepseekflash.apiKeyEnv, "DEEPSEEK_API_KEY");
+
+  // Explicit overrides still win.
+  const pinned = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "deepseekflash",
+    MULTIPOLY_DEEPSEEKFLASH_API_KEY: "k",
+    MULTIPOLY_DEEPSEEKFLASH_MODEL: "deepseek-v4-flash-0731",
+    MULTIPOLY_DEEPSEEKFLASH_DISPLAY_NAME: "DeepSeek V4 Flash",
+  });
+  assert.equal(pinned.models.deepseekflash.model, "deepseek-v4-flash-0731");
+  assert.equal(pinned.models.deepseekflash.displayName, "DeepSeek V4 Flash");
+});
+
 test("OPUS_INFO is no longer exported (folded into claude)", async () => {
   const mod = await import("../scripts/lib/models.mjs");
   assert.equal(mod.OPUS_INFO, undefined);

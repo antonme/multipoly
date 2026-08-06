@@ -22,6 +22,9 @@ const RAW_ALIASES = {
   k2: "kimi", k3: "kimi", "kimi-k3": "kimi", "kimi-k.3.0": "kimi", moonshot: "kimi",
   cursor: "composer",
   "deepseek-v4": "deepseek",
+  // DeepSeek V4 Flash (release stamp 0731; the callable id stays deepseek-v4-flash).
+  "deepseek-v4-flash": "deepseekflash", "deepseek-flash": "deepseekflash",
+  "deepseek-v4-flash-0731": "deepseekflash", "deepseek-flash-0731": "deepseekflash",
   "qwen-max": "qwen",
   "qwen3.8": "qwen38", "qwen3.8-max": "qwen38", "qwen-3.8-max": "qwen38",
   "qwen3.8-max-preview": "qwen38", "qwen38-max": "qwen38",
