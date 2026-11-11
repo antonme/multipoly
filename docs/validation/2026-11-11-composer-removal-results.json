@@ -1,0 +1,116 @@
+{
+  "tests": {
+    "pass": 530,
+    "fail": 0
+  },
+  "live": [
+    {
+      "key": "glm",
+      "model": "glm-5.3",
+      "status": "PASS",
+      "ms": 3774,
+      "check": "consult"
+    },
+    {
+      "key": "qwen",
+      "model": "qwen3.8-max",
+      "status": "PASS",
+      "ms": 5592,
+      "check": "consult"
+    },
+    {
+      "key": "deepseek",
+      "model": "deepseek-v4-pro",
+      "status": "PASS",
+      "ms": 1540,
+      "check": "consult"
+    },
+    {
+      "key": "kimi",
+      "model": "kimi-k3.1-pro",
+      "status": "PASS",
+      "ms": 2479,
+      "check": "consult"
+    },
+    {
+      "key": "gemini",
+      "model": "gemini-3.8-flash",
+      "status": "PASS",
+      "ms": 5890,
+      "check": "consult"
+    },
+    {
+      "key": "claude",
+      "model": "claude-opus-5-5",
+      "status": "PASS",
+      "ms": 2841,
+      "check": "consult"
+    },
+    {
+      "key": "codex",
+      "model": "gpt-6.1-sol",
+      "status": "PASS",
+      "ms": 8674,
+      "check": "consult"
+    },
+    {
+      "key": "mimo",
+      "model": "mimo-v2.6-pro",
+      "status": "PASS",
+      "ms": 5846,
+      "check": "consult"
+    },
+    {
+      "key": "grok",
+      "model": "grok-4.7",
+      "status": "FAIL",
+      "ms": 20897,
+      "check": "consult"
+    },
+    {
+      "key": "fable",
+      "model": "claude-fable-5-2",
+      "status": "PASS",
+      "ms": 2624,
+      "check": "consult"
+    },
+    {
+      "key": "qwen38",
+      "model": "qwen3.8-max",
+      "status": "PASS",
+      "ms": 4809,
+      "check": "consult"
+    },
+    {
+      "key": "deepseekflash",
+      "model": "deepseek-flash",
+      "status": "PASS",
+      "ms": 1285,
+      "check": "consult"
+    },
+    {
+      "key": "claude",
+      "model": "claude-opus-5-5",
+      "status": "PASS",
+      "check": "review"
+    },
+    {
+      "key": "fable",
+      "model": "claude-fable-5-2",
+      "status": "PASS",
+      "check": "review"
+    },
+    {
+      "key": "grok",
+      "model": "grok-4.7",
+      "status": "PASS",
+      "check": "review"
+    },
+    {
+      "key": "grok",
+      "model": "grok-4.7",
+      "check": "consult-repeat",
+      "status": "PASS"
+    }
+  ]
+}

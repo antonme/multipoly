@@ -93,13 +93,13 @@ const config = {
       apiKey: "d",
       model: "deepseek",
     },
-    composer: {
+    plain: {
       configured: true,
-      key: "composer",
-      displayName: "Composer",
-      baseUrl: "https://composer.test/v1",
+      key: "plain",
+      displayName: "Plain",
+      baseUrl: "https://plain.test/v1",
       apiKey: "c",
-      model: "composer",
+      model: "plain",
     },
   },
   thinking: "off",
@@ -112,14 +112,15 @@ const config = {
 };
 
 // A config where only glm + qwen are configured, used to exercise the
-// synthesizer fall-through chain (chosen → qwen → deepseek → glm → composer).
+// synthesizer fall-through chain (chosen → qwen → deepseek → glm → plain).
 const twoModelConfig = {
   ...config,
+  modelKeys: ["glm", "qwen", "deepseek", "plain"],
   models: {
     glm: config.models.glm,
     qwen: config.models.qwen,
     deepseek: { ...config.models.deepseek, configured: false },
-    composer: { ...config.models.composer, configured: false },
+    plain: { ...config.models.plain, configured: false },
   },
 };
 
@@ -183,7 +184,7 @@ test("council review: defers to harness by default with per-member findings", as
 });
 
 test("council consult: explicit synthesizer falls through to next configured model", async () => {
-  // Ask for composer (not configured in twoModelConfig); resolution must fall
+  // Ask for plain (not configured in twoModelConfig); resolution must fall
   // through the chain and land on qwen.
   const repo = await makeCommittedRepo("multipoly-council-fallthrough-");
   const prev = process.cwd();
@@ -200,7 +201,7 @@ test("council consult: explicit synthesizer falls through to next configured mod
       });
     };
     const out = await handleCouncilConsult(
-      { prompt: "go", models: ["glm", "qwen"], synthesizer: "composer" },
+      { prompt: "go", models: ["glm", "qwen"], synthesizer: "plain" },
       { config: twoModelConfig, fetchImpl },
     );
     // 2 members + 1 synthesizer (qwen, via fall-through).

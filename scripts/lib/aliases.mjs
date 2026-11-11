@@ -11,6 +11,14 @@ function norm(raw) {
 // Seed alias table (extensible). Keys are NORMALIZED alias forms; values are
 // canonical model keys. Must never target a synthesizer sentinel.
 const RAW_ALIASES = {
+  gpt6: "codex", "gpt6.1": "codex", "gpt-6.1-sol": "codex",
+  "opus-5.5": "claude", "claude-opus-5-5": "claude",
+  "fable-5.2": "fable", "claude-fable-5-2": "fable",
+  "gemini-3.8-flash": "gemini", "gemini-3.8": "gemini",
+  "glm5.3": "glm",
+  "kimi-k3.1-pro": "kimi", "k3.1-pro": "kimi",
+  "deepseek-flash": "deepseekflash", "deepseek-v4.1-flash": "deepseekflash",
+  "grok-4.7": "grok",
   gpt: "codex", gpt5: "codex", "gpt5.6": "codex", openai: "codex",
   "gpt5.6-sol": "codex", "gpt5.6-terra": "codex", "gpt5.6-luna": "codex",
   opus: "claude", "claude-opus": "claude", "opus-5": "claude", "claude-opus-5": "claude",
@@ -20,7 +28,6 @@ const RAW_ALIASES = {
   "gemini-3.5": "gemini", // legacy; default wire model is now gemini-3.6-flash
   zhipu: "glm", "glm5.1": "glm",
   k2: "kimi", k3: "kimi", "kimi-k3": "kimi", "kimi-k.3.0": "kimi", moonshot: "kimi",
-  cursor: "composer",
   "deepseek-v4": "deepseek",
   // DeepSeek V4 Flash (release stamp 0731; the callable id stays deepseek-v4-flash).
   "deepseek-v4-flash": "deepseekflash", "deepseek-flash": "deepseekflash",

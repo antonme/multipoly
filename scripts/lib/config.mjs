@@ -216,7 +216,7 @@ function parseCwdMode(raw, label) {
  * When the entry has a `baseName` (all builtins), apply the convention
  * "<baseName> (<transport-suffix>)" via computeDisplayName.
  * Otherwise fall back to `info.displayName`, then `key`.
- * This ensures ALL builtins — both always-on (glm/qwen/deepseek/composer) and
+ * This ensures ALL builtins — both always-on (glm/qwen/deepseek) and
  * promotable (claude/codex/gemini/kimi/mimo/grok/fable/qwen38/deepseekflash) — surface convention-form names
  * from the config-loader path without touching MODEL_INFO literals.
  */
@@ -453,8 +453,8 @@ const HARNESS_ALIASES = new Set(["harness", "none", "caller"]);
 export const SYNTHESIZER_CHOICES = Object.freeze([...MODEL_KEYS, "harness", "none", "caller"]);
 
 // Fall-through order applied after the "chosen one" when resolving which
-// configured model synthesizes: chosen → qwen → deepseek → glm → composer.
-export const SYNTHESIZER_FALLBACK_ORDER = Object.freeze(["qwen", "deepseek", "glm", "composer"]);
+// configured model synthesizes: chosen → qwen → deepseek → glm.
+export const SYNTHESIZER_FALLBACK_ORDER = Object.freeze(["qwen", "deepseek", "glm"]);
 
 /**
  * Normalize a synthesizer choice string.

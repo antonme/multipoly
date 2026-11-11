@@ -7,8 +7,8 @@ description: Guidance for delegating to Multipoly model-specific and council MCP
 
 Use model-specific tools when you want one model's independent opinion:
 
-- `glm_review`, `qwen_review`, `deepseek_review`, `composer_review`
-- `glm_consult`, `qwen_consult`, `deepseek_consult`, `composer_consult`
+- `glm_review`, `qwen_review`, `deepseek_review`
+- `glm_consult`, `qwen_consult`, `deepseek_consult`
 - Additional configured model keys expose the same `<key>_review` / `<key>_consult` pattern (e.g. `claude`/`opus_*`, `codex`/`gpt56_*`, `fable`, `gemini`, … when opted in via `MULTIPOLY_MODELS`).
 
 Use council tools when disagreement or synthesis is valuable:

@@ -158,17 +158,18 @@ const glmConfig = {
   progress: "off",
 };
 
-const composerConfig = {
+const plainConfig = {
   ...glmConfig,
+  modelKeys: ["glm", "plain"],
   models: {
     ...glmConfig.models,
-    composer: {
+    plain: {
       configured: true,
-      key: "composer",
-      displayName: "Composer",
-      baseUrl: "https://composer.test/v1",
+      key: "plain",
+      displayName: "Plain",
+      baseUrl: "https://plain.test/v1",
       apiKey: "c",
-      model: "composer",
+      model: "plain",
       reasoningEffort: undefined, // NONE capability — no reasoning effort
     },
   },
@@ -352,11 +353,11 @@ test("effort-threading: council review with reasoning_effort=low → each member
   const prev = process.cwd();
   process.chdir(repo);
   try {
-    const bodiesByModel = { glm: [], composer: [] };
+    const bodiesByModel = { glm: [], plain: [] };
     const fetchImpl = async (url, opts) => {
       const body = JSON.parse(opts.body);
       if (url.includes("glm.test")) bodiesByModel.glm.push(body);
-      else if (url.includes("composer.test")) bodiesByModel.composer.push(body);
+      else if (url.includes("plain.test")) bodiesByModel.plain.push(body);
       return new Response(sseStream(reviewJson("ok")), {
         status: 200,
         headers: { "content-type": "text/event-stream" },
@@ -364,23 +365,23 @@ test("effort-threading: council review with reasoning_effort=low → each member
     };
 
     await handleCouncilReview(
-      { paths: ["a.txt"], models: ["glm", "composer"], reasoning_effort: "low" },
-      { config: composerConfig, fetchImpl },
+      { paths: ["a.txt"], models: ["glm", "plain"], reasoning_effort: "low" },
+      { config: plainConfig, fetchImpl },
     );
 
     assert.ok(bodiesByModel.glm.length >= 1, "glm was called");
-    assert.ok(bodiesByModel.composer.length >= 1, "composer was called");
+    assert.ok(bodiesByModel.plain.length >= 1, "plain was called");
 
     // After Task 8: per-call effort="low" is capability-dispatched.
     // GLM (GLM_TOGGLE) + low → thinking:{type:"enabled"} on body root.
     assert.deepEqual(bodiesByModel.glm[0].thinking, { type: "enabled" },
       "glm transport should receive thinking:enabled for low effort (GLM_TOGGLE)");
-    // Composer (NONE capability) receives no reasoning fields.
-    assert.equal(bodiesByModel.composer[0].thinking, undefined,
-      "composer (NONE) should receive no thinking field");
+    // Plain custom model (NONE capability) receives no reasoning fields.
+    assert.equal(bodiesByModel.plain[0].thinking, undefined,
+      "plain (NONE) should receive no thinking field");
     // Neither should have the raw reasoningEffort passthrough key.
     assert.equal("reasoningEffort" in bodiesByModel.glm[0], false);
-    assert.equal("reasoningEffort" in bodiesByModel.composer[0], false);
+    assert.equal("reasoningEffort" in bodiesByModel.plain[0], false);
   } finally {
     process.chdir(prev);
   }
@@ -391,11 +392,11 @@ test("effort-threading: council consult with reasoning_effort=low → each membe
   const prev = process.cwd();
   process.chdir(repo);
   try {
-    const bodiesByModel = { glm: [], composer: [] };
+    const bodiesByModel = { glm: [], plain: [] };
     const fetchImpl = async (url, opts) => {
       const body = JSON.parse(opts.body);
       if (url.includes("glm.test")) bodiesByModel.glm.push(body);
-      else if (url.includes("composer.test")) bodiesByModel.composer.push(body);
+      else if (url.includes("plain.test")) bodiesByModel.plain.push(body);
       return new Response(sseStream("member answer"), {
         status: 200,
         headers: { "content-type": "text/event-stream" },
@@ -403,21 +404,21 @@ test("effort-threading: council consult with reasoning_effort=low → each membe
     };
 
     await handleCouncilConsult(
-      { prompt: "what now?", models: ["glm", "composer"], reasoning_effort: "low" },
-      { config: composerConfig, fetchImpl },
+      { prompt: "what now?", models: ["glm", "plain"], reasoning_effort: "low" },
+      { config: plainConfig, fetchImpl },
     );
 
     assert.ok(bodiesByModel.glm.length >= 1, "glm was called");
-    assert.ok(bodiesByModel.composer.length >= 1, "composer was called");
+    assert.ok(bodiesByModel.plain.length >= 1, "plain was called");
 
     // After Task 8: GLM (GLM_TOGGLE) + low → thinking:enabled.
     assert.deepEqual(bodiesByModel.glm[0].thinking, { type: "enabled" },
       "glm transport should receive thinking:enabled for low effort (GLM_TOGGLE)");
-    // Composer (NONE) receives no reasoning fields.
-    assert.equal(bodiesByModel.composer[0].thinking, undefined,
-      "composer (NONE) should receive no thinking field");
+    // Plain custom model (NONE) receives no reasoning fields.
+    assert.equal(bodiesByModel.plain[0].thinking, undefined,
+      "plain (NONE) should receive no thinking field");
     assert.equal("reasoningEffort" in bodiesByModel.glm[0], false);
-    assert.equal("reasoningEffort" in bodiesByModel.composer[0], false);
+    assert.equal("reasoningEffort" in bodiesByModel.plain[0], false);
   } finally {
     process.chdir(prev);
   }

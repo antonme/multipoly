@@ -38,7 +38,7 @@ const RESERVED_MODEL_KEYS = new Set([
   "__proto__",
 ]);
 
-export const MODEL_KEYS = Object.freeze(["glm", "qwen", "deepseek", "composer"]);
+export const MODEL_KEYS = Object.freeze(["glm", "qwen", "deepseek"]);
 
 // Promotable builtins: present in MODEL_INFO but NOT in MODEL_KEYS (opt-in via
 // MULTIPOLY_MODELS). When listed, the registry loader merges the baked MODEL_INFO
@@ -57,14 +57,14 @@ export const TRANSPORTS = Object.freeze(["http", "anthropic", "cli"]);
 export const CLI_KINDS = Object.freeze({
   claude: Object.freeze({ binary: "claude" }),
   codex: Object.freeze({ binary: "codex" }),
-  cursor: Object.freeze({ binary: "cursor-agent", defaultModel: "composer-2.5" }),
+  cursor: Object.freeze({ binary: "cursor-agent" }),
   gemini: Object.freeze({ binary: "gemini" }),
   // agy has no --model flag and only a weak sandbox.
   agy: Object.freeze({ binary: "agy", weakSandbox: true, noModelFlag: true }),
   kimi: Object.freeze({ binary: "kimi" }),
   // xAI "Grok Build" coding CLI: claude-code-like agent with a graded --effort
   // flag and a read-only `--permission-mode plan`.
-  grok: Object.freeze({ binary: "grok", defaultModel: "grok-build" }),
+  grok: Object.freeze({ binary: "grok", defaultModel: "grok-4.7" }),
 });
 
 // The native Anthropic API endpoint and pinned version header.
@@ -74,10 +74,10 @@ export const ANTHROPIC_VERSION = "2023-06-01";
 export const MODEL_INFO = Object.freeze({
   glm: Object.freeze({
     key: "glm",
-    baseName: "glm-5.2",
-    displayName: "GLM 5.2",
+    baseName: "glm-5.3",
+    displayName: "GLM 5.3",
     transport: "http",
-    defaultModel: "glm-5.2",
+    defaultModel: "glm-5.3",
     defaultBaseUrl: "https://api.z.ai/api/coding/paas/v4",
     apiKeyEnv: ["MULTIPOLY_GLM_API_KEY", "GLM_API_KEY", "ZHIPU_API_KEY"],
     supportsThinking: true,
@@ -86,10 +86,10 @@ export const MODEL_INFO = Object.freeze({
   }),
   qwen: Object.freeze({
     key: "qwen",
-    baseName: "qwen3.7-max",
-    displayName: "Qwen 3.7 Max",
+    baseName: "qwen3.8-max",
+    displayName: "Qwen 3.8 Max",
     transport: "http",
-    defaultModel: "qwen3.7max",
+    defaultModel: "qwen3.8-max",
     defaultBaseUrl: null,
     apiKeyEnv: ["MULTIPOLY_QWEN_API_KEY", "QWEN_API_KEY"],
     supportsThinking: false,
@@ -109,21 +109,6 @@ export const MODEL_INFO = Object.freeze({
     reasoningVocab: "deepseek",
     defaultEffort: "high",
   }),
-  // Composer 2.5 has no HTTP API — it is only reachable through cursor-agent.
-  // It is shipped as a cli/cursor builtin but stays unconfigured until the
-  // operator opts in with MULTIPOLY_COMPOSER_ENABLED (see CHANGELOG migration).
-  composer: Object.freeze({
-    key: "composer",
-    baseName: "composer-2.5",
-    displayName: "Composer 2.5",
-    transport: "cli",
-    cliKind: "cursor",
-    defaultModel: null,
-    apiKeyEnv: [],
-    supportsThinking: false,
-    reasoning: CAPABILITY.NONE,
-    defaultEffort: "off",
-  }),
   // ── Promotable builtins: baked metadata, NOT auto-registered ──────────────
   // These entries carry capability/baseName/defaultEffort so operator deployments
   // that list them in MULTIPOLY_MODELS don't need per-model display env.
@@ -133,7 +118,7 @@ export const MODEL_INFO = Object.freeze({
     baseName: "opus",                // display base; full name computed by transport
     transport: "cli",
     cliKind: "claude",
-    defaultModel: "claude-opus-5",
+    defaultModel: "claude-opus-5-5",
     defaultBaseUrl: null,            // anthropic transport falls back to ANTHROPIC_DEFAULT_BASE_URL in config
     apiKeyEnv: ["MULTIPOLY_CLAUDE_API_KEY", "ANTHROPIC_API_KEY"],
     supportsThinking: true,
@@ -142,12 +127,11 @@ export const MODEL_INFO = Object.freeze({
   }),
   codex: Object.freeze({
     key: "codex",
-    baseName: "gpt5.6-sol",
+    baseName: "gpt6.1-sol",
     transport: "cli",
     cliKind: "codex",
-    // GPT-5.6 family: Sol (flagship, default), Terra (balanced), Luna (cheap/fast).
-    // Pin another tier with MULTIPOLY_CODEX_MODEL=gpt-5.6-terra|gpt-5.6-luna.
-    defaultModel: "gpt-5.6-sol",
+    // Preserve the Sol coding tier; Astra is separately selectable via env.
+    defaultModel: "gpt-6.1-sol",
     defaultBaseUrl: null,
     apiKeyEnv: ["MULTIPOLY_CODEX_API_KEY", "OPENAI_API_KEY"],
     supportsThinking: false,
@@ -156,9 +140,9 @@ export const MODEL_INFO = Object.freeze({
   }),
   gemini: Object.freeze({
     key: "gemini",
-    baseName: "gemini-3.6-flash",
+    baseName: "gemini-3.8-flash",
     transport: "http",
-    defaultModel: "gemini-3.6-flash",
+    defaultModel: "gemini-3.8-flash",
     defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
     apiKeyEnv: ["MULTIPOLY_GEMINI_API_KEY", "GEMINI_API_KEY"],
     supportsThinking: false,
@@ -166,22 +150,12 @@ export const MODEL_INFO = Object.freeze({
     reasoningVocab: "gemini",
     defaultEffort: "high",
   }),
-  // Kimi K3 on the standard Moonshot open platform (OpenAI-compatible),
-  // launched 2026-07-16: model `kimi-k3` at https://api.moonshot.ai/v1
-  // (https://api.moonshot.cn/v1 for the China platform). Keys are
-  // endpoint-specific — a Kimi Code subscription key (api.kimi.com/coding)
-  // does NOT work here; use an open-platform key (MOONSHOT_API_KEY).
-  // K3 thinking is always-on: the top-level `reasoning_effort` field replaces
-  // the K2-era `thinking` toggle and currently accepts only "max" (mapped in
-  // effortToOpenAiFields, vocab "kimi"). To keep the Kimi Code preview route
-  // instead, set MULTIPOLY_KIMI_TRANSPORT=anthropic,
-  // MULTIPOLY_KIMI_BASE_URL=https://api.kimi.com/coding,
-  // MULTIPOLY_KIMI_MODEL=kimi-k.3.0, MULTIPOLY_KIMI_REASONING=kimi_toggle.
+  // Moonshot open-platform model ID; Kimi Code uses `k3.1-pro` instead.
   kimi: Object.freeze({
     key: "kimi",
-    baseName: "kimi-k3",
+    baseName: "kimi-k3.1-pro",
     transport: "http",
-    defaultModel: "kimi-k3",
+    defaultModel: "kimi-k3.1-pro",
     defaultBaseUrl: "https://api.moonshot.ai/v1",
     apiKeyEnv: ["MULTIPOLY_KIMI_API_KEY", "MOONSHOT_API_KEY"],
     supportsThinking: false,
@@ -191,9 +165,9 @@ export const MODEL_INFO = Object.freeze({
   }),
   mimo: Object.freeze({
     key: "mimo",
-    baseName: "mimo-v2.5-pro",
+    baseName: "mimo-v2.6-pro",
     transport: "http",
-    defaultModel: "mimo-v2.5-pro",
+    defaultModel: "mimo-v2.6-pro",
     defaultBaseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
     // Recognize the existing XIAOMIMIMO_* env names as aliases, mirroring glm's
     // ZHIPU_API_KEY/GLM_API_KEY fallbacks.
@@ -203,44 +177,24 @@ export const MODEL_INFO = Object.freeze({
     defaultEffort: "high",
     usesMaxCompletionTokens: true,    // MiMo expects max_completion_tokens, not max_tokens
   }),
-  // Qwen 3.8 Max — Alibaba's newest flagship, shipped 2026-07-19 as a 2.4T-param
-  // PREVIEW (model handle `qwen3.8-max-preview`). It is Token-Plan-only: neither
-  // the eu-central DashScope workspace (the always-on `qwen` builtin's home) nor
-  // the CN Beijing workspace carries any 3.8 model, so this entry pins the
-  // ap-southeast-1 Token Plan compatible-mode endpoint and its dedicated key
-  // (ALIBABA_CODE_PLAN_API_KEY). A sibling of the always-on `qwen` (3.7) builtin:
-  // same OpenAI-compatible http shape and QWEN_BUDGET reasoning (separate
-  // `reasoning_content`, `enable_thinking`/`thinking_budget`), so no transport or
-  // reasoning changes are needed. 1M-token input class; max output 131072.
+  // Keep the qwen38 key pinned to the stable 3.8 line for existing callers.
   qwen38: Object.freeze({
     key: "qwen38",
     baseName: "qwen3.8-max",
     transport: "http",
-    defaultModel: "qwen3.8-max-preview",
+    defaultModel: "qwen3.8-max",
     defaultBaseUrl: "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
     apiKeyEnv: ["MULTIPOLY_QWEN38_API_KEY", "ALIBABA_CODE_PLAN_API_KEY"],
     supportsThinking: false,
     reasoning: CAPABILITY.QWEN_BUDGET,
     defaultEffort: "high",
   }),
-  // DeepSeek V4 Flash — the fast/cheap sibling of the always-on `deepseek`
-  // (V4 Pro) builtin: same OpenAI-compatible `http` shape at the official
-  // https://api.deepseek.com endpoint and the same `deepseek` reasoning vocab
-  // (top-level `reasoning_effort` high/max; `off` → `thinking:{type:"disabled"}`),
-  // so no transport or reasoning changes are needed and both can run side by
-  // side in the council. DeepSeek updates this handle in place — since
-  // 2026-07-31 it serves DeepSeek-V4-Flash-0731, and the callable model id
-  // stays `deepseek-v4-flash` (the "0731" is a release stamp, not part of the
-  // id). 1M-token context, 384K max output. Credentials are the standard
-  // DeepSeek keys: `MULTIPOLY_DEEPSEEKFLASH_API_KEY` or the existing
-  // `MULTIPOLY_DEEPSEEK_API_KEY` / `DEEPSEEK_API_KEY` shared with the `deepseek`
-  // builtin — a configured deepseek deployment enables flash by just adding
-  // `deepseekflash` to MULTIPOLY_MODELS.
+  // DeepSeek V4.1 Flash uses the rolling `deepseek-flash` API handle.
   deepseekflash: Object.freeze({
     key: "deepseekflash",
-    baseName: "deepseek-v4-flash",
+    baseName: "deepseek-v4.1-flash",
     transport: "http",
-    defaultModel: "deepseek-v4-flash",
+    defaultModel: "deepseek-flash",
     defaultBaseUrl: "https://api.deepseek.com",
     apiKeyEnv: ["MULTIPOLY_DEEPSEEKFLASH_API_KEY", "MULTIPOLY_DEEPSEEK_API_KEY", "DEEPSEEK_API_KEY"],
     supportsThinking: false,
@@ -256,19 +210,19 @@ export const MODEL_INFO = Object.freeze({
   // effort scale caps at xhigh → `--effort xhigh`; grok's native `max` is not used.)
   grok: Object.freeze({
     key: "grok",
-    baseName: "grok-build",
+    baseName: "grok-4.7",
     transport: "cli",
     cliKind: "grok",
-    defaultModel: "grok-build",
+    defaultModel: "grok-4.7",
     defaultBaseUrl: null,
     apiKeyEnv: ["MULTIPOLY_GROK_API_KEY", "XAI_API_KEY"],
     supportsThinking: false,
     reasoning: CAPABILITY.ANTHROPIC_EFFORT, // graded effort, xhigh-native (matches grok --effort)
     defaultEffort: "xhigh",
   }),
-  // Claude Fable 5 — Anthropic's most capable widely released model. A sibling of
+  // Claude Fable 5.2 — Anthropic's most capable widely released model. A sibling of
   // the `claude` (Opus) builtin: same cli-default/anthropic-flip shape and
-  // ANTHROPIC_EFFORT capability, pointed at claude-fable-5 and reusing the verified
+  // ANTHROPIC_EFFORT capability, pointed at claude-fable-5-2 and reusing the verified
   // Claude Code cli recipe (cliKind "claude"). Fable's wire constraints — thinking is
   // always-on; `{type:"disabled"}` and `budget_tokens` both 400 — are already satisfied
   // by the ANTHROPIC_EFFORT path: at effort "off" it OMITS `thinking` (adaptive runs),
@@ -279,7 +233,7 @@ export const MODEL_INFO = Object.freeze({
     baseName: "fable",               // versionless display base, mirroring claude's "opus"
     transport: "cli",
     cliKind: "claude",               // reuses the Claude Code read-only CLI recipe
-    defaultModel: "claude-fable-5",
+    defaultModel: "claude-fable-5-2",
     defaultBaseUrl: null,            // anthropic transport falls back to ANTHROPIC_DEFAULT_BASE_URL in config
     apiKeyEnv: ["MULTIPOLY_FABLE_API_KEY", "ANTHROPIC_API_KEY"],
     supportsThinking: true,
@@ -305,7 +259,7 @@ export function envPrefixForModel(key) {
 }
 
 /**
- * Build the model registry for an environment: the four builtins plus any
+ * Build the model registry for an environment: the three builtins plus any
  * custom models declared via MULTIPOLY_MODELS (comma-separated keys). Each
  * custom key <K> draws its identity from MULTIPOLY_<K>_{MODEL,BASE_URL,
  * DISPLAY_NAME,THINKING} and its API key from MULTIPOLY_<K>_API_KEY; whether it

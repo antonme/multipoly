@@ -67,6 +67,7 @@ test("cli: claude — read-only + MCP-isolated argv, prompt on stdin", async () 
   assert.ok(args.includes("-p"));
   assert.deepEqual(args.slice(args.indexOf("--model"), args.indexOf("--model") + 2), ["--model", "the-model"]);
   assert.ok(args.includes("--tools")); // followed by "" (read-only)
+  assert.equal(args[args.indexOf("--setting-sources") + 1], "");
   assert.ok(args.includes("--strict-mcp-config")); // isolation, no user MCP
   assert.ok(opts.input.includes("You are a reviewer."));
   assert.ok(opts.input.includes("Review this."));

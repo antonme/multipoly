@@ -7,12 +7,11 @@ const PROMPT = "Reply with exactly this token and nothing else: SMOKE-OK";
 
 const KINDS = [
   { kind: "claude", model: "haiku" },
-  { kind: "codex", model: "gpt-5.6-sol" },
-  { kind: "cursor", model: "composer-2.5", authTokenEnv: "CURSOR_API_KEY" },
-  { kind: "gemini", model: "gemini-3.6-flash" },
+  { kind: "codex", model: "gpt-6.1-sol" },
+  { kind: "gemini", model: "gemini-3.8-flash" },
   { kind: "kimi", model: "kimi-code/kimi-for-coding" },
   { kind: "agy", model: null, unsafe: true },
-  { kind: "grok", model: "grok-build" },
+  { kind: "grok", model: "grok-4.7" },
 ];
 
 function cfg(spec) {

@@ -15,14 +15,13 @@ test("config: defaults", () => {
   const c = loadConfig({ ...base });
   assert.equal(c.models.glm.configured, true);
   assert.equal(c.models.glm.baseUrl, ENDPOINT_PROFILES["zai-coding-plan"]);
-  assert.equal(c.models.glm.model, "glm-5.2");
+  assert.equal(c.models.glm.model, "glm-5.3");
   assert.equal(c.models.glm.apiKey, "test-key");
   assert.deepEqual(c.models.glm.maxTokens, { review: 131072, consult: 131072 });
   assert.equal(c.models.qwen.configured, false);
   // qwen has QWEN_BUDGET reasoning capability → gets 32768/8192 floor even when unconfigured
   assert.deepEqual(c.models.qwen.maxTokens, { review: 32768, consult: 8192 });
   assert.equal(c.models.deepseek.configured, false);
-  assert.equal(c.models.composer.configured, false);
   assert.equal(c.thinking, "auto"); // mode-default retired: unset MULTIPOLY_THINKING now means "auto" (don't send a thinking toggle; rely on per-model reasoningEffort)
   assert.equal(c.maxTokens.review, 131072);
   assert.equal(c.maxTokens.consult, 131072);
@@ -315,13 +314,12 @@ test("config: loads configured model endpoints independently", () => {
     MULTIPOLY_GLM_API_KEY: "glm-key",
     MULTIPOLY_QWEN_API_KEY: "qwen-key",
     MULTIPOLY_QWEN_BASE_URL: "https://qwen.example/v1",
-    MULTIPOLY_QWEN_MODEL: "qwen3.7max",
+    MULTIPOLY_QWEN_MODEL: "qwen3.8-max",
   });
   assert.equal(c.models.glm.configured, true);
   assert.equal(c.models.qwen.configured, true);
   assert.equal(c.models.deepseek.configured, false);
-  assert.equal(c.models.composer.configured, false);
-  assert.equal(c.models.qwen.model, "qwen3.7max");
+  assert.equal(c.models.qwen.model, "qwen3.8-max");
   assert.equal(c.models.qwen.baseUrl, "https://qwen.example/v1");
   assert.equal(c.models.qwen.apiKey, "qwen-key");
   // qwen has QWEN_BUDGET reasoning capability → gets 32768/8192 floor even when unconfigured
@@ -468,10 +466,10 @@ test("claude/codex/gemini/kimi are baked MODEL_INFO entries with capability + ba
   }
 });
 
-test("kimi baked builtin defaults to K3 on the standard Moonshot platform, explicit overrides still win", () => {
-  assert.equal(MODEL_INFO.kimi.baseName, "kimi-k3");
+test("kimi baked builtin defaults to K3.1 Pro on the standard Moonshot platform, explicit overrides still win", () => {
+  assert.equal(MODEL_INFO.kimi.baseName, "kimi-k3.1-pro");
   assert.equal(MODEL_INFO.kimi.transport, "http");
-  assert.equal(MODEL_INFO.kimi.defaultModel, "kimi-k3");
+  assert.equal(MODEL_INFO.kimi.defaultModel, "kimi-k3.1-pro");
   assert.equal(MODEL_INFO.kimi.defaultBaseUrl, "https://api.moonshot.ai/v1");
   assert.equal(MODEL_INFO.kimi.reasoning, "openai_effort");
   assert.equal(MODEL_INFO.kimi.reasoningVocab, "kimi");
@@ -483,9 +481,9 @@ test("kimi baked builtin defaults to K3 on the standard Moonshot platform, expli
     MULTIPOLY_KIMI_API_KEY: "k",
   });
   assert.equal(baked.models.kimi.transport, "http");
-  assert.equal(baked.models.kimi.model, "kimi-k3");
+  assert.equal(baked.models.kimi.model, "kimi-k3.1-pro");
   assert.equal(baked.models.kimi.baseUrl, "https://api.moonshot.ai/v1");
-  assert.equal(baked.models.kimi.displayName, "kimi-k3 (api)");
+  assert.equal(baked.models.kimi.displayName, "kimi-k3.1-pro (api)");
 
   const pinned = loadConfig({
     MULTIPOLY_GLM_API_KEY: "g",
@@ -511,10 +509,10 @@ test("kimi baked builtin defaults to K3 on the standard Moonshot platform, expli
   assert.equal(preview.models.kimi.reasoning, "kimi_toggle");
 });
 
-test("qwen38 baked builtin defaults to the 3.8 preview on the Token Plan endpoint, explicit overrides still win", () => {
+test("qwen38 baked builtin defaults to stable 3.8 on the Token Plan endpoint, explicit overrides still win", () => {
   assert.equal(MODEL_INFO.qwen38.baseName, "qwen3.8-max");
   assert.equal(MODEL_INFO.qwen38.transport, "http");
-  assert.equal(MODEL_INFO.qwen38.defaultModel, "qwen3.8-max-preview");
+  assert.equal(MODEL_INFO.qwen38.defaultModel, "qwen3.8-max");
   assert.equal(MODEL_INFO.qwen38.defaultBaseUrl, "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1");
   assert.equal(MODEL_INFO.qwen38.reasoning, "qwen_budget");
   assert.equal(MODEL_INFO.qwen38.defaultEffort, "high");
@@ -528,7 +526,7 @@ test("qwen38 baked builtin defaults to the 3.8 preview on the Token Plan endpoin
   });
   assert.equal(baked.models.qwen38.transport, "http");
   assert.equal(baked.models.qwen38.configured, true);
-  assert.equal(baked.models.qwen38.model, "qwen3.8-max-preview");
+  assert.equal(baked.models.qwen38.model, "qwen3.8-max");
   assert.equal(baked.models.qwen38.baseUrl, "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1");
   assert.equal(baked.models.qwen38.reasoning, "qwen_budget");
 
@@ -552,10 +550,10 @@ test("qwen38 baked builtin defaults to the 3.8 preview on the Token Plan endpoin
   assert.equal(pinned.models.qwen38.displayName, "Qwen 3.8 Max");
 });
 
-test("deepseekflash baked builtin defaults to V4 Flash on the official endpoint, explicit overrides still win", () => {
-  assert.equal(MODEL_INFO.deepseekflash.baseName, "deepseek-v4-flash");
+test("deepseekflash baked builtin defaults to V4.1 Flash on the official endpoint, explicit overrides still win", () => {
+  assert.equal(MODEL_INFO.deepseekflash.baseName, "deepseek-v4.1-flash");
   assert.equal(MODEL_INFO.deepseekflash.transport, "http");
-  assert.equal(MODEL_INFO.deepseekflash.defaultModel, "deepseek-v4-flash");
+  assert.equal(MODEL_INFO.deepseekflash.defaultModel, "deepseek-flash");
   assert.equal(MODEL_INFO.deepseekflash.defaultBaseUrl, "https://api.deepseek.com");
   assert.equal(MODEL_INFO.deepseekflash.reasoning, "openai_effort");
   assert.equal(MODEL_INFO.deepseekflash.reasoningVocab, "deepseek");
@@ -573,11 +571,11 @@ test("deepseekflash baked builtin defaults to V4 Flash on the official endpoint,
   });
   assert.equal(baked.models.deepseekflash.transport, "http");
   assert.equal(baked.models.deepseekflash.configured, true);
-  assert.equal(baked.models.deepseekflash.model, "deepseek-v4-flash");
+  assert.equal(baked.models.deepseekflash.model, "deepseek-flash");
   assert.equal(baked.models.deepseekflash.baseUrl, "https://api.deepseek.com");
   assert.equal(baked.models.deepseekflash.reasoning, "openai_effort");
   assert.equal(baked.models.deepseekflash.reasoningVocab, "deepseek");
-  assert.equal(baked.models.deepseekflash.displayName, "deepseek-v4-flash (api)");
+  assert.equal(baked.models.deepseekflash.displayName, "deepseek-v4.1-flash (api)");
 
   // The shared deepseek keys alone configure the model — no new key or base URL needed.
   const shared = loadConfig({
@@ -599,7 +597,7 @@ test("deepseekflash baked builtin defaults to V4 Flash on the official endpoint,
   assert.equal(both.models.deepseek.configured, true);
   assert.equal(both.models.deepseek.model, "deepseek-v4-pro");
   assert.equal(both.models.deepseekflash.configured, true);
-  assert.equal(both.models.deepseekflash.model, "deepseek-v4-flash");
+  assert.equal(both.models.deepseekflash.model, "deepseek-flash");
 
   // The unprefixed legacy DEEPSEEK_API_KEY also configures deepseekflash.
   const legacy = loadConfig({
@@ -629,7 +627,7 @@ test("OPUS_INFO is no longer exported (folded into claude)", async () => {
 
 test("baked builtins are NOT auto-registered (MODEL_KEYS unchanged)", async () => {
   const { MODEL_KEYS: keys } = await import("../scripts/lib/models.mjs");
-  assert.deepEqual([...keys], ["glm", "qwen", "deepseek", "composer"]);
+  assert.deepEqual([...keys], ["glm", "qwen", "deepseek"]);
 });
 
 // ── Task 4: Registry merge for baked builtins ──
@@ -716,7 +714,7 @@ test("no warning when no legacy vars are present", () => {
 // ── Task 7: Lenient synthesizer name resolution ──
 
 test("normalizeSynthesizerChoice: alias 'gpt' resolves to 'codex' when codex is configured", () => {
-  const keys = ["glm", "qwen", "deepseek", "composer", "codex"];
+  const keys = ["glm", "qwen", "deepseek", "codex"];
   assert.equal(normalizeSynthesizerChoice("gpt", keys), "codex");
 });
 
@@ -751,14 +749,14 @@ test("mimo is a baked MODEL_INFO builtin with http_thinking_toggle capability", 
   assert.ok(MODEL_INFO.mimo);
   assert.equal(MODEL_INFO.mimo.reasoning, "http_thinking_toggle");
   assert.equal(MODEL_INFO.mimo.usesMaxCompletionTokens, true);
-  assert.equal(MODEL_INFO.mimo.baseName, "mimo-v2.5-pro");
+  assert.equal(MODEL_INFO.mimo.baseName, "mimo-v2.6-pro");
 });
 
 test("MULTIPOLY_MODELS=mimo merges baked base and recognizes XIAOMIMIMO_API_KEY", () => {
   const { keys, info } = loadModelRegistry({ MULTIPOLY_MODELS: "mimo" });
   assert.ok(keys.includes("mimo"));
   assert.equal(info.mimo.reasoning, "http_thinking_toggle");
-  assert.equal(info.mimo.displayName, "mimo-v2.5-pro (api)"); // convention from Plan B
+  assert.equal(info.mimo.displayName, "mimo-v2.6-pro (api)"); // convention from Plan B
   assert.deepEqual([...info.mimo.apiKeyEnv], ["MULTIPOLY_MIMO_API_KEY", "XIAOMIMIMO_API_KEY"]);
 });
 
@@ -804,7 +802,7 @@ test("MULTIPOLY_MODELS=grok merges baked base: cli transport, grok kind, convent
   assert.equal(info.grok.transport, "cli");
   assert.equal(info.grok.cliKind, "grok");
   assert.equal(info.grok.reasoning, "anthropic_effort"); // baked graded effort
-  assert.equal(info.grok.displayName, "grok-build (grok cli)");
+  assert.equal(info.grok.displayName, "grok-4.7 (grok cli)");
 });
 
 test("grok stays unconfigured until MULTIPOLY_GROK_ENABLED=1 (cli opt-in gate)", () => {
@@ -820,7 +818,7 @@ test("grok stays unconfigured until MULTIPOLY_GROK_ENABLED=1 (cli opt-in gate)",
   assert.equal(on.models.grok.configured, true);
   assert.equal(on.models.grok.cliKind, "grok");
   assert.equal(on.models.grok.binary, "grok");
-  assert.equal(on.models.grok.model, "grok-build"); // baked default
+  assert.equal(on.models.grok.model, "grok-4.7"); // baked default
 });
 
 // ── fable baked builtin (Anthropic-family sibling of claude; opt-in) ──
@@ -831,7 +829,7 @@ test("MULTIPOLY_MODELS=fable merges baked base: cli default, claude kind, conven
   assert.equal(info.fable.transport, "cli");
   assert.equal(info.fable.cliKind, "claude"); // reuses the Claude Code recipe
   assert.equal(info.fable.reasoning, "anthropic_effort"); // baked graded effort
-  assert.equal(info.fable.defaultModel, "claude-fable-5");
+  assert.equal(info.fable.defaultModel, "claude-fable-5-2");
   assert.equal(info.fable.displayName, "fable (claude cli)");
 });
 
@@ -868,7 +866,7 @@ test("fable (cli) stays unconfigured until MULTIPOLY_FABLE_ENABLED=1 (cli opt-in
   assert.equal(on.models.fable.configured, true);
   assert.equal(on.models.fable.cliKind, "claude");
   assert.equal(on.models.fable.binary, "claude");
-  assert.equal(on.models.fable.model, "claude-fable-5"); // baked default
+  assert.equal(on.models.fable.model, "claude-fable-5-2"); // baked default
 });
 
 test("fable (anthropic) is configured by an Anthropic key without needing the ENABLED gate", () => {
@@ -879,7 +877,7 @@ test("fable (anthropic) is configured by an Anthropic key without needing the EN
   });
   assert.equal(c.models.fable.transport, "anthropic");
   assert.equal(c.models.fable.configured, true);
-  assert.equal(c.models.fable.model, "claude-fable-5"); // baked default flows to the anthropic body
+  assert.equal(c.models.fable.model, "claude-fable-5-2"); // baked default flows to the anthropic body
 });
 
 test("fable flips to anthropic on MULTIPOLY_FABLE_API_KEY alone (no ANTHROPIC_API_KEY)", () => {
@@ -908,12 +906,11 @@ test("MULTIPOLY_FABLE_MODEL overrides the baked default model (documented escape
 // ── Display-name convention: always-on builtins surface "<base> (<transport>)" ──
 
 test("config: always-on builtins surface convention-form display names", () => {
-  // glm/qwen/deepseek are http → "(api)"; composer is cli/cursor → "(cursor cli)"
+  // glm/qwen/deepseek are http → "(api)"
   const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "x" });
-  assert.equal(config.models.glm.displayName, "glm-5.2 (api)");
-  assert.equal(config.models.qwen.displayName, "qwen3.7-max (api)");
+  assert.equal(config.models.glm.displayName, "glm-5.3 (api)");
+  assert.equal(config.models.qwen.displayName, "qwen3.8-max (api)");
   assert.equal(config.models.deepseek.displayName, "deepseek-v4-pro (api)");
-  assert.equal(config.models.composer.displayName, "composer-2.5 (cursor cli)");
 });
 
 // ── D2 Task 1: Generalize max_tokens floor to all reasoning capabilities ──
@@ -966,11 +963,11 @@ test("D2: glm (GLM_TOGGLE) with no server-wide cap gets 32768/8192 floor (raised
   assert.ok(config.models.glm.maxTokens.consult >= 8192, "glm consult floor must be >= 8192");
 });
 
-test("D2: NONE-capability model (composer) gets no floor — maxTokens remain undefined", () => {
-  const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "glm-key" });
-  // composer has CAPABILITY.NONE — floor must NOT be applied.
-  assert.equal(config.models.composer.maxTokens.review, undefined);
-  assert.equal(config.models.composer.maxTokens.consult, undefined);
+test("D2: custom NONE-capability model gets no floor", () => {
+  const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "glm-key", MULTIPOLY_MODELS: "plain" });
+  assert.equal(config.models.plain.maxTokens.review, undefined);
+  assert.equal(config.models.plain.maxTokens.consult, undefined);
+  // NONE has no reasoning token floor.
 });
 
 test("D2: explicit MULTIPOLY_<K>_MAX_TOKENS_REVIEW wins over the floor", () => {
@@ -1007,4 +1004,10 @@ test("D2: reasoning floor values are within MODEL_OUTPUT_CEILING (32768 < 131072
     config.models.deepseek.maxTokens.consult <= MODEL_OUTPUT_CEILING,
     "consult must not exceed ceiling",
   );
+});
+
+test("retired Composer settings do not register or enable a model", () => {
+  const c = loadConfig({ MULTIPOLY_GLM_API_KEY: "test", MULTIPOLY_COMPOSER_ENABLED: "1" });
+  assert.equal(Object.hasOwn(c.models, "composer"), false);
+  assert.equal(c.modelKeys.includes("composer"), false);
 });

@@ -94,7 +94,7 @@ export async function runCliModel(args) {
   }
   // Refuse to spawn an unconfigured/un-opted-in cli model. Every model's tools
   // are advertised regardless of `configured`, so without this guard a direct
-  // `composer_review` / `<agy>_consult` call would shell out to the agent and
+  // `<agy>_consult` call would shell out to the agent and
   // bypass the MULTIPOLY_<K>_ENABLED (and agy UNSAFE) opt-in gate. Mirrors the
   // http (client.mjs) and anthropic (anthropic.mjs) configured checks.
   if (!m.configured) {
@@ -258,6 +258,8 @@ export function buildInvocation({ kind, binary, model, cwd, reasoningEffort, pro
   switch (kind) {
     case "claude": {
       const claudeArgs = [
+        "--setting-sources",
+        "",
         "-p",
         "--model",
         model,

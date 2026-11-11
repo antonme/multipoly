@@ -9,6 +9,7 @@
   },
   "scripts": {
     "start": "node scripts/multipoly-mcp.mjs",
+    "smoke": "node scripts/smoke-models.mjs",
     "health": "node scripts/multipoly-mcp.mjs --health",
     "test": "node --test --test-reporter=spec tests/*.test.mjs"
   },

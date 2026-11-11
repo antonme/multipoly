@@ -7,8 +7,6 @@ import { MODEL_KEYS } from "../scripts/lib/models.mjs";
 test("mcp tools: exposes model-specific review and consult tools plus council tools", () => {
   const names = buildTools().map((t) => t.name).sort();
   assert.deepEqual(names, [
-    "composer_consult",
-    "composer_review",
     "council_consult",
     "council_review",
     "deepseek_consult",

@@ -83,7 +83,7 @@ export function resolveCouncilModels(input, config) {
  *
  * The "chosen one" is the per-call `synthesizer` arg if present, else the
  * env-configured `config.synthesizer`. When the chosen one is a model key it
- * heads the fall-through chain (chosen → qwen → deepseek → glm → composer →
+ * heads the fall-through chain (chosen → qwen → deepseek → glm →
  * any other configured model) and the first CONFIGURED model wins — an
  * explicitly named but unconfigured synthesizer falls through rather than
  * erroring. When nothing is chosen, or the choice is the "harness" sentinel,

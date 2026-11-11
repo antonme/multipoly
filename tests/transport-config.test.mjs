@@ -13,29 +13,6 @@ test("transport: http builtins carry transport 'http'", () => {
   assert.equal(c.models.deepseek.transport, "http");
 });
 
-test("transport: composer is a cli/cursor builtin, unconfigured by default", () => {
-  const c = loadConfig({ ...glm });
-  assert.equal(c.models.composer.transport, "cli");
-  assert.equal(c.models.composer.cliKind, "cursor");
-  assert.equal(c.models.composer.configured, false);
-});
-
-test("transport: composer becomes configured when MULTIPOLY_COMPOSER_ENABLED is set", () => {
-  const c = loadConfig({ ...glm, MULTIPOLY_COMPOSER_ENABLED: "1" });
-  assert.equal(c.models.composer.configured, true);
-  assert.equal(c.models.composer.cliKind, "cursor");
-  assert.equal(c.models.composer.binary, "cursor-agent");
-  assert.equal(c.models.composer.cwdMode, "repo");
-});
-
-test("transport: a setting an API key alone does NOT configure the cli composer (migration)", () => {
-  // The old HTTP composer never worked; setting only its API key must not
-  // silently shell out to cursor-agent. Enabling is explicit now.
-  const c = loadConfig({ ...glm, MULTIPOLY_COMPOSER_API_KEY: "x", MULTIPOLY_COMPOSER_BASE_URL: "https://x/v1" });
-  assert.equal(c.models.composer.configured, false);
-});
-
-
 test("transport: custom model can declare anthropic transport", () => {
   const c = loadConfig({
     ...glm,
@@ -222,9 +199,8 @@ test("transport: CLI_KINDS exposes the known agent kinds", () => {
   assert.equal(CLI_KINDS.agy.weakSandbox, true);
   assert.equal(CLI_KINDS.cursor.binary, "cursor-agent");
   assert.equal(CLI_KINDS.grok.binary, "grok");
-  assert.equal(CLI_KINDS.grok.defaultModel, "grok-build");
+  assert.equal(CLI_KINDS.grok.defaultModel, "grok-4.7");
 });
-
 
 // --- Task 5: static capability + defaults on MODEL_INFO; modelHasReasoningControl ---
 
@@ -236,16 +212,14 @@ test("models: capability + default effort on builtins", () => {
   assert.equal(MODEL_INFO.deepseek.reasoning, CAPABILITY.OPENAI_EFFORT);
   assert.equal(MODEL_INFO.deepseek.reasoningVocab, "deepseek");
   assert.equal(MODEL_INFO.deepseek.defaultEffort, "high");
-  assert.equal(MODEL_INFO.composer.reasoning, CAPABILITY.NONE);
-  assert.equal(MODEL_INFO.composer.defaultEffort, "off");
 });
 
 test("models: grok is a cli baked builtin with graded effort (ANTHROPIC_EFFORT, xhigh)", () => {
   assert.ok(MODEL_INFO.grok, "grok should be in MODEL_INFO");
   assert.equal(MODEL_INFO.grok.transport, "cli");
   assert.equal(MODEL_INFO.grok.cliKind, "grok");
-  assert.equal(MODEL_INFO.grok.baseName, "grok-build");
-  assert.equal(MODEL_INFO.grok.defaultModel, "grok-build");
+  assert.equal(MODEL_INFO.grok.baseName, "grok-4.7");
+  assert.equal(MODEL_INFO.grok.defaultModel, "grok-4.7");
   assert.equal(MODEL_INFO.grok.reasoning, CAPABILITY.ANTHROPIC_EFFORT);
   assert.equal(MODEL_INFO.grok.defaultEffort, "xhigh");
 });
@@ -255,7 +229,7 @@ test("models: fable is an Anthropic-family baked builtin (cli default via claude
   assert.equal(MODEL_INFO.fable.transport, "cli");
   assert.equal(MODEL_INFO.fable.cliKind, "claude"); // reuses the Claude Code recipe
   assert.equal(MODEL_INFO.fable.baseName, "fable");
-  assert.equal(MODEL_INFO.fable.defaultModel, "claude-fable-5");
+  assert.equal(MODEL_INFO.fable.defaultModel, "claude-fable-5-2");
   assert.equal(MODEL_INFO.fable.reasoning, CAPABILITY.ANTHROPIC_EFFORT);
   assert.equal(MODEL_INFO.fable.defaultEffort, "xhigh");
   // Shares ANTHROPIC_API_KEY with claude (distinct model ids, same key).
@@ -270,17 +244,17 @@ test("models: modelSupportsThinking stays true only for GLM_TOGGLE/KIMI_TOGGLE/A
 });
 
 test("models: modelCapability reads from model info", () => {
-  const c = { models: { glm: MODEL_INFO.glm, deepseek: MODEL_INFO.deepseek, composer: MODEL_INFO.composer } };
+  const c = { models: { glm: MODEL_INFO.glm, deepseek: MODEL_INFO.deepseek, plain: { reasoning: CAPABILITY.NONE } } };
   assert.equal(modelCapability(c, "glm"), CAPABILITY.GLM_TOGGLE);
   assert.equal(modelCapability(c, "deepseek"), CAPABILITY.OPENAI_EFFORT);
-  assert.equal(modelCapability(c, "composer"), CAPABILITY.NONE);
+  assert.equal(modelCapability(c, "plain"), CAPABILITY.NONE);
 });
 
 test("models: modelHasReasoningControl is true for non-NONE, false for NONE", () => {
-  const c = { models: { glm: MODEL_INFO.glm, deepseek: MODEL_INFO.deepseek, composer: MODEL_INFO.composer } };
+  const c = { models: { glm: MODEL_INFO.glm, deepseek: MODEL_INFO.deepseek, plain: { reasoning: CAPABILITY.NONE } } };
   assert.equal(modelHasReasoningControl(c, "deepseek"), true);
   assert.equal(modelHasReasoningControl(c, "glm"), true);
-  assert.equal(modelHasReasoningControl(c, "composer"), false);
+  assert.equal(modelHasReasoningControl(c, "plain"), false);
 });
 
 test("models: modelCapability falls back to NONE for custom models without a reasoning field", () => {
@@ -333,11 +307,6 @@ test("config: retire mode-default — unset MULTIPOLY_THINKING gives auto", () =
 test("config: all-inherit resolves to baked default effort (glm → high)", () => {
   const c = loadConfig({ ...glm });
   assert.equal(c.models.glm.reasoningEffort, "high");
-});
-
-test("config: composer baseline resolves to off (NONE capability)", () => {
-  const c = loadConfig({ ...glm });
-  assert.equal(c.models.composer.reasoningEffort, "off");
 });
 
 // --- Part B: env-defined custom models get capability ---

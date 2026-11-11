@@ -585,8 +585,8 @@ test("client[Task8]: per-call effort overrides model baseline", async () => {
 test("client[Task8]: NONE capability → no reasoning fields added to body", async () => {
   const fetchImpl = makeFetch({});
   await streamChatCompletion({
-    config: makeCapConfig({ key: "composer", capability: CAPABILITY.NONE, reasoningEffort: "off" }),
-    modelKey: "composer",
+    config: makeCapConfig({ key: "plain", capability: CAPABILITY.NONE, reasoningEffort: "off" }),
+    modelKey: "plain",
     messages: [{ role: "user", content: "x" }],
     mode: "review",
     fetchImpl,

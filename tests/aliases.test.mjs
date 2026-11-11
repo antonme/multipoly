@@ -3,7 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolveModelAlias, nearestModelKey, didYouMean, MODEL_ALIASES } from "../scripts/lib/aliases.mjs";
 
-const KEYS = ["glm", "qwen", "deepseek", "composer", "claude", "codex", "gemini", "kimi"];
+const KEYS = ["glm", "qwen", "deepseek", "plain", "claude", "codex", "gemini", "kimi"];
 
 test("exact configured key resolves to itself", () => {
   assert.equal(resolveModelAlias("codex", KEYS), "codex");
@@ -115,5 +115,18 @@ test("non-string input is tolerated and resolves to null", () => {
 test("MODEL_ALIASES never maps to a synthesizer sentinel", () => {
   for (const target of Object.values(MODEL_ALIASES)) {
     assert.ok(!["harness", "none", "caller"].includes(target));
+  }
+});
+
+test("current release aliases preserve configured model identity", () => {
+  const keys = [...KEYS, "fable", "grok", "deepseekflash"];
+  for (const [alias, key] of Object.entries({
+    "gpt-6.1-sol": "codex", "claude-opus-5-5": "claude",
+    "claude-fable-5-2": "fable", "gemini-3.8-flash": "gemini",
+    "glm5.3": "glm", "k3.1-pro": "kimi",
+    "deepseek-flash": "deepseekflash", "grok-4.7": "grok",
+  })) {
+    assert.equal(resolveModelAlias(alias, keys), key);
+    assert.equal(resolveModelAlias(alias, []), null);
   }
 });

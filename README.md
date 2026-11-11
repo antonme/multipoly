@@ -6,7 +6,7 @@ Multipoly exposes multiple coding models through one MCP server. It supports dir
 
 | Tool family | Purpose |
 |---|---|
-| `<model>_review` (`glm`, `qwen`, `deepseek`, `composer`, `claude`, `codex`, …) | Structured code review from one model |
+| `<model>_review` (`glm`, `qwen`, `deepseek`, `claude`, `codex`, …) | Structured code review from one model |
 | `<model>_consult` | Design/implementation consultation from one model |
 | `opus_review`, `opus_consult` | Alias tools routed to `claude` (registered when `claude` is configured) |
 | `gpt56_review`, `gpt56_consult` | Alias tools routed to `codex` (registered when `codex` is configured) |
@@ -38,7 +38,7 @@ environment variable by the client that launches it. A good starting council
 
 ```sh
 # ── API models (HTTP) ──
-MULTIPOLY_GLM_API_KEY=<glm-key>              # GLM 5.2 — always on
+MULTIPOLY_GLM_API_KEY=<glm-key>              # GLM 5.3 — always on
 MULTIPOLY_DEEPSEEK_API_KEY=<deepseek-key>    # DeepSeek
 MULTIPOLY_DEEPSEEK_BASE_URL=https://api.deepseek.com
 
@@ -142,11 +142,8 @@ Configure any subset of models. A model-specific tool returns a typed config err
 | GLM | http | `MULTIPOLY_GLM_API_KEY`; optional `MULTIPOLY_GLM_BASE_URL`, `MULTIPOLY_GLM_MODEL` |
 | Qwen | http | `MULTIPOLY_QWEN_API_KEY`, `MULTIPOLY_QWEN_BASE_URL`; optional `MULTIPOLY_QWEN_MODEL` |
 | DeepSeek | http | `MULTIPOLY_DEEPSEEK_API_KEY`, `MULTIPOLY_DEEPSEEK_BASE_URL`; optional `MULTIPOLY_DEEPSEEK_MODEL` |
-| Composer | cli (cursor) | `MULTIPOLY_COMPOSER_ENABLED=1`; runs via `cursor-agent` (see [Transports](#transports)) |
 
 Compatibility aliases are accepted for API keys: GLM also accepts `GLM_API_KEY` and `ZHIPU_API_KEY`; Qwen accepts `QWEN_API_KEY`; DeepSeek accepts `DEEPSEEK_API_KEY`.
-
-> **Migration (Composer):** Composer 2.5 has no HTTP API and the old HTTP form never worked. Composer is now a `cursor-agent` CLI model and is **off by default**. Setting only `MULTIPOLY_COMPOSER_API_KEY` no longer configures it — opt in with `MULTIPOLY_COMPOSER_ENABLED=1` and ensure `cursor-agent` is installed and authenticated. See [Transports](#transports).
 
 ### Baked builtins (opt-in)
 
@@ -155,73 +152,57 @@ Compatibility aliases are accepted for API keys: GLM also accepts `GLM_API_KEY` 
 | Key | Default transport | Baked display name | Env override |
 |---|---|---|---|
 | `claude` | `cli` (flips to `anthropic` when an Anthropic key is present; see [claude transport-flip rule](#model-names--aliases)) | `opus (claude cli)` / `opus (api)` | `MULTIPOLY_CLAUDE_API_KEY`, `ANTHROPIC_API_KEY` |
-| `codex` | `cli` | `gpt5.6-sol (codex cli)` | `MULTIPOLY_CODEX_API_KEY`, `OPENAI_API_KEY` |
-| `gemini` | `http` | `gemini-3.6-flash (api)` | `MULTIPOLY_GEMINI_API_KEY`, `GEMINI_API_KEY` |
-| `kimi` | `http` | `kimi-k3 (api)` | `MULTIPOLY_KIMI_API_KEY`, `MOONSHOT_API_KEY` |
-| `mimo` | `http` | `mimo-v2.5-pro (api)` | `MULTIPOLY_MIMO_API_KEY`, `XIAOMIMIMO_API_KEY` |
-| `grok` | `cli` | `grok-build (grok cli)` | `MULTIPOLY_GROK_API_KEY`, `XAI_API_KEY` |
+| `codex` | `cli` | `gpt6.1-sol (codex cli)` | `MULTIPOLY_CODEX_API_KEY`, `OPENAI_API_KEY` |
+| `gemini` | `http` | `gemini-3.8-flash (api)` | `MULTIPOLY_GEMINI_API_KEY`, `GEMINI_API_KEY` |
+| `kimi` | `http` | `kimi-k3.1-pro (api)` | `MULTIPOLY_KIMI_API_KEY`, `MOONSHOT_API_KEY` |
+| `mimo` | `http` | `mimo-v2.6-pro (api)` | `MULTIPOLY_MIMO_API_KEY`, `XIAOMIMIMO_API_KEY` |
+| `grok` | `cli` | `grok-4.7 (grok cli)` | `MULTIPOLY_GROK_API_KEY`, `XAI_API_KEY` |
 | `fable` | `cli` (flips to `anthropic` when an Anthropic key is present; same rule as `claude`) | `fable (claude cli)` / `fable (api)` | `MULTIPOLY_FABLE_API_KEY`, `ANTHROPIC_API_KEY` |
 | `qwen38` | `http` | `qwen3.8-max (api)` | `MULTIPOLY_QWEN38_API_KEY`, `ALIBABA_CODE_PLAN_API_KEY` |
-| `deepseekflash` | `http` | `deepseek-v4-flash (api)` | `MULTIPOLY_DEEPSEEKFLASH_API_KEY`, `MULTIPOLY_DEEPSEEK_API_KEY`, `DEEPSEEK_API_KEY` |
+| `deepseekflash` | `http` | `deepseek-v4.1-flash (api)` | `MULTIPOLY_DEEPSEEKFLASH_API_KEY`, `MULTIPOLY_DEEPSEEK_API_KEY`, `DEEPSEEK_API_KEY` |
 
 All env overrides from the custom-model table apply (`MULTIPOLY_<K>_TRANSPORT`, `_MODEL`, `_DISPLAY_NAME`, etc.). You no longer need to supply `MULTIPOLY_CLAUDE_DISPLAY_NAME` or `MULTIPOLY_CLAUDE_REASONING` — they are baked; env still overrides.
 
-`claude` defaults to **Claude Opus 5** (wire model `claude-opus-5`; display stays versionless `opus (…)`). Override with `MULTIPOLY_CLAUDE_MODEL` if needed.
+`claude` defaults to **Claude Opus 5.5** (wire model `claude-opus-5-5`; display stays versionless `opus (…)`). Override with `MULTIPOLY_CLAUDE_MODEL` if needed.
 
-`codex` defaults to **GPT-5.6 Sol** at effort `high` (wire model `gpt-5.6-sol`, display `gpt5.6-sol (codex cli)`). The GPT-5.6 family also offers **Terra** (balanced) and **Luna** (cheap/fast) — pin another tier with `MULTIPOLY_CODEX_MODEL`:
-
-```sh
-MULTIPOLY_CODEX_MODEL=gpt-5.6-terra   # or gpt-5.6-luna
-```
+`codex` defaults to **GPT-6.1 Sol** at effort `high` (wire model `gpt-6.1-sol`, display `gpt6.1-sol (codex cli)`). Select a different available model with `MULTIPOLY_CODEX_MODEL`; the Sol tier remains the default.
 
 Alias names `gpt5.6-sol` / `gpt5.6-terra` / `gpt5.6-luna` all resolve to the `codex` key for council selection; the wire model is still whatever `MULTIPOLY_CODEX_MODEL` (or the Sol default) sets. Tools are `codex_*` and `gpt56_*`.
 
-`gemini` defaults to **Gemini 3.6 Flash** (wire model `gemini-3.6-flash`). Override with `MULTIPOLY_GEMINI_MODEL` (e.g. `gemini-3.5-flash` if you want the previous generation).
+`gemini` defaults to **Gemini 3.8 Flash** (wire model `gemini-3.8-flash`). Override with `MULTIPOLY_GEMINI_MODEL` (e.g. `gemini-3.5-flash` if you want the previous generation).
 
-`kimi` defaults to **Kimi K3** on the **standard Moonshot open platform** —
-the OpenAI-compatible `https://api.moonshot.ai/v1` endpoint with model ID
-`kimi-k3` (use `MULTIPOLY_KIMI_BASE_URL=https://api.moonshot.cn/v1` for the
-China platform). Keys are endpoint-specific: create one on the open platform
-and pass it as `MOONSHOT_API_KEY` (or `MULTIPOLY_KIMI_API_KEY`) — a Kimi Code
-subscription key only works against `api.kimi.com/coding` and is **not** valid
-here. The stable tools remain `kimi_review` / `kimi_consult`. K3's thinking is
-always-on: multipoly maps every graded effort to `reasoning_effort: "max"`
-(the only level the platform accepts today), and `off` sends nothing — it does
-**not** disable thinking upstream. To keep the Kimi Code preview/subscription
-route instead, pin the old contract explicitly:
+`kimi` defaults to **Kimi K3.1 Pro** on the standard Moonshot open platform,
+using `https://api.moonshot.ai/v1` and model `kimi-k3.1-pro`.
+Open-platform credentials (`MOONSHOT_API_KEY`) and Kimi Code subscription keys
+are endpoint-specific. For Kimi Code use:
 
 ```sh
 MULTIPOLY_KIMI_TRANSPORT=anthropic
 MULTIPOLY_KIMI_BASE_URL=https://api.kimi.com/coding
-MULTIPOLY_KIMI_MODEL=kimi-k.3.0
+MULTIPOLY_KIMI_MODEL=k3.1-pro
 MULTIPOLY_KIMI_REASONING=kimi_toggle
 ```
 
-To run the previous-generation open-platform model, set
-`MULTIPOLY_KIMI_MODEL=kimi-k2.6`; optionally set
-`MULTIPOLY_KIMI_DISPLAY_NAME='kimi-k2.6 (api)'` as well so health output, tool
-descriptions, and logs reflect the pinned model.
+`mimo` (Xiaomi MiMo V2.6 Pro) uses the same reasoning capability class as GLM: a top-level `thinking:{type}` toggle with no graded effort — `off` disables thinking, any other effort value enables it (default `high`). It gets a minimum token floor of 8192 (review) / 4096 (consult) when no explicit cap is set, preventing empty-response failures. On the wire it sends `max_completion_tokens` instead of `max_tokens` (the MiMo API rejects the legacy field). To enable mimo, add it to `MULTIPOLY_MODELS` and supply a key — `XIAOMIMIMO_API_KEY` is recognized so existing deployments need no rename. The per-deployment `MULTIPOLY_MIMO_DISPLAY_NAME`, `_REASONING`, `_BASE_URL`, and `_MODEL` env vars are no longer needed (baked); keep only `MULTIPOLY_MIMO_MAX_TOKENS_*` if you tuned the token cap.
 
-`mimo` (Xiaomi MiMo V2.5 Pro) uses the same reasoning capability class as GLM: a top-level `thinking:{type}` toggle with no graded effort — `off` disables thinking, any other effort value enables it (default `high`). It gets a minimum token floor of 8192 (review) / 4096 (consult) when no explicit cap is set, preventing empty-response failures. On the wire it sends `max_completion_tokens` instead of `max_tokens` (the MiMo API rejects the legacy field). To enable mimo, add it to `MULTIPOLY_MODELS` and supply a key — `XIAOMIMIMO_API_KEY` is recognized so existing deployments need no rename. The per-deployment `MULTIPOLY_MIMO_DISPLAY_NAME`, `_REASONING`, `_BASE_URL`, and `_MODEL` env vars are no longer needed (baked); keep only `MULTIPOLY_MIMO_MAX_TOKENS_*` if you tuned the token cap.
+`grok` (xAI **Grok Build**) is a local coding-agent CLI, driven read-only like Claude Code/Codex. It is **cli-only** (no HTTP API is exposed here) and authenticates with the grok CLI's own OAuth — run `grok login` once; no API key env is required. Its `--effort` flag is graded and `xhigh`-native, so it shares Claude's effort class (default `xhigh`). multipoly's effort scale tops out at `xhigh` (which maps to `--effort xhigh`); grok's CLI also accepts a native `max`, but that level is not exposed through multipoly. To enable it: install the grok CLI, then add `grok` to `MULTIPOLY_MODELS` and set `MULTIPOLY_GROK_ENABLED=1` (cli models are off by default). The default model is `grok-4.7`; override with `MULTIPOLY_GROK_MODEL`.
 
-`grok` (xAI **Grok Build**) is a local coding-agent CLI, driven read-only like Claude Code/Codex. It is **cli-only** (no HTTP API is exposed here) and authenticates with the grok CLI's own OAuth — run `grok login` once; no API key env is required. Its `--effort` flag is graded and `xhigh`-native, so it shares Claude's effort class (default `xhigh`). multipoly's effort scale tops out at `xhigh` (which maps to `--effort xhigh`); grok's CLI also accepts a native `max`, but that level is not exposed through multipoly. To enable it: install the grok CLI, then add `grok` to `MULTIPOLY_MODELS` and set `MULTIPOLY_GROK_ENABLED=1` (cli models are off by default). The default model is `grok-build`; override with `MULTIPOLY_GROK_MODEL`.
-
-`fable` (**Claude Fable 5**, model `claude-fable-5`) is a sibling of the `claude` (Opus) builtin — same shape, pointed at Fable — so both can run side by side in the council. It shares Claude's graded effort class (default `xhigh`) and reaches Fable two ways, chosen by the same transport-flip rule as `claude`:
+`fable` (**Claude Fable 5.2**, model `claude-fable-5-2`) is a sibling of the `claude` (Opus) builtin — same shape, pointed at Fable — so both can run side by side in the council. It shares Claude's graded effort class (default `xhigh`) and reaches Fable two ways, chosen by the same transport-flip rule as `claude`:
 
 - **Anthropic API (native Messages):** set `ANTHROPIC_API_KEY` (or `MULTIPOLY_FABLE_API_KEY`) and, with `MULTIPOLY_FABLE_TRANSPORT` unset, `fable` auto-selects the `anthropic` transport. Override the endpoint with `ANTHROPIC_BASE_URL`. Because both `claude` and `fable` recognize `ANTHROPIC_API_KEY`, a single key flips **both** to the API (distinct model ids, same key) — intended.
-- **Claude Code CLI (`claude --model claude-fable-5`):** with no Anthropic key present, or with `MULTIPOLY_FABLE_TRANSPORT=cli` set explicitly (the escape hatch when you have `ANTHROPIC_API_KEY` exported but want CLI/OAuth billing), `fable` runs read-only through the local `claude` binary. Like every cli model it is **off until `MULTIPOLY_FABLE_ENABLED=1`**.
+- **Claude Code CLI (`claude --model claude-fable-5-2`):** with no Anthropic key present, or with `MULTIPOLY_FABLE_TRANSPORT=cli` set explicitly (the escape hatch when you have `ANTHROPIC_API_KEY` exported but want CLI/OAuth billing), `fable` runs read-only through the local `claude` binary. Like every cli model it is **off until `MULTIPOLY_FABLE_ENABLED=1`**.
 
-The default model is `claude-fable-5`; override with `MULTIPOLY_FABLE_MODEL`. Fable's thinking is always-on (`{type:"disabled"}` and `budget_tokens` both 400 on the wire); multipoly never sends either — at effort `off` it omits `thinking` (adaptive runs), and at graded effort it sends `{type:"adaptive"}` + `output_config.effort`, so no Fable-specific handling is required. Two Fable behaviors are surfaced but not specially handled: a safety-classifier decline arrives as a `refusal` stop reason (surfaced as `finishReason:"refusal"`, same as `claude`), and Fable requires 30-day data retention on the org (a `400` on every request otherwise) — both are account/org concerns, not multipoly config.
+The default model is `claude-fable-5-2`; override with `MULTIPOLY_FABLE_MODEL`. Fable's thinking is always-on (`{type:"disabled"}` and `budget_tokens` both 400 on the wire); multipoly never sends either — at effort `off` it omits `thinking` (adaptive runs), and at graded effort it sends `{type:"adaptive"}` + `output_config.effort`, so no Fable-specific handling is required. Two Fable behaviors are surfaced but not specially handled: a safety-classifier decline arrives as a `refusal` stop reason (surfaced as `finishReason:"refusal"`, same as `claude`), and Fable requires 30-day data retention on the org (a `400` on every request otherwise) — both are account/org concerns, not multipoly config.
 
-`qwen38` (**Qwen 3.8 Max**, model `qwen3.8-max-preview`) is a sibling of the always-on `qwen` (3.7) builtin — same OpenAI-compatible `http` shape and `qwen_budget` reasoning (separate `reasoning_content`, `enable_thinking`/`thinking_budget`), so both can run side by side in the council. Qwen 3.8 is a Token-Plan-only preview: neither the eu-central DashScope workspace (the `qwen` builtin's home) nor the CN Beijing workspace carries any 3.8 model, so this entry pins the ap-southeast-1 Token Plan compatible-mode endpoint (`https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`) and its dedicated key. `ALIBABA_CODE_PLAN_API_KEY` is recognized as an alias so existing deployments need no rename. To enable it, add `qwen38` to `MULTIPOLY_MODELS` and supply a key; set `MULTIPOLY_QWEN38_DISPLAY_NAME='Qwen 3.8 Max'` for a cleaner tool/health label. Override the model or endpoint with `MULTIPOLY_QWEN38_MODEL` / `MULTIPOLY_QWEN38_BASE_URL`.
+`qwen38` retains its canonical key and now selects stable `qwen3.8-max` on the Token Plan endpoint (`https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1`), using `ALIBABA_CODE_PLAN_API_KEY`. The always-on `qwen` builtin also defaults to stable 3.8, with its existing deployment endpoint. Qwen4 Max preview is listed by the current catalog but returned 403 for this deployment; select it explicitly only with account access.
 
-`deepseekflash` (**DeepSeek V4 Flash**, wire model `deepseek-v4-flash`) is the fast/cheap sibling of the always-on `deepseek` (V4 Pro) builtin — same OpenAI-compatible `http` shape and `deepseek` reasoning vocab (top-level `reasoning_effort` `high`/`max`; `off` sends `thinking:{type:"disabled"}`), so no transport or reasoning changes are needed and both can run side by side in the council. It is reached at the official endpoint (`https://api.deepseek.com`) and shares the standard DeepSeek credentials, so an existing deepseek deployment enables it by just adding `deepseekflash` to `MULTIPOLY_MODELS` — no new key or base URL required (override with `MULTIPOLY_DEEPSEEKFLASH_MODEL` / `MULTIPOLY_DEEPSEEKFLASH_BASE_URL`). Note on naming: DeepSeek updates the `deepseek-v4-flash` handle in place — since 2026-07-31 it serves **DeepSeek-V4-Flash-0731**, and the callable model id stays `deepseek-v4-flash` (the "0731" is a release stamp, not part of the id). 1M-token context, 384K max output. Tools are `deepseekflash_review` / `deepseekflash_consult`; aliases `deepseek-v4-flash`, `deepseek-flash`, `deepseek-v4-flash-0731`, and `deepseek-flash-0731` all resolve to the `deepseekflash` key.
+`deepseekflash` selects **DeepSeek V4.1 Flash** with the rolling wire ID `deepseek-flash`, at `https://api.deepseek.com`. It shares the standard DeepSeek credentials and reasoning vocabulary with `deepseek`, so add `deepseekflash` to `MULTIPOLY_MODELS` to enable it alongside V4 Pro. Older `deepseek-v4-flash` and dated aliases remain accepted for council selection.
 
 > **Migration from `MULTIPOLY_OPUS_*`.** The standalone `opus` model is removed. Use `MULTIPOLY_MODELS=claude` instead, and rename `MULTIPOLY_OPUS_*` env vars to `MULTIPOLY_CLAUDE_*`. At startup the server emits a structured stderr warning naming any `MULTIPOLY_OPUS_*` or `MULTIPOLY_GPT55_*` vars it finds — their values are no longer used to configure a model and are ignored as credentials (use `MULTIPOLY_CLAUDE_*` / `MULTIPOLY_CODEX_*` instead). Note: the mere presence of `MULTIPOLY_OPUS_API_KEY` is still honored as a legacy Anthropic-key signal for the claude transport-flip default (see below).
 
 ### Custom models
 
-Beyond the four always-on builtins (glm/qwen/deepseek/composer) and the opt-in baked builtins above, you can register additional models without code changes via `MULTIPOLY_MODELS` (comma-separated keys). Each custom key `<K>` (lowercase, starting with a letter; may not collide with a builtin or the reserved words `harness`/`none`/`caller`) is configured from:
+Beyond the three always-on builtins (glm/qwen/deepseek) and the opt-in baked builtins above, you can register additional models without code changes via `MULTIPOLY_MODELS` (comma-separated keys). Each custom key `<K>` (lowercase, starting with a letter; may not collide with a builtin or the reserved words `harness`/`none`/`caller`) is configured from:
 
 | Env | Required | Notes |
 |---|---|---|
@@ -242,7 +223,7 @@ Server-wide settings:
 |---|---|---|
 | `MULTIPOLY_REASONING_EFFORT` | (per-model default) | `off\|low\|medium\|high\|xhigh` — server-wide effort baseline for all models. |
 | `MULTIPOLY_THINKING` | `auto` | Coarse alias: `on` → `medium` effort, `off` → `off`, `auto` → inherit. `MULTIPOLY_REASONING_EFFORT` takes precedence when both are set. |
-| `MULTIPOLY_SYNTHESIZER` | (unset) | Default council synthesizer: any active model key (`glm`/`qwen`/`deepseek`/`composer`/`claude`/`codex`/custom), or `harness`/`none`/`caller` to defer to the calling harness. Unset = defer. Overridable per-call. |
+| `MULTIPOLY_SYNTHESIZER` | (unset) | Default council synthesizer: any active model key (`glm`/`qwen`/`deepseek`/`claude`/`codex`/custom), or `harness`/`none`/`caller` to defer to the calling harness. Unset = defer. Overridable per-call. |
 | `MULTIPOLY_MAX_TOKENS_REVIEW` | 131072 | Output-token cap for review and council review synthesis. |
 | `MULTIPOLY_MAX_TOKENS_CONSULT` | 131072 | Output-token cap for consult and council consult synthesis. |
 | `MULTIPOLY_TIMEOUT_MS` | 600000 | Upstream stream inactivity timeout in ms, range `[1, 3600000]`. |
@@ -284,7 +265,6 @@ Every model that supports graded reasoning exposes a `reasoning_effort` argument
 | `mimo` | `high` | `thinking: {type: "enabled"\|"disabled"}` toggle (same class as GLM; no graded effort) |
 | `grok` | `xhigh` | `--effort` cli flag (graded `low`–`xhigh`, `xhigh`-native; same class as claude) |
 | `fable` | `xhigh` | `output_config.effort` + `thinking: {type: "adaptive"}` (api) / `--effort` cli flag (same class as claude) |
-| `composer` | `off` | no reasoning control (cursor-agent) |
 
 **Precedence order (highest to lowest):**
 
@@ -295,7 +275,7 @@ Every model that supports graded reasoning exposes a `reasoning_effort` argument
 5. Server-wide `MULTIPOLY_THINKING` (coarse alias)
 6. Per-model baked default (table above)
 
-Models with `CAPABILITY.NONE` (e.g. `composer`) do not expose the `reasoning_effort` argument and ignore all effort settings.
+Models with `CAPABILITY.NONE` (custom models with no reasoning controls) do not expose the `reasoning_effort` argument and ignore all effort settings.
 
 > **Note:** The old review-on / consult-off "mode-default" asymmetry was retired. All modes now use the same per-model default effort. Use `MULTIPOLY_REASONING_EFFORT=off` if you want to disable reasoning server-wide.
 
@@ -342,7 +322,7 @@ MULTIPOLY_HAIKU_MODEL=claude-haiku-4-5
 > override, sending the Opus-style payload to a non-Claude endpoint will result
 > in an API error.
 
-### CLI agents (Claude Code, Codex, Cursor/Composer, Gemini, agy, Kimi, Grok)
+### CLI agents (Claude Code, Codex, Cursor, Gemini, agy, Kimi, Grok)
 
 A `cli` model shells out to a local agent in its **read-only** mode. CLI models
 are **opt-in** (`MULTIPOLY_<K>_ENABLED=1`). Config/MCP isolation varies by kind:
@@ -363,12 +343,12 @@ can write.
 | `kimi` | `kimi` | `--print --plan` (`--print` implies auto-run, so `--plan` is mandatory) | `kimi login` / `KIMI_API_KEY` |
 | `grok` | `grok` | `--permission-mode plan` (+ `--no-subagents`, `--disable-web-search`, `--no-memory`); prompt via `--prompt-file` (0600) | `grok login` (OAuth) |
 
-Per-cli env (`<K>` is the model key, e.g. `COMPOSER`):
+Per-cli env (`<K>` is the model key, e.g. `CLAUDE`):
 
 | Env | Notes |
 |---|---|
 | `MULTIPOLY_<K>_ENABLED` | `1` to enable (required — cli models are off by default) |
-| `MULTIPOLY_<K>_CLI_KIND` | one of the kinds above (builtin `composer` is fixed to `cursor`) |
+| `MULTIPOLY_<K>_CLI_KIND` | one of the kinds above |
 | `MULTIPOLY_<K>_MODEL` | the `--model`/`-m` value |
 | `MULTIPOLY_<K>_CLI` | override the binary path |
 | `MULTIPOLY_<K>_AUTH_TOKEN_ENV` | name of an env var the agent needs (e.g. `CURSOR_API_KEY`); presence is checked before spawning |
@@ -415,7 +395,7 @@ MULTIPOLY_MODELS=cdx
 MULTIPOLY_CDX_TRANSPORT=cli
 MULTIPOLY_CDX_CLI_KIND=codex
 MULTIPOLY_CDX_ENABLED=1
-MULTIPOLY_CDX_MODEL=gpt-5.6-sol
+MULTIPOLY_CDX_MODEL=gpt-6.1-sol
 ```
 
 ### JSON registry file
@@ -429,7 +409,7 @@ there is no `argv` field (argv is built from the controlled `cliKind` recipe).
 ```jsonc
 {
   "models": {
-    "myopus": { "transport": "anthropic", "model": "claude-opus-5", "apiKeyEnv": "ANTHROPIC_API_KEY" },
+    "myopus": { "transport": "anthropic", "model": "claude-opus-5-5", "apiKeyEnv": "ANTHROPIC_API_KEY" },
     "mygem":  { "transport": "cli", "cliKind": "gemini", "model": "gemini-3-pro",
                 "authTokenEnv": "GEMINI_API_KEY", "cwd": "temp", "enabled": true }
   }
@@ -447,8 +427,8 @@ Allowed entry fields: `transport`, `displayName`, `model`, `baseUrl`,
 
 Every registered model surfaces a human-readable display name in the form `<base> (<transport>)`:
 
-- CLI models: `<base> (<kind> cli)` — e.g. `opus (claude cli)`, `gpt5.6-sol (codex cli)`, `composer-2.5 (cursor cli)`
-- API models (http or anthropic transport): `<base> (api)` — e.g. `opus (api)`, `gemini-3.6-flash (api)`, `glm-5.2 (api)`
+- CLI models: `<base> (<kind> cli)` — e.g. `opus (claude cli)`, `gpt6.1-sol (codex cli)`
+- API models (http or anthropic transport): `<base> (api)` — e.g. `opus (api)`, `gemini-3.8-flash (api)`, `glm-5.3 (api)`
 
 The display name is shown in descriptions and logs. Override it per-model with `MULTIPOLY_<K>_DISPLAY_NAME`.
 
@@ -460,10 +440,9 @@ Lenient name resolution applies wherever a model name is accepted as input: the 
 |---|---|
 | `gpt`, `gpt5`, `gpt5.6`, `gpt5.6-sol`, `gpt5.6-terra`, `gpt5.6-luna`, `openai` | `codex` |
 | `opus`, `claude-opus`, `opus-5`, `claude-opus-5`, `opus-4.7` | `claude` |
-| `flash`, `gemini-flash`, `gemini-3.6`, `gemini-3.6-flash`, `gemini-3.5` | `gemini` |
+| `flash`, `gemini-flash`, `gemini-3.6`, `gemini-3.8-flash`, `gemini-3.5` | `gemini` |
 | `zhipu`, `glm5.1` | `glm` |
 | `k3`, `kimi-k3`, `kimi-k.3.0`, `k2`, `moonshot` | `kimi` |
-| `cursor` | `composer` |
 | `deepseek-v4` | `deepseek` |
 | `deepseek-v4-flash`, `deepseek-flash`, `deepseek-v4-flash-0731`, `deepseek-flash-0731` | `deepseekflash` |
 | `qwen-max` | `qwen` |
@@ -554,7 +533,7 @@ Council tools accept the same review/consult arguments plus:
 
 To merge server-side instead, set a `synthesizer`:
 
-- A model key (`glm`, `qwen`, `deepseek`, `composer`, `claude`, `codex`, or a custom key) runs that model as the synthesizer. Lenient name resolution applies: `opus` resolves to `claude`, `gpt`/`gpt5.6`/`gpt5.6-sol` to `codex`, etc. (see [Model names & aliases](#model-names--aliases)). If the named model isn't configured, resolution falls through the chain `chosen → qwen → deepseek → glm → composer → any other configured model` and uses the first configured model.
+- A model key (`glm`, `qwen`, `deepseek`, `claude`, `codex`, or a custom key) runs that model as the synthesizer. Lenient name resolution applies: `opus` resolves to `claude`, `gpt`/`gpt5.6`/`gpt5.6-sol` to `codex`, etc. (see [Model names & aliases](#model-names--aliases)). If the named model isn't configured, resolution falls through the chain `chosen → qwen → deepseek → glm → any other configured model` and uses the first configured model.
 - `harness` / `none` / `caller` forces the default defer-to-harness behavior even when `MULTIPOLY_SYNTHESIZER` names a model.
 
 The per-call `synthesizer` argument overrides the `MULTIPOLY_SYNTHESIZER` env default. When server-side synthesis runs, member outputs are re-scanned for secrets before being sent to the synthesizer provider.
@@ -623,8 +602,8 @@ If the client kills the call first, no server-side setting can save it. Raise th
 
 ## Slash Commands
 
-- `/glm-review [base-ref]`, `/qwen-review [base-ref]`, `/deepseek-review [base-ref]`, `/composer-review [base-ref]`
-- `/glm-consult <question>`, `/qwen-consult <question>`, `/deepseek-consult <question>`, `/composer-consult <question>`
+- `/glm-review [base-ref]`, `/qwen-review [base-ref]`, `/deepseek-review [base-ref]`, `-review [base-ref]`
+- `/glm-consult <question>`, `/qwen-consult <question>`, `/deepseek-consult <question>`, `-consult <question>`
 - `/council-review [base-ref]`
 - `/council-consult <question>`
 
@@ -667,6 +646,7 @@ NODE_OPTIONS=--dns-result-order=ipv4first node /path/to/multipoly/scripts/multip
 ```sh
 npm test
 npm run health
+npm run smoke           # live calls, uses configured provider credentials
 npm run start
 ```
 

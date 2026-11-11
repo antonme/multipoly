@@ -6,8 +6,6 @@ import { createServer, buildServerSurface, registryFromConfig } from "../scripts
 import { loadConfig } from "../scripts/lib/config.mjs";
 
 const BUILTIN_TOOL_NAMES = [
-  "composer_consult",
-  "composer_review",
   "council_consult",
   "council_review",
   "deepseek_consult",
@@ -87,27 +85,27 @@ test("surface: every advertised schema's keys equal its validator key set", () =
 
 // ── Task 11: per-call reasoning_effort tool argument ──────────────────────────
 
-test("schema: glm_review has reasoning_effort with correct enum; composer_review does not", () => {
-  const { tools } = buildServerSurface();
+test("schema: glm_review has reasoning_effort with correct enum; plain_review does not", () => {
+  const { tools } = buildServerSurface({ keys: ["glm", "plain"], info: { glm: {reasoning: "http_thinking_toggle"}, plain: {reasoning: "none"} } });
   const glmReview = tools.find((t) => t.name === "glm_review");
-  const composerReview = tools.find((t) => t.name === "composer_review");
+  const plainReview = tools.find((t) => t.name === "plain_review");
   assert.ok(glmReview, "glm_review not found");
-  assert.ok(composerReview, "composer_review not found");
+  assert.ok(plainReview, "plain_review not found");
   // GLM has reasoning control — must expose reasoning_effort
   assert.ok("reasoning_effort" in glmReview.inputSchema.properties, "glm_review missing reasoning_effort");
   const re = glmReview.inputSchema.properties.reasoning_effort;
   assert.equal(re.type, "string");
   assert.deepEqual(re.enum, ["off", "low", "medium", "high", "xhigh"]);
-  // Composer has NONE capability — must NOT expose reasoning_effort
-  assert.ok(!("reasoning_effort" in composerReview.inputSchema.properties), "composer_review should not have reasoning_effort");
+  // Plain custom model has NONE capability — must NOT expose reasoning_effort
+  assert.ok(!("reasoning_effort" in plainReview.inputSchema.properties), "plain_review should not have reasoning_effort");
 });
 
-test("schema: glm_consult has reasoning_effort; composer_consult does not", () => {
-  const { tools } = buildServerSurface();
+test("schema: glm_consult has reasoning_effort; plain_consult does not", () => {
+  const { tools } = buildServerSurface({ keys: ["glm", "plain"], info: { glm: {reasoning: "http_thinking_toggle"}, plain: {reasoning: "none"} } });
   const glmConsult = tools.find((t) => t.name === "glm_consult");
-  const composerConsult = tools.find((t) => t.name === "composer_consult");
+  const plainConsult = tools.find((t) => t.name === "plain_consult");
   assert.ok("reasoning_effort" in glmConsult.inputSchema.properties, "glm_consult missing reasoning_effort");
-  assert.ok(!("reasoning_effort" in composerConsult.inputSchema.properties), "composer_consult should not have reasoning_effort");
+  assert.ok(!("reasoning_effort" in plainConsult.inputSchema.properties), "plain_consult should not have reasoning_effort");
 });
 
 test("schema: council_review and council_consult have reasoning_effort", () => {
@@ -162,12 +160,12 @@ test("integration: glm_review rejects invalid reasoning_effort value 'turbo'", a
   }
 });
 
-test("integration: composer_review rejects reasoning_effort argument (unknown key for NONE model)", async () => {
-  const config = loadConfig({ MULTIPOLY_COMPOSER_ENABLED: "1" });
+test("integration: plain_review rejects reasoning_effort argument (unknown key for NONE model)", async () => {
+  const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "dummy", MULTIPOLY_MODELS: "plain" });
   const conn = await connect(config);
   try {
     const res = await conn.client.callTool({
-      name: "composer_review",
+      name: "plain_review",
       arguments: { diff_base: "main", reasoning_effort: "low" },
     });
     assert.equal(res.isError, true);
