@@ -567,6 +567,30 @@ test("client[Task8]: gemini vocab + off → reasoning_effort=minimal", async () 
   assert.equal("reasoningEffort" in sent, false);
 });
 
+test("client: gemini4 (Carbon) clamps xhigh→high and off→low, while hydrogen preserves xhigh", async () => {
+  const carbonFetch = makeFetch({});
+  await streamChatCompletion({
+    config: makeCapConfig({ key: "gemini", capability: CAPABILITY.OPENAI_EFFORT, vocab: "gemini4", reasoningEffort: "high", model: "gemini-4-carbon" }),
+    modelKey: "gemini",
+    messages: [{ role: "user", content: "x" }],
+    mode: "review",
+    reasoningEffort: "xhigh",
+    fetchImpl: carbonFetch,
+  });
+  assert.equal(JSON.parse(carbonFetch.calls[0].opts.body).reasoning_effort, "high");
+
+  const hydrogenFetch = makeFetch({});
+  await streamChatCompletion({
+    config: makeCapConfig({ key: "hydrogen", capability: CAPABILITY.OPENAI_EFFORT, vocab: "hydrogen", reasoningEffort: "high", model: "gemini-4-hydrogen" }),
+    modelKey: "hydrogen",
+    messages: [{ role: "user", content: "x" }],
+    mode: "review",
+    reasoningEffort: "xhigh",
+    fetchImpl: hydrogenFetch,
+  });
+  assert.equal(JSON.parse(hydrogenFetch.calls[0].opts.body).reasoning_effort, "xhigh");
+});
+
 test("client[Task8]: per-call effort overrides model baseline", async () => {
   const fetchImpl = makeFetch({});
   // baseline is "high" → thinking enabled; per-call "off" must win

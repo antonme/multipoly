@@ -47,6 +47,14 @@ export function effortToOpenAiFields(e, { vocab }) {
   // only "max". Every graded effort maps to "max"; "off" sends nothing (K3
   // still reasons at max upstream — it cannot be turned off).
   if (vocab === "kimi") return e === "off" ? {} : { reasoning_effort: "max" };
+  // Gemini 4 Hydrogen always reasons and natively supports low..xhigh.
+  if (vocab === "hydrogen" || vocab === "gemini4-hydrogen") {
+    return { reasoning_effort: e === "off" ? "low" : e };
+  }
+  // Gemini 4 Carbon always reasons; low is its minimum supported level and high is its maximum.
+  if (vocab === "gemini4" || vocab === "gemini4-carbon") {
+    return { reasoning_effort: e === "off" ? "low" : e === "xhigh" ? "high" : e };
+  }
   if (e === "off") {
     if (vocab === "deepseek") return { thinking: { type: "disabled" } }; // top-level (raw fetch)
     return { reasoning_effort: "minimal" }; // gemini etc. cannot fully disable

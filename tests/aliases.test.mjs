@@ -118,10 +118,25 @@ test("MODEL_ALIASES never maps to a synthesizer sentinel", () => {
   }
 });
 
+test("hydrogen aliases resolve to hydrogen only when configured (and never misroute to gemini)", () => {
+  const keys = [...KEYS, "hydrogen"];
+  for (const alias of ["hydrogen", "gemini-4-hydrogen", "gemini4-hydrogen", "gemini-hydrogen"]) {
+    assert.equal(resolveModelAlias(alias, keys), "hydrogen");
+    // Unconfigured hydrogen → no resolution, and must NOT fall through to gemini (Carbon).
+    assert.equal(resolveModelAlias(alias, KEYS), null);
+  }
+  // Carbon and Gemini 4 generic aliases still target gemini.
+  for (const alias of ["carbon", "gemini4", "gemini-4-carbon", "gemini-carbon"]) {
+    assert.equal(resolveModelAlias(alias, keys), "gemini");
+  }
+});
+
 test("current release aliases preserve configured model identity", () => {
-  const keys = [...KEYS, "fable", "grok", "deepseekflash"];
+  const keys = [...KEYS, "fable", "grok", "deepseekflash", "hydrogen"];
   for (const [alias, key] of Object.entries({
     "gpt-6.1-sol": "codex", "claude-opus-5-5": "claude",
+    "gemini-4-carbon": "gemini", carbon: "gemini", "gemini4": "gemini",
+    "gemini-4-hydrogen": "hydrogen", "gemini-hydrogen": "hydrogen",
     "claude-fable-5-2": "fable", "gemini-3.8-flash": "gemini",
     "glm5.3": "glm", "k3.1-pro": "kimi",
     "deepseek-flash": "deepseekflash", "grok-4.7": "grok",

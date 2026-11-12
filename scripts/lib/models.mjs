@@ -43,7 +43,41 @@ export const MODEL_KEYS = Object.freeze(["glm", "qwen", "deepseek"]);
 // Promotable builtins: present in MODEL_INFO but NOT in MODEL_KEYS (opt-in via
 // MULTIPOLY_MODELS). When listed, the registry loader merges the baked MODEL_INFO
 // base under env overrides instead of building from scratch.
-const PROMOTABLE_BUILTINS = new Set(["claude", "codex", "gemini", "kimi", "mimo", "grok", "fable", "qwen38", "deepseekflash"]);
+const PROMOTABLE_BUILTINS = new Set([
+  "claude",
+  "codex",
+  "gemini",
+  "hydrogen",
+  "kimi",
+  "mimo",
+  "grok",
+  "fable",
+  "qwen38",
+  "deepseekflash",
+]);
+
+const OPENAI_EFFORT_VOCABS = new Set([
+  "deepseek",
+  "gemini",
+  "gemini4",
+  "gemini4-carbon",
+  "hydrogen",
+  "gemini4-hydrogen",
+]);
+
+// Infer the OpenAI-compat reasoning vocabulary from an explicit Gemini model ID
+// when MULTIPOLY_<K>_REASONING_VOCAB is unset:
+//  - Gemini 4 Hydrogen: always-on reasoning, low..xhigh native ("hydrogen")
+//  - Gemini 4 Carbon / other Gemini 4: always-on reasoning, low..high ("gemini4")
+//  - Gemini 3.x: minimal..high ("gemini")
+function inferGeminiReasoningVocab(modelId, fallback) {
+  const m = (modelId || "").trim().toLowerCase();
+  if (!m) return fallback;
+  if (m.includes("hydrogen")) return "hydrogen";
+  if (m.includes("carbon") || m.startsWith("gemini-4")) return "gemini4";
+  if (m.startsWith("gemini-3")) return "gemini";
+  return fallback;
+}
 
 // The three transports a model can be reached over. `http` is the default
 // OpenAI-compatible streaming client; `anthropic` is the native Messages API;
@@ -140,14 +174,29 @@ export const MODEL_INFO = Object.freeze({
   }),
   gemini: Object.freeze({
     key: "gemini",
-    baseName: "gemini-3.8-flash",
+    baseName: "gemini-4-carbon",
     transport: "http",
-    defaultModel: "gemini-3.8-flash",
+    defaultModel: "gemini-4-carbon",
     defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
     apiKeyEnv: ["MULTIPOLY_GEMINI_API_KEY", "GEMINI_API_KEY"],
     supportsThinking: false,
     reasoning: CAPABILITY.OPENAI_EFFORT,
-    reasoningVocab: "gemini",
+    reasoningVocab: "gemini4",
+    defaultEffort: "high",
+  }),
+  // Gemini 4 Hydrogen — fast, high-efficiency Gemini 4 sibling of `gemini` (Carbon).
+  // Shares the Google OpenAI-compatible endpoint and GEMINI_API_KEY credentials so
+  // both Carbon (`gemini`) and Hydrogen (`hydrogen`) can run side by side in councils.
+  hydrogen: Object.freeze({
+    key: "hydrogen",
+    baseName: "gemini-4-hydrogen",
+    transport: "http",
+    defaultModel: "gemini-4-hydrogen",
+    defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+    apiKeyEnv: ["MULTIPOLY_HYDROGEN_API_KEY", "MULTIPOLY_GEMINI_API_KEY", "GEMINI_API_KEY"],
+    supportsThinking: false,
+    reasoning: CAPABILITY.OPENAI_EFFORT,
+    reasoningVocab: "hydrogen",
     defaultEffort: "high",
   }),
   // Moonshot open-platform model ID; Kimi Code uses `k3.1-pro` instead.
@@ -313,15 +362,18 @@ export function loadModelRegistry(env = process.env) {
     if (baked) {
       // ── Promotable builtin path: merge baked MODEL_INFO base under env overrides ──
       const thinkingEnv = env[`${prefix}_THINKING`];
+      const modelEnv = (env[`${prefix}_MODEL`] || "").trim();
+      const isGeminiFamily = key === "gemini" || key === "hydrogen";
+      const effectiveBaseName = isGeminiFamily && modelEnv ? modelEnv : baked.baseName;
       const base = {
         key,
         transport,
         // DISPLAY_NAME env wins; else convention from baseName; else baked displayName; else key
         displayName:
           (env[`${prefix}_DISPLAY_NAME`] || "").trim() ||
-          (baked.baseName
+          (effectiveBaseName
             ? computeDisplayName(
-                baked.baseName,
+                effectiveBaseName,
                 transport,
                 // cliKind for the display: baked value or env override
                 (env[`${prefix}_CLI_KIND`] || "").trim().toLowerCase() || baked.cliKind,
@@ -368,12 +420,15 @@ export function loadModelRegistry(env = process.env) {
         base.reasoning = CAPABILITY.NONE;
       }
 
-      // reasoningVocab: env override, else baked
-      const vocabEnv = (env[`${prefix}_REASONING_VOCAB`] || "").trim();
+      // reasoningVocab: env override, else model-inferred for Gemini family, else baked
+      const vocabEnv = (env[`${prefix}_REASONING_VOCAB`] || "").trim().toLowerCase();
       if (vocabEnv && base.reasoning === CAPABILITY.OPENAI_EFFORT) {
         base.reasoningVocab = vocabEnv;
-      } else if (baked.reasoningVocab && base.reasoning === CAPABILITY.OPENAI_EFFORT) {
-        base.reasoningVocab = baked.reasoningVocab;
+      } else if (base.reasoning === CAPABILITY.OPENAI_EFFORT) {
+        const inferred = isGeminiFamily
+          ? inferGeminiReasoningVocab(modelEnv, baked.reasoningVocab)
+          : baked.reasoningVocab;
+        if (inferred) base.reasoningVocab = inferred;
       }
 
       // cliKind: env override, else baked
@@ -425,7 +480,7 @@ export function loadModelRegistry(env = process.env) {
       } else if (transport === "http") {
         // Infer from REASONING_VOCAB when available.
         const vocab = (env[`${prefix}_REASONING_VOCAB`] || "").trim().toLowerCase();
-        if (vocab === "deepseek" || vocab === "gemini") {
+        if (OPENAI_EFFORT_VOCABS.has(vocab)) {
           base.reasoning = CAPABILITY.OPENAI_EFFORT;
         } else if (vocab === "glm") {
           base.reasoning = CAPABILITY.GLM_TOGGLE;
@@ -439,7 +494,7 @@ export function loadModelRegistry(env = process.env) {
         base.reasoning = CAPABILITY.NONE;
       }
       // reasoningVocab: carry forward when OPENAI_EFFORT and REASONING_VOCAB is set.
-      const vocab = (env[`${prefix}_REASONING_VOCAB`] || "").trim();
+      const vocab = (env[`${prefix}_REASONING_VOCAB`] || "").trim().toLowerCase();
       if (vocab && base.reasoning === CAPABILITY.OPENAI_EFFORT) {
         base.reasoningVocab = vocab;
       }

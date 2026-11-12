@@ -1011,3 +1011,96 @@ test("retired Composer settings do not register or enable a model", () => {
   assert.equal(Object.hasOwn(c.models, "composer"), false);
   assert.equal(c.modelKeys.includes("composer"), false);
 });
+
+test("Gemini defaults to Carbon with its supported reasoning vocabulary", () => {
+  const config = loadConfig({ MULTIPOLY_GLM_API_KEY: "test", MULTIPOLY_MODELS: "gemini", GEMINI_API_KEY: "test" });
+  assert.equal(config.models.gemini.model, "gemini-4-carbon");
+  assert.equal(config.models.gemini.displayName, "gemini-4-carbon (api)");
+  assert.equal(config.models.gemini.reasoningVocab, "gemini4");
+});
+
+test("MULTIPOLY_GEMINI_MODEL=gemini-4-hydrogen switches gemini wire model, display name, and reasoning vocab", () => {
+  const hyd = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "test",
+    MULTIPOLY_MODELS: "gemini",
+    GEMINI_API_KEY: "test",
+    MULTIPOLY_GEMINI_MODEL: "gemini-4-hydrogen",
+  });
+  assert.equal(hyd.models.gemini.model, "gemini-4-hydrogen");
+  assert.equal(hyd.models.gemini.displayName, "gemini-4-hydrogen (api)");
+  assert.equal(hyd.models.gemini.reasoningVocab, "hydrogen");
+
+  // Gemini 3 model override infers legacy gemini vocab unless explicitly overridden.
+  const g3 = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "test",
+    MULTIPOLY_MODELS: "gemini",
+    GEMINI_API_KEY: "test",
+    MULTIPOLY_GEMINI_MODEL: "gemini-3.8-flash",
+  });
+  assert.equal(g3.models.gemini.model, "gemini-3.8-flash");
+  assert.equal(g3.models.gemini.displayName, "gemini-3.8-flash (api)");
+  assert.equal(g3.models.gemini.reasoningVocab, "gemini");
+
+  // Explicit DISPLAY_NAME and REASONING_VOCAB overrides still win.
+  const explicit = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "test",
+    MULTIPOLY_MODELS: "gemini",
+    GEMINI_API_KEY: "test",
+    MULTIPOLY_GEMINI_MODEL: "gemini-4-hydrogen",
+    MULTIPOLY_GEMINI_DISPLAY_NAME: "Custom Gemini",
+    MULTIPOLY_GEMINI_REASONING_VOCAB: "gemini4",
+  });
+  assert.equal(explicit.models.gemini.displayName, "Custom Gemini");
+  assert.equal(explicit.models.gemini.reasoningVocab, "gemini4");
+});
+
+test("hydrogen baked builtin defaults to Gemini 4 Hydrogen, shares Gemini credentials, and coexists with Carbon", () => {
+  assert.equal(MODEL_INFO.hydrogen.baseName, "gemini-4-hydrogen");
+  assert.equal(MODEL_INFO.hydrogen.transport, "http");
+  assert.equal(MODEL_INFO.hydrogen.defaultModel, "gemini-4-hydrogen");
+  assert.equal(MODEL_INFO.hydrogen.defaultBaseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
+  assert.equal(MODEL_INFO.hydrogen.reasoning, "openai_effort");
+  assert.equal(MODEL_INFO.hydrogen.reasoningVocab, "hydrogen");
+  assert.equal(MODEL_INFO.hydrogen.defaultEffort, "high");
+  assert.deepEqual(
+    [...MODEL_INFO.hydrogen.apiKeyEnv],
+    ["MULTIPOLY_HYDROGEN_API_KEY", "MULTIPOLY_GEMINI_API_KEY", "GEMINI_API_KEY"],
+  );
+
+  // Own key configures hydrogen.
+  const own = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "hydrogen",
+    MULTIPOLY_HYDROGEN_API_KEY: "hyd-key",
+  });
+  assert.equal(own.models.hydrogen.configured, true);
+  assert.equal(own.models.hydrogen.model, "gemini-4-hydrogen");
+  assert.equal(own.models.hydrogen.baseUrl, "https://generativelanguage.googleapis.com/v1beta/openai");
+  assert.equal(own.models.hydrogen.displayName, "gemini-4-hydrogen (api)");
+  assert.equal(own.models.hydrogen.reasoning, "openai_effort");
+  assert.equal(own.models.hydrogen.reasoningVocab, "hydrogen");
+  assert.equal(own.models.hydrogen.apiKeyEnv, "MULTIPOLY_HYDROGEN_API_KEY");
+
+  // Coexistence: `gemini` (Carbon) and `hydrogen` (Hydrogen) run side by side on shared GEMINI_API_KEY.
+  const both = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "gemini,hydrogen",
+    GEMINI_API_KEY: "shared-gem-key",
+  });
+  assert.equal(both.models.gemini.configured, true);
+  assert.equal(both.models.gemini.model, "gemini-4-carbon");
+  assert.equal(both.models.gemini.reasoningVocab, "gemini4");
+  assert.equal(both.models.hydrogen.configured, true);
+  assert.equal(both.models.hydrogen.model, "gemini-4-hydrogen");
+  assert.equal(both.models.hydrogen.reasoningVocab, "hydrogen");
+  assert.equal(both.models.hydrogen.apiKeyEnv, "GEMINI_API_KEY");
+
+  // Shared MULTIPOLY_GEMINI_API_KEY also configures hydrogen.
+  const sharedMultipoly = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "hydrogen",
+    MULTIPOLY_GEMINI_API_KEY: "mp-gem-key",
+  });
+  assert.equal(sharedMultipoly.models.hydrogen.configured, true);
+  assert.equal(sharedMultipoly.models.hydrogen.apiKeyEnv, "MULTIPOLY_GEMINI_API_KEY");
+});

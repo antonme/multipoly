@@ -4,6 +4,26 @@ All notable changes to this project are documented here.
 
 ## Unreleased
 
+### Gemini 4 Carbon default + Gemini 4 Hydrogen (`hydrogen` builtin)
+
+- **`gemini`** now defaults to **Gemini 4 Carbon** (wire `gemini-4-carbon`,
+  display `gemini-4-carbon (api)`), using the `gemini4` reasoning vocabulary
+  (`low`–`high`; `off` maps to `low` and `xhigh` clamps to `high`). Overriding
+  `MULTIPOLY_GEMINI_MODEL` to `gemini-4-hydrogen` or a `gemini-3*` model
+  automatically infers the matching reasoning vocabulary and display name
+  unless explicitly overridden.
+- **New opt-in sibling builtin `hydrogen`** (**Gemini 4 Hydrogen**, wire
+  `gemini-4-hydrogen`, display `gemini-4-hydrogen (api)`): shares the Google
+  OpenAI-compatible endpoint and `MULTIPOLY_HYDROGEN_API_KEY` /
+  `MULTIPOLY_GEMINI_API_KEY` / `GEMINI_API_KEY` credentials so Carbon and
+  Hydrogen can run side by side (`MULTIPOLY_MODELS=gemini,hydrogen,...`),
+  exposing `hydrogen_review` and `hydrogen_consult`. Hydrogen's `hydrogen`
+  reasoning vocabulary maps `off` to `low` and preserves `low`–`xhigh`
+  natively (default `high`).
+- **Aliases:** `carbon`, `gemini4`, `gemini-4-carbon`, `gemini-carbon` →
+  `gemini`; `gemini-4-hydrogen`, `gemini-hydrogen` → `hydrogen` (only when
+  `hydrogen` is configured).
+
 ### Model defaults: Opus 5, GPT-5.6 Sol, Gemini 3.6 Flash
 
 - **`claude`** → **Claude Opus 5** (wire `claude-opus-5`, was `claude-opus-4-7`).

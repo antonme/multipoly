@@ -146,3 +146,19 @@ test("regression: every MODEL_INFO entry has a valid CAPABILITY value for 'reaso
   }
 });
 
+
+test("Gemini 4 Carbon reasoning clamps off to low and xhigh to high", () => {
+  for (const vocab of ["gemini4", "gemini4-carbon"]) {
+    for (const [input, output] of Object.entries({ off: "low", low: "low", medium: "medium", high: "high", xhigh: "high" })) {
+      assert.deepEqual(effortToOpenAiFields(input, { vocab }), { reasoning_effort: output });
+    }
+  }
+});
+
+test("Gemini 4 Hydrogen reasoning clamps off to low and preserves native xhigh", () => {
+  for (const vocab of ["hydrogen", "gemini4-hydrogen"]) {
+    for (const [input, output] of Object.entries({ off: "low", low: "low", medium: "medium", high: "high", xhigh: "xhigh" })) {
+      assert.deepEqual(effortToOpenAiFields(input, { vocab }), { reasoning_effort: output });
+    }
+  }
+});

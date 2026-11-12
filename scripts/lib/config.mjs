@@ -217,7 +217,7 @@ function parseCwdMode(raw, label) {
  * "<baseName> (<transport-suffix>)" via computeDisplayName.
  * Otherwise fall back to `info.displayName`, then `key`.
  * This ensures ALL builtins — both always-on (glm/qwen/deepseek) and
- * promotable (claude/codex/gemini/kimi/mimo/grok/fable/qwen38/deepseekflash) — surface convention-form names
+ * promotable (claude/codex/gemini/hydrogen/kimi/mimo/grok/fable/qwen38/deepseekflash) — surface convention-form names
  * from the config-loader path without touching MODEL_INFO literals.
  */
 function resolveDisplayName(info, transport) {

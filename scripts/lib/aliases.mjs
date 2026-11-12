@@ -11,6 +11,8 @@ function norm(raw) {
 // Seed alias table (extensible). Keys are NORMALIZED alias forms; values are
 // canonical model keys. Must never target a synthesizer sentinel.
 const RAW_ALIASES = {
+  "gemini-4-carbon": "gemini", "gemini-carbon": "gemini", carbon: "gemini", "gemini4": "gemini",
+  "gemini-4-hydrogen": "hydrogen", "gemini-hydrogen": "hydrogen",
   gpt6: "codex", "gpt6.1": "codex", "gpt-6.1-sol": "codex",
   "opus-5.5": "claude", "claude-opus-5-5": "claude",
   "fable-5.2": "fable", "claude-fable-5-2": "fable",

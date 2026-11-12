@@ -335,6 +335,19 @@ test("models: env-defined http model with REASONING_VOCAB=deepseek gets OPENAI_E
   assert.equal(c.models.mydeep.reasoningVocab, "deepseek");
 });
 
+test("models: env-defined http model with REASONING_VOCAB=hydrogen gets OPENAI_EFFORT", () => {
+  const c = loadConfig({
+    MULTIPOLY_GLM_API_KEY: "g",
+    MULTIPOLY_MODELS: "myhyd",
+    MULTIPOLY_MYHYD_API_KEY: "k",
+    MULTIPOLY_MYHYD_BASE_URL: "https://gem.example/v1",
+    MULTIPOLY_MYHYD_MODEL: "gemini-4-hydrogen",
+    MULTIPOLY_MYHYD_REASONING_VOCAB: "HYDROGEN",
+  });
+  assert.equal(modelCapability(c, "myhyd"), CAPABILITY.OPENAI_EFFORT);
+  assert.equal(c.models.myhyd.reasoningVocab, "hydrogen");
+});
+
 test("models: env-defined http model with REASONING=kimi_toggle gets KIMI_TOGGLE", () => {
   const c = loadConfig({
     MULTIPOLY_GLM_API_KEY: "g",

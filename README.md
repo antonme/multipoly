@@ -147,13 +147,14 @@ Compatibility aliases are accepted for API keys: GLM also accepts `GLM_API_KEY` 
 
 ### Baked builtins (opt-in)
 
-`claude`, `codex`, `gemini`, `kimi`, `mimo`, `grok`, `fable`, `qwen38`, and `deepseekflash` are **baked builtins** — they carry pre-configured capability metadata (transport, reasoning capability, default effort, base URL) but are **not registered by default**. Add them to `MULTIPOLY_MODELS` to enable their tools:
+`claude`, `codex`, `gemini`, `hydrogen`, `kimi`, `mimo`, `grok`, `fable`, `qwen38`, and `deepseekflash` are **baked builtins** — they carry pre-configured capability metadata (transport, reasoning capability, default effort, base URL) but are **not registered by default**. Add them to `MULTIPOLY_MODELS` to enable their tools:
 
 | Key | Default transport | Baked display name | Env override |
 |---|---|---|---|
 | `claude` | `cli` (flips to `anthropic` when an Anthropic key is present; see [claude transport-flip rule](#model-names--aliases)) | `opus (claude cli)` / `opus (api)` | `MULTIPOLY_CLAUDE_API_KEY`, `ANTHROPIC_API_KEY` |
 | `codex` | `cli` | `gpt6.1-sol (codex cli)` | `MULTIPOLY_CODEX_API_KEY`, `OPENAI_API_KEY` |
-| `gemini` | `http` | `gemini-3.8-flash (api)` | `MULTIPOLY_GEMINI_API_KEY`, `GEMINI_API_KEY` |
+| `gemini` | `http` | `gemini-4-carbon (api)` | `MULTIPOLY_GEMINI_API_KEY`, `GEMINI_API_KEY` |
+| `hydrogen` | `http` | `gemini-4-hydrogen (api)` | `MULTIPOLY_HYDROGEN_API_KEY`, `MULTIPOLY_GEMINI_API_KEY`, `GEMINI_API_KEY` |
 | `kimi` | `http` | `kimi-k3.1-pro (api)` | `MULTIPOLY_KIMI_API_KEY`, `MOONSHOT_API_KEY` |
 | `mimo` | `http` | `mimo-v2.6-pro (api)` | `MULTIPOLY_MIMO_API_KEY`, `XIAOMIMIMO_API_KEY` |
 | `grok` | `cli` | `grok-4.7 (grok cli)` | `MULTIPOLY_GROK_API_KEY`, `XAI_API_KEY` |
@@ -169,7 +170,9 @@ All env overrides from the custom-model table apply (`MULTIPOLY_<K>_TRANSPORT`, 
 
 Alias names `gpt5.6-sol` / `gpt5.6-terra` / `gpt5.6-luna` all resolve to the `codex` key for council selection; the wire model is still whatever `MULTIPOLY_CODEX_MODEL` (or the Sol default) sets. Tools are `codex_*` and `gpt56_*`.
 
-`gemini` defaults to **Gemini 3.8 Flash** (wire model `gemini-3.8-flash`). Override with `MULTIPOLY_GEMINI_MODEL` (e.g. `gemini-3.5-flash` if you want the previous generation).
+`gemini` defaults to **Gemini 4 Carbon** (wire model `gemini-4-carbon`). Carbon always reasons (`low`–`high`): `off` maps to `low`, and `xhigh` clamps to `high`. Setting `MULTIPOLY_GEMINI_MODEL=gemini-4-hydrogen` switches `gemini` to Hydrogen (and automatically infers Hydrogen's `low`–`xhigh` reasoning vocabulary); setting `MULTIPOLY_GEMINI_MODEL=gemini-3.8-flash` switches to Gemini 3's `minimal`–`high` vocabulary.
+
+`hydrogen` selects **Gemini 4 Hydrogen** (`gemini-4-hydrogen`) as an opt-in sibling builtin (`hydrogen_review` / `hydrogen_consult`), sharing the Google OpenAI-compatible endpoint and `MULTIPOLY_GEMINI_API_KEY` / `GEMINI_API_KEY` credentials so Carbon (`gemini`) and Hydrogen (`hydrogen`) can run side by side in councils (`MULTIPOLY_MODELS=gemini,hydrogen,...`). Hydrogen always reasons (`off` maps to `low`) and natively supports `low`, `medium`, `high`, and `xhigh` (default `high`).
 
 `kimi` defaults to **Kimi K3.1 Pro** on the standard Moonshot open platform,
 using `https://api.moonshot.ai/v1` and model `kimi-k3.1-pro`.
@@ -260,7 +263,8 @@ Every model that supports graded reasoning exposes a `reasoning_effort` argument
 | `deepseekflash` | `high` | `reasoning_effort` (`high`/`max`, same class as `deepseek`) |
 | `claude` | `xhigh` | `output_config.effort` + `thinking: {type: "adaptive"}` |
 | `codex` | `high` | `reasoning_effort` (OpenAI effort; Sol default) |
-| `gemini` | `high` | `reasoning_effort` (OpenAI effort) |
+| `gemini` | `high` | `reasoning_effort` (`low`–`high` on Carbon; `off` → `low`, `xhigh` → `high`) |
+| `hydrogen` | `high` | `reasoning_effort` (`low`–`xhigh` native; `off` → `low`) |
 | `kimi` | `high` | `reasoning_effort` (`"max"` only today; thinking is always-on — `off` sends nothing and does not disable it) |
 | `mimo` | `high` | `thinking: {type: "enabled"\|"disabled"}` toggle (same class as GLM; no graded effort) |
 | `grok` | `xhigh` | `--effort` cli flag (graded `low`–`xhigh`, `xhigh`-native; same class as claude) |
@@ -428,7 +432,7 @@ Allowed entry fields: `transport`, `displayName`, `model`, `baseUrl`,
 Every registered model surfaces a human-readable display name in the form `<base> (<transport>)`:
 
 - CLI models: `<base> (<kind> cli)` — e.g. `opus (claude cli)`, `gpt6.1-sol (codex cli)`
-- API models (http or anthropic transport): `<base> (api)` — e.g. `opus (api)`, `gemini-3.8-flash (api)`, `glm-5.3 (api)`
+- API models (http or anthropic transport): `<base> (api)` — e.g. `opus (api)`, `gemini-4-carbon (api)`, `glm-5.3 (api)`
 
 The display name is shown in descriptions and logs. Override it per-model with `MULTIPOLY_<K>_DISPLAY_NAME`.
 
@@ -440,7 +444,8 @@ Lenient name resolution applies wherever a model name is accepted as input: the 
 |---|---|
 | `gpt`, `gpt5`, `gpt5.6`, `gpt5.6-sol`, `gpt5.6-terra`, `gpt5.6-luna`, `openai` | `codex` |
 | `opus`, `claude-opus`, `opus-5`, `claude-opus-5`, `opus-4.7` | `claude` |
-| `flash`, `gemini-flash`, `gemini-3.6`, `gemini-3.8-flash`, `gemini-3.5` | `gemini` |
+| `carbon`, `gemini4`, `gemini-4-carbon`, `gemini-carbon`, plus legacy Flash aliases | `gemini` |
+| `gemini-4-hydrogen`, `gemini-hydrogen` | `hydrogen` |
 | `zhipu`, `glm5.1` | `glm` |
 | `k3`, `kimi-k3`, `kimi-k.3.0`, `k2`, `moonshot` | `kimi` |
 | `deepseek-v4` | `deepseek` |
